@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { AppConfig, LaunchOptions } from '@shared/types'
+import type { AppConfig, LaunchOptions, LiveSession } from '@shared/types'
 import { Desktop } from './compositor/Desktop'
 import type { Rect } from './compositor/geometry'
 import { paneInDirection } from './compositor/geometry'
@@ -22,7 +22,7 @@ import {
 } from './compositor/layout'
 import { installKeyHandler, type Action } from './keys/bindings'
 import { Selector } from './selector/Selector'
-import type { SessionMeta } from './state/types'
+import { paneStatusFromLive, type SessionMeta } from './state/types'
 import { basename } from './util/path'
 import {
   destroySession,
@@ -110,7 +110,13 @@ export default function App(): React.JSX.Element {
       const meta = sessionsRef.current[paneId]
       if (!meta || isStarted(paneId)) return
       void ensureSession(paneId, slot, meta.launch)
-        .then(() => patchSession(paneId, { status: 'running' }))
+        .then((result) =>
+          patchSession(paneId, {
+            status: 'running',
+            // Serve a correlare il riquadro col registro delle sessioni vive.
+            claudeSessionId: result?.claudeSessionId || null
+          })
+        )
         .catch((err: unknown) =>
           patchSession(paneId, {
             status: 'error',
@@ -250,6 +256,51 @@ export default function App(): React.JSX.Element {
     })
     return () => setSessionEvents(null)
   }, [patchSession])
+
+  /**
+   * Lo stato dei riquadri viene dal registro che Claude Code stesso mantiene
+   * in ~/.claude/sessions/: è autorevole e non richiede di interpretare
+   * l'output del terminale. Una sessione ancora assente dal registro (Claude
+   * sta partendo, o è fermo al dialogo di fiducia) resta 'running': assente
+   * non vuol dire morta.
+   */
+  const applyLive = useCallback(
+    (liveSessions: LiveSession[]) => {
+      const byId = new Map(liveSessions.map((s) => [s.sessionId, s]))
+      setSessions((prev) => {
+        let changed = false
+        const next: Record<string, SessionMeta> = {}
+
+        for (const [paneId, meta] of Object.entries(prev)) {
+          // Un riquadro la cui shell è morta non torna vivo per un record
+          // rimasto indietro nel registro.
+          if (meta.status === 'exited' || meta.status === 'error' || !meta.claudeSessionId) {
+            next[paneId] = meta
+            continue
+          }
+
+          const live = byId.get(meta.claudeSessionId)
+          const status = live ? paneStatusFromLive(live.status) : meta.status
+          const waitingFor = live?.waitingFor ?? null
+
+          if (status !== meta.status || waitingFor !== (meta.waitingFor ?? null)) {
+            next[paneId] = { ...meta, status, waitingFor }
+            changed = true
+          } else {
+            next[paneId] = meta
+          }
+        }
+
+        return changed ? next : prev
+      })
+    },
+    []
+  )
+
+  useEffect(() => {
+    void window.cm.claude.live().then(applyLive)
+    return window.cm.claude.onLiveChange(applyLive)
+  }, [applyLive])
 
   // Con il selettore aperto il compositor non intercetta nulla: le frecce e
   // l'Invio devono restare all'overlay, che gestisce da sé anche Esc.

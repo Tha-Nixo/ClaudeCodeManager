@@ -520,6 +520,73 @@ body.cm-dragging * {
   color: var(--cm-waiting);
 }
 
+/* --- Sessioni riprendibili ------------------------------------------------ */
+
+.cm-resume {
+  flex: 0 0 auto;
+  padding: 8px 14px;
+  border-top: 1px solid var(--cm-border-idle);
+  background: var(--cm-panel);
+}
+
+.cm-resume__head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 6px;
+}
+
+.cm-resume__fork {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--cm-text-dim);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.cm-resume__list {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+.cm-resume__item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-items: flex-start;
+  flex: 0 0 auto;
+  max-width: 260px;
+  padding: 5px 9px;
+  border: 1px solid var(--cm-border-idle);
+  border-radius: 6px;
+  background: var(--cm-terminal-bg);
+  color: var(--cm-text-dim);
+  font-size: 11px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.cm-resume__item--on {
+  border-color: var(--cm-accent);
+  background: color-mix(in srgb, var(--cm-accent) 14%, var(--cm-terminal-bg));
+  color: var(--cm-text);
+}
+
+.cm-resume__label {
+  max-width: 244px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cm-resume__when {
+  color: var(--cm-text-dim);
+  font-size: 10px;
+}
+
 .cm-selector__options {
   display: flex;
   align-items: flex-end;

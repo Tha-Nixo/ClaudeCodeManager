@@ -16,6 +16,30 @@ export interface SessionMeta {
   status: PaneStatus
   launch: LaunchOptions
   error?: string
+  /**
+   * Id sessione che Claude Code userà su disco: è la chiave con cui il
+   * riquadro viene correlato al registro delle sessioni vive. Vale null con
+   * --fork-session e --continue, dove l'id lo conia Claude e non è prevedibile.
+   */
+  claudeSessionId?: string | null
+  /** Dettaglio dello stato riportato da Claude, es. 'input needed'. */
+  waitingFor?: string | null
+}
+
+/**
+ * Traduce lo `status` di ~/.claude/sessions/<pid>.json nello stato mostrato.
+ * I valori sono quelli osservati; qualunque altro viene trattato come sessione
+ * viva e pronta, perché il formato è interno a Claude Code e può cambiare.
+ */
+export function paneStatusFromLive(status: string | undefined): PaneStatus {
+  switch (status) {
+    case 'busy':
+      return 'busy'
+    case 'waiting':
+      return 'waiting'
+    default:
+      return 'running'
+  }
 }
 
 export const STATUS_LABEL: Record<PaneStatus, string> = {

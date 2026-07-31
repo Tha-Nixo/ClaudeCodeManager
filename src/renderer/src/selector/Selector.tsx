@@ -5,7 +5,8 @@ import type {
   FolderCandidate,
   LaunchOptions,
   ModelAlias,
-  PermissionMode
+  PermissionMode,
+  TranscriptSession
 } from '@shared/types'
 import { basename, shortenPath } from '../util/path'
 
@@ -69,6 +70,11 @@ export function Selector({
   const [permissionMode, setPermissionMode] = useState<PermissionMode>(defaults.permissionMode)
   const [prompt, setPrompt] = useState('')
 
+  const [pastSessions, setPastSessions] = useState<TranscriptSession[]>([])
+  /** null = nuova sessione; altrimenti l'id da riprendere. */
+  const [resumeId, setResumeId] = useState<string | null>(null)
+  const [fork, setFork] = useState(false)
+
   const inputRef = useRef<HTMLInputElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
 
@@ -110,6 +116,25 @@ export function Selector({
 
   const currentPath = mode === 'search' ? (selected?.path ?? '') : browsePath
 
+  // Le sessioni pregresse della cartella evidenziata. Cambiando riga la
+  // selezione di ripresa va azzerata: riprendere l'id di un'altra cartella
+  // farebbe partire Claude nel posto sbagliato.
+  useEffect(() => {
+    if (!currentPath) {
+      setPastSessions([])
+      setResumeId(null)
+      return
+    }
+    let cancelled = false
+    setResumeId(null)
+    void window.cm.claude.sessionsFor(currentPath).then((list) => {
+      if (!cancelled) setPastSessions(list)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [currentPath])
+
   const launch = useCallback(
     (path: string) => {
       if (!path) return
@@ -119,10 +144,12 @@ export function Selector({
         effort,
         permissionMode,
         initialPrompt: prompt.trim() || undefined,
-        name: basename(path)
+        name: basename(path),
+        resumeSessionId: resumeId ?? undefined,
+        forkSession: resumeId ? fork : undefined
       })
     },
-    [model, effort, permissionMode, prompt, onOpen]
+    [model, effort, permissionMode, prompt, resumeId, fork, onOpen]
   )
 
   const toggleFav = useCallback((path: string) => {
@@ -283,6 +310,41 @@ export function Selector({
           )}
         </div>
 
+        {pastSessions.length > 0 && (
+          <div className="cm-resume">
+            <div className="cm-resume__head">
+              <span className="cm-field__label">
+                Sessioni precedenti in {basename(currentPath)}
+              </span>
+              {resumeId && (
+                <label className="cm-resume__fork">
+                  <input type="checkbox" checked={fork} onChange={(e) => setFork(e.target.checked)} />
+                  crea una copia invece di continuare l&apos;originale
+                </label>
+              )}
+            </div>
+            <div className="cm-resume__list">
+              <button
+                className={`cm-resume__item ${resumeId === null ? 'cm-resume__item--on' : ''}`}
+                onClick={() => setResumeId(null)}
+              >
+                <span className="cm-resume__label">＋ Nuova sessione</span>
+              </button>
+              {pastSessions.slice(0, 8).map((s) => (
+                <button
+                  key={s.sessionId}
+                  className={`cm-resume__item ${resumeId === s.sessionId ? 'cm-resume__item--on' : ''}`}
+                  onClick={() => setResumeId(s.sessionId)}
+                  title={`${s.label}\n${s.sessionId}`}
+                >
+                  <span className="cm-resume__label">{s.label}</span>
+                  <span className="cm-resume__when">{relativeTime(s.modifiedAt)}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         <div className="cm-selector__options">
           <Select label="Modello" value={model} options={MODELS} onChange={setModel} />
           <Select label="Impegno" value={effort} options={EFFORTS} onChange={setEffort} />
@@ -304,7 +366,7 @@ export function Selector({
             disabled={!currentPath}
             onClick={() => launch(currentPath)}
           >
-            Apri sessione
+            {resumeId ? (fork ? 'Duplica e apri' : 'Riprendi') : 'Apri sessione'}
           </button>
         </div>
 
@@ -390,6 +452,17 @@ function Row({
 /** L'evidenziazione dei caratteri trovati arriverà con l'indice esteso di M6. */
 function Highlighted({ text }: { text: string }): React.JSX.Element {
   return <>{text}</>
+}
+
+function relativeTime(timestamp: number): string {
+  const minutes = Math.round((Date.now() - timestamp) / 60000)
+  if (minutes < 1) return 'ora'
+  if (minutes < 60) return `${minutes} min fa`
+  const hours = Math.round(minutes / 60)
+  if (hours < 24) return `${hours} h fa`
+  const days = Math.round(hours / 24)
+  if (days < 30) return `${days} g fa`
+  return new Date(timestamp).toLocaleDateString('it-IT')
 }
 
 function BrowseList({

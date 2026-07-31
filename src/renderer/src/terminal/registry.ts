@@ -1,4 +1,4 @@
-import type { LaunchOptions } from '@shared/types'
+import type { CreateSessionResult, LaunchOptions } from '@shared/types'
 import { TerminalHost } from './host'
 
 /**
@@ -71,13 +71,13 @@ export async function ensureSession(
   paneId: string,
   slot: HTMLElement,
   opts: LaunchOptions
-): Promise<void> {
+): Promise<CreateSessionResult | null> {
   const existing = hosts.get(paneId)
   if (existing) {
     existing.attach(slot)
-    return
+    return null
   }
-  if (starting.has(paneId)) return
+  if (starting.has(paneId)) return null
   starting.add(paneId)
 
   const host = new TerminalHost()
@@ -91,6 +91,10 @@ export async function ensureSession(
     ptyByPane.set(paneId, result.id)
     paneByPty.set(result.id, paneId)
     host.bind(result.id)
+    // Un riquadro appena creato è sempre quello attivo: senza questo, il
+    // terminale resta senza fuoco e i tasti finiscono su <body>.
+    host.focus()
+    return result
   } catch (err) {
     host.dispose()
     throw err

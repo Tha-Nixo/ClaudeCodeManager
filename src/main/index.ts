@@ -1,5 +1,6 @@
 import { join } from 'node:path'
 import { app, BrowserWindow, Menu, session, shell } from 'electron'
+import { LiveSessions } from './claude/live'
 import { installDevBridge } from './dev/bridge'
 import { registerIpc } from './ipc'
 import { PtyManager } from './pty/manager'
@@ -10,6 +11,7 @@ const startWindowed = isDev && process.env.CM_WINDOWED === '1'
 
 let mainWindow: BrowserWindow | null = null
 const ptys = new PtyManager()
+const live = new LiveSessions()
 
 function createWindow(): void {
   mainWindow = new BrowserWindow({
@@ -88,8 +90,9 @@ if (!app.requestSingleInstanceLock()) {
     Menu.setApplicationMenu(null)
 
     applyProductionCsp()
-    registerIpc(ptys, () => mainWindow)
+    registerIpc(ptys, live, () => mainWindow)
     installDevBridge(() => mainWindow)
+    live.start()
     createWindow()
 
     app.on('activate', () => {
@@ -101,5 +104,8 @@ if (!app.requestSingleInstanceLock()) {
 
   // I processi PTY sono figli di questo processo: senza kill esplicito
   // resterebbero PowerShell orfani dopo la chiusura dell'app.
-  app.on('before-quit', () => ptys.killAll())
+  app.on('before-quit', () => {
+    live.stop()
+    ptys.killAll()
+  })
 }

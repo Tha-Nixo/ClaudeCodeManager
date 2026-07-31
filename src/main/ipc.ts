@@ -1,5 +1,7 @@
 import { BrowserWindow, ipcMain } from 'electron'
 import type { AppConfig, LaunchOptions } from '@shared/types'
+import type { LiveSessions } from './claude/live'
+import { sessionsForFolder } from './claude/transcripts'
 import { folderInfo, listDir, listDrives } from './fs/browse'
 import { invalidateIndex, searchFolders } from './indexer/sources'
 import type { PtyManager } from './pty/manager'
@@ -10,7 +12,11 @@ import { getFavorites, toggleFavorite, touchRecent } from './store/folders'
  * Unico punto di contatto fra renderer e main. Ogni canale è registrato qui
  * e ha una controparte tipizzata in src/preload/index.ts.
  */
-export function registerIpc(ptys: PtyManager, getWindow: () => BrowserWindow | null): void {
+export function registerIpc(
+  ptys: PtyManager,
+  live: LiveSessions,
+  getWindow: () => BrowserWindow | null
+): void {
   // --- PTY ------------------------------------------------------------------
 
   ipcMain.handle('pty:create', (_e, opts: LaunchOptions) => {
@@ -38,6 +44,15 @@ export function registerIpc(ptys: PtyManager, getWindow: () => BrowserWindow | n
   })
   ptys.on('exit', (id, exitCode, signal) => {
     getWindow()?.webContents.send('pty:exit', { id, exitCode, signal })
+  })
+
+  // --- Sessioni Claude ------------------------------------------------------
+
+  ipcMain.handle('claude:live', () => live.sessions)
+  ipcMain.handle('claude:sessionsFor', (_e, folder: string) => sessionsForFolder(folder))
+
+  live.on('change', (sessions) => {
+    getWindow()?.webContents.send('claude:live-change', sessions)
   })
 
   // --- Cartelle -------------------------------------------------------------

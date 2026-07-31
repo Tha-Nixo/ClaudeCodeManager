@@ -62,6 +62,41 @@ export interface PtyExitEvent {
   signal?: number
 }
 
+// --- Sessioni Claude Code ---------------------------------------------------
+
+/**
+ * Record scritto da Claude Code in ~/.claude/sessions/<pid>.json.
+ * I campi oltre pid/sessionId/cwd sono opzionali di proposito: il formato è
+ * interno a Claude Code e può cambiare fra versioni, quindi si legge quello
+ * che c'è senza pretenderlo.
+ */
+export interface LiveSession {
+  pid: number
+  sessionId: string
+  cwd: string
+  name?: string
+  kind?: string
+  /** 'busy' | 'waiting' | 'idle' | altro. */
+  status?: string
+  /** Es. 'input needed'. Presente quando status è 'waiting'. */
+  waitingFor?: string
+  startedAt?: number
+  updatedAt?: number
+  version?: string
+}
+
+/** Sessione passata, ricostruita dal transcript su disco. */
+export interface TranscriptSession {
+  sessionId: string
+  file: string
+  /** Etichetta scelta con la catena aiTitle -> lastPrompt -> primo messaggio. */
+  label: string
+  aiTitle: string | null
+  lastPrompt: string | null
+  modifiedAt: number
+  sizeBytes: number
+}
+
 // --- Esplorazione cartelle --------------------------------------------------
 
 export interface DirEntry {

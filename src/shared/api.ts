@@ -5,8 +5,10 @@ import type {
   FolderCandidate,
   FolderInfo,
   LaunchOptions,
+  LiveSession,
   PtyDataEvent,
-  PtyExitEvent
+  PtyExitEvent,
+  TranscriptSession
 } from './types'
 
 export interface ListDirResult {
@@ -34,6 +36,14 @@ export interface CmApi {
     onData(cb: (e: PtyDataEvent) => void): () => void
     /** Ritorna la funzione per disiscriversi. */
     onExit(cb: (e: PtyExitEvent) => void): () => void
+  }
+  claude: {
+    /** Stato corrente delle sessioni Claude Code vive. */
+    live(): Promise<LiveSession[]>
+    /** Ritorna la funzione per disiscriversi. */
+    onLiveChange(cb: (sessions: LiveSession[]) => void): () => void
+    /** Sessioni riprendibili per una cartella, dalla più recente. */
+    sessionsFor(folder: string): Promise<TranscriptSession[]>
   }
   folders: {
     /** Ricerca fuzzy sull'indice; query vuota = elenco per pertinenza. */

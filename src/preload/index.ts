@@ -6,8 +6,10 @@ import type {
   FolderCandidate,
   FolderInfo,
   LaunchOptions,
+  LiveSession,
   PtyDataEvent,
-  PtyExitEvent
+  PtyExitEvent,
+  TranscriptSession
 } from '@shared/types'
 
 /**
@@ -39,6 +41,17 @@ const api: CmApi = {
       ipcRenderer.on('pty:exit', listener)
       return () => ipcRenderer.removeListener('pty:exit', listener)
     }
+  },
+
+  claude: {
+    live: (): Promise<LiveSession[]> => ipcRenderer.invoke('claude:live'),
+    onLiveChange: (cb: (sessions: LiveSession[]) => void): (() => void) => {
+      const listener = (_e: unknown, sessions: LiveSession[]): void => cb(sessions)
+      ipcRenderer.on('claude:live-change', listener)
+      return () => ipcRenderer.removeListener('claude:live-change', listener)
+    },
+    sessionsFor: (folder: string): Promise<TranscriptSession[]> =>
+      ipcRenderer.invoke('claude:sessionsFor', folder)
   },
 
   folders: {
