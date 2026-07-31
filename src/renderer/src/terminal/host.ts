@@ -1,0 +1,170 @@
+import { Terminal } from '@xterm/xterm'
+import { FitAddon } from '@xterm/addon-fit'
+import { WebLinksAddon } from '@xterm/addon-web-links'
+import { WebglAddon } from '@xterm/addon-webgl'
+import '@xterm/xterm/css/xterm.css'
+import { claudeDarkXterm } from '../theme/xterm-theme'
+
+/**
+ * Un terminale xterm, gestito imperativamente e volutamente FUORI dalla
+ * riconciliazione di React: un remount di React distruggerebbe il buffer e
+ * la history di scorrimento. React possiede solo il `<div>` slot in cui
+ * innestiamo `element`; il ciclo di vita di questo oggetto lo decide il
+ * registro in `registry.ts`.
+ */
+export class TerminalHost {
+  readonly element: HTMLDivElement
+
+  private readonly term: Terminal
+  private readonly fitAddon = new FitAddon()
+  private webgl: WebglAddon | null = null
+  private observer: ResizeObserver | null = null
+  private fitFrame = 0
+
+  private sessionId: string | null = null
+  /** Tasti premuti prima che il PTY esista: vanno consegnati, non persi. */
+  private pendingInput: string[] = []
+  private opened = false
+  private disposed = false
+
+  /** Titolo impostato dal processo via sequenza OSC. */
+  onTitle: ((title: string) => void) | null = null
+  /** Nuove dimensioni in celle dopo un fit. */
+  onResize: ((dims: { cols: number; rows: number }) => void) | null = null
+
+  constructor() {
+    this.element = document.createElement('div')
+    this.element.className = 'cm-term'
+
+    this.term = new Terminal({
+      allowProposedApi: true,
+      cursorBlink: true,
+      cursorStyle: 'bar',
+      fontFamily: "'Cascadia Code', 'Cascadia Mono', Consolas, 'Courier New', monospace",
+      fontSize: 13,
+      lineHeight: 1.15,
+      letterSpacing: 0,
+      scrollback: 10000,
+      theme: claudeDarkXterm,
+      // Dice a xterm che dall'altra parte c'è ConPTY: cambia le euristiche di
+      // riavvolgimento riga, altrimenti il riflow dopo un resize è sbagliato.
+      windowsPty: { backend: 'conpty' }
+    })
+
+    this.term.onData((data) => this.sendInput(data))
+    this.term.onBinary((data) => this.sendInput(data))
+    this.term.onTitleChange((title) => this.onTitle?.(title))
+    this.term.onResize(({ cols, rows }) => {
+      if (this.sessionId) window.cm.pty.resize(this.sessionId, cols, rows)
+      this.onResize?.({ cols, rows })
+    })
+  }
+
+  /** Innesta il terminale nello slot fornito da React e inizia a osservarlo. */
+  attach(parent: HTMLElement): void {
+    if (this.disposed) return
+    if (this.element.parentElement !== parent) parent.appendChild(this.element)
+
+    if (!this.opened) {
+      this.term.open(this.element)
+      this.term.loadAddon(this.fitAddon)
+      this.term.loadAddon(new WebLinksAddon())
+      this.enableWebgl()
+      this.opened = true
+    }
+
+    this.observer ??= new ResizeObserver(() => this.scheduleFit())
+    this.observer.observe(this.element)
+    this.scheduleFit()
+  }
+
+  detach(): void {
+    this.observer?.disconnect()
+    this.observer = null
+    this.element.remove()
+  }
+
+  /**
+   * Associa il terminale a un PTY. Da questo momento l'input viene inoltrato;
+   * quanto digitato prima viene consegnato subito.
+   */
+  bind(sessionId: string): void {
+    this.sessionId = sessionId
+    if (this.pendingInput.length > 0) {
+      const queued = this.pendingInput.join('')
+      this.pendingInput = []
+      window.cm.pty.write(sessionId, queued)
+    }
+    // Il PTY è nato con dimensioni stimate: allineiamolo a quelle reali.
+    window.cm.pty.resize(sessionId, this.term.cols, this.term.rows)
+  }
+
+  write(data: string): void {
+    if (!this.disposed) this.term.write(data)
+  }
+
+  /** Scrive senza passare dal PTY: per messaggi dell'app dentro il riquadro. */
+  writeAppMessage(text: string): void {
+    this.write(`\r\n\x1b[38;2;140;139;135m${text}\x1b[0m\r\n`)
+  }
+
+  focus(): void {
+    this.term.focus()
+  }
+
+  get dimensions(): { cols: number; rows: number } {
+    return { cols: this.term.cols, rows: this.term.rows }
+  }
+
+  /** Misura subito l'elemento. Da chiamare quando è già nel DOM e visibile. */
+  fitNow(): { cols: number; rows: number } {
+    try {
+      this.fitAddon.fit()
+    } catch {
+      // L'elemento può essere a dimensione zero durante una transizione.
+    }
+    return this.dimensions
+  }
+
+  dispose(): void {
+    if (this.disposed) return
+    this.disposed = true
+    if (this.fitFrame) cancelAnimationFrame(this.fitFrame)
+    this.observer?.disconnect()
+    this.observer = null
+    this.webgl?.dispose()
+    this.term.dispose()
+    this.element.remove()
+  }
+
+  private sendInput(data: string): void {
+    if (this.sessionId) window.cm.pty.write(this.sessionId, data)
+    else this.pendingInput.push(data)
+  }
+
+  private scheduleFit(): void {
+    if (this.fitFrame || this.disposed) return
+    this.fitFrame = requestAnimationFrame(() => {
+      this.fitFrame = 0
+      this.fitNow()
+    })
+  }
+
+  private enableWebgl(): void {
+    try {
+      const addon = new WebglAddon()
+      // Alla perdita del contesto WebGL xterm non ridisegna più nulla: si
+      // scarica l'addon e si torna al renderer DOM, che è più lento ma sempre
+      // disponibile.
+      addon.onContextLoss(() => {
+        addon.dispose()
+        this.webgl = null
+      })
+      this.term.loadAddon(addon)
+      this.webgl = addon
+    } catch {
+      // Nessun WebGL2 disponibile: xterm resta sul renderer DOM.
+      this.webgl = null
+    }
+  }
+}

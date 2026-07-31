@@ -1,0 +1,260 @@
+/* Tema "Claude Dark". Tutti i colori dell'app nascono qui: compositor,
+   selettore e tema ANSI di xterm leggono queste stesse variabili. */
+
+:root {
+  --cm-desktop: #1f1e1d;
+  --cm-panel: #262625;
+  --cm-panel-raised: #2e2d2b;
+  --cm-terminal-bg: #1a1917;
+
+  --cm-border-idle: #3a3937;
+  --cm-border-focus: #d97757;
+
+  --cm-text: #f0eee6;
+  --cm-text-dim: #8c8b87;
+
+  --cm-accent: #d97757;
+  --cm-ok: #7da87b;
+  --cm-waiting: #e0a458;
+  --cm-error: #c15f3c;
+
+  --cm-radius: 6px;
+  --cm-gap: 8px;
+  --cm-font-ui: 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif;
+  --cm-font-mono: 'Cascadia Code', 'Cascadia Mono', Consolas, 'Courier New', monospace;
+
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+body {
+  background: var(--cm-desktop);
+  color: var(--cm-text);
+  font-family: var(--cm-font-ui);
+  font-size: 13px;
+  /* L'app non è un documento: niente selezione accidentale trascinando fuori
+     dal terminale. xterm riabilita la selezione al suo interno. */
+  user-select: none;
+  cursor: default;
+}
+
+/* --- Desktop -------------------------------------------------------------- */
+
+.cm-desktop {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--cm-desktop);
+}
+
+.cm-topbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 34px;
+  padding: 0 10px;
+  flex: 0 0 auto;
+  background: var(--cm-panel);
+  border-bottom: 1px solid var(--cm-border-idle);
+  -webkit-app-region: drag;
+}
+
+.cm-topbar__brand {
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--cm-accent);
+}
+
+.cm-topbar__spacer {
+  flex: 1 1 auto;
+}
+
+.cm-topbar__hint {
+  color: var(--cm-text-dim);
+  font-size: 12px;
+}
+
+.cm-topbar__buttons {
+  display: flex;
+  gap: 4px;
+  -webkit-app-region: no-drag;
+}
+
+.cm-iconbtn {
+  width: 26px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--cm-text-dim);
+  font-family: var(--cm-font-mono);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.cm-iconbtn:hover {
+  background: var(--cm-panel-raised);
+  border-color: var(--cm-border-idle);
+  color: var(--cm-text);
+}
+
+.cm-iconbtn--danger:hover {
+  background: var(--cm-error);
+  border-color: var(--cm-error);
+  color: #fff;
+}
+
+.cm-stage {
+  position: relative;
+  flex: 1 1 auto;
+  padding: var(--cm-gap);
+  min-height: 0;
+}
+
+/* --- Riquadro sessione ---------------------------------------------------- */
+
+.cm-pane {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  background: var(--cm-panel);
+  border: 1px solid var(--cm-border-idle);
+  border-radius: var(--cm-radius);
+  overflow: hidden;
+}
+
+.cm-pane--focused {
+  border-color: var(--cm-border-focus);
+}
+
+.cm-pane__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 26px;
+  padding: 0 8px;
+  flex: 0 0 auto;
+  background: var(--cm-panel);
+  border-bottom: 1px solid var(--cm-border-idle);
+  font-size: 12px;
+}
+
+.cm-pane__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+  background: var(--cm-text-dim);
+}
+
+.cm-pane__dot--running {
+  background: var(--cm-accent);
+  animation: cm-pulse 1.4s ease-in-out infinite;
+}
+
+.cm-pane__dot--waiting {
+  background: var(--cm-waiting);
+}
+
+.cm-pane__dot--idle {
+  background: var(--cm-ok);
+}
+
+.cm-pane__dot--exited {
+  background: var(--cm-error);
+}
+
+@keyframes cm-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
+}
+
+.cm-pane__path {
+  font-family: var(--cm-font-mono);
+  color: var(--cm-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cm-pane__meta {
+  margin-left: auto;
+  color: var(--cm-text-dim);
+  white-space: nowrap;
+}
+
+.cm-pane__body {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  background: var(--cm-terminal-bg);
+}
+
+/* Contenitore in cui viene innestato l'elemento di xterm. */
+.cm-term {
+  position: absolute;
+  inset: 0;
+  padding: 4px 0 4px 6px;
+}
+
+.cm-term .xterm {
+  height: 100%;
+}
+
+.cm-term .xterm-viewport {
+  /* Barra di scorrimento coerente col tema invece di quella di sistema. */
+  scrollbar-width: thin;
+  scrollbar-color: var(--cm-border-idle) transparent;
+}
+
+/* --- Stati vuoti / errore ------------------------------------------------- */
+
+.cm-notice {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  color: var(--cm-text-dim);
+  gap: 10px;
+  text-align: center;
+}
+
+.cm-notice__title {
+  color: var(--cm-text);
+  font-size: 14px;
+}
+
+.cm-notice code {
+  font-family: var(--cm-font-mono);
+  color: var(--cm-accent);
+}
+
+.cm-kbd {
+  display: inline-block;
+  padding: 1px 5px;
+  border: 1px solid var(--cm-border-idle);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  background: var(--cm-panel-raised);
+  color: var(--cm-text);
+  font-family: var(--cm-font-mono);
+  font-size: 11px;
+}
