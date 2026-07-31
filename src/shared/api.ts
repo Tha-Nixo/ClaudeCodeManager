@@ -1,10 +1,20 @@
 import type {
   AppConfig,
   CreateSessionResult,
+  DirEntry,
+  FolderCandidate,
+  FolderInfo,
   LaunchOptions,
   PtyDataEvent,
   PtyExitEvent
 } from './types'
+
+export interface ListDirResult {
+  path: string
+  parent: string | null
+  entries: DirEntry[]
+  error?: string
+}
 
 /**
  * Contratto dell'API esposta su `window.cm`.
@@ -24,6 +34,15 @@ export interface CmApi {
     onData(cb: (e: PtyDataEvent) => void): () => void
     /** Ritorna la funzione per disiscriversi. */
     onExit(cb: (e: PtyExitEvent) => void): () => void
+  }
+  folders: {
+    /** Ricerca fuzzy sull'indice; query vuota = elenco per pertinenza. */
+    search(query: string): Promise<FolderCandidate[]>
+    list(path: string): Promise<ListDirResult>
+    drives(): Promise<string[]>
+    info(path: string): Promise<FolderInfo>
+    favorites(): Promise<string[]>
+    toggleFavorite(path: string): Promise<string[]>
   }
   config: {
     get(): Promise<AppConfig>

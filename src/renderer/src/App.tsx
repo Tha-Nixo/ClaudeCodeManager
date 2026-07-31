@@ -21,7 +21,9 @@ import {
   type SplitDir
 } from './compositor/layout'
 import { installKeyHandler, type Action } from './keys/bindings'
+import { Selector } from './selector/Selector'
 import type { SessionMeta } from './state/types'
+import { basename } from './util/path'
 import {
   destroySession,
   ensureSession,
@@ -35,6 +37,9 @@ export default function App(): React.JSX.Element {
   const [config, setConfig] = useState<AppConfig | null>(null)
   const [layout, setLayout] = useState<Layout>(EMPTY_LAYOUT)
   const [sessions, setSessions] = useState<Record<string, SessionMeta>>({})
+  const [selectorOpen, setSelectorOpen] = useState(false)
+  const selectorOpenRef = useRef(false)
+  selectorOpenRef.current = selectorOpen
 
   // Geometrie correnti dei riquadri. Sono un ref e non uno stato: servono solo
   // dentro i gestori (focus direzionale, passaggio a flottante) e non devono
@@ -79,7 +84,10 @@ export default function App(): React.JSX.Element {
           cwd,
           model: config?.launchDefaults.model,
           effort: config?.launchDefaults.effort,
-          permissionMode: config?.launchDefaults.permissionMode
+          permissionMode: config?.launchDefaults.permissionMode,
+          // Il nome compare nel prompt box di Claude e in
+          // ~/.claude/sessions/<pid>.json: serve a riconoscere la sessione.
+          name: basename(cwd)
         },
         dir ?? naturalSplit(focused)
       )
@@ -154,6 +162,8 @@ export default function App(): React.JSX.Element {
 
       switch (action) {
         case 'new-session':
+          setSelectorOpen(true)
+          return
         case 'new-session-here':
           newSessionHere()
           return
@@ -241,15 +251,18 @@ export default function App(): React.JSX.Element {
     return () => setSessionEvents(null)
   }, [patchSession])
 
+  // Con il selettore aperto il compositor non intercetta nulla: le frecce e
+  // l'Invio devono restare all'overlay, che gestisce da sé anche Esc.
   useEffect(
-    () => installKeyHandler({ isEnabled: () => true, onAction: runAction }),
+    () => installKeyHandler({ isEnabled: () => !selectorOpenRef.current, onAction: runAction }),
     [runAction]
   )
 
-  // Il fuoco della tastiera segue il riquadro attivo.
+  // Il fuoco della tastiera segue il riquadro attivo, ma non glielo si ruba
+  // mentre il selettore è aperto: scriverebbe nel terminale sottostante.
   useEffect(() => {
-    if (layout.focused) focusPane(layout.focused)
-  }, [layout.focused])
+    if (layout.focused && !selectorOpen) focusPane(layout.focused)
+  }, [layout.focused, selectorOpen])
 
   // Prima sessione all'avvio.
   useEffect(() => {
@@ -262,7 +275,8 @@ export default function App(): React.JSX.Element {
           cwd: cfg.defaultCwd,
           model: cfg.launchDefaults.model,
           effort: cfg.launchDefaults.effort,
-          permissionMode: cfg.launchDefaults.permissionMode
+          permissionMode: cfg.launchDefaults.permissionMode,
+          name: basename(cfg.defaultCwd)
         },
         'h'
       )
@@ -320,6 +334,20 @@ export default function App(): React.JSX.Element {
           rectsRef.current = rects
         }}
       />
+
+      {selectorOpen && config && (
+        <Selector
+          defaults={config.launchDefaults}
+          startPath={
+            (layout.focused ? sessions[layout.focused]?.cwd : null) ?? config.defaultCwd
+          }
+          onCancel={() => setSelectorOpen(false)}
+          onOpen={(opts) => {
+            setSelectorOpen(false)
+            newSession(opts, naturalSplit(layout.focused))
+          }}
+        />
+      )}
     </div>
   )
 }

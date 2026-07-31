@@ -62,6 +62,39 @@ export interface PtyExitEvent {
   signal?: number
 }
 
+// --- Esplorazione cartelle --------------------------------------------------
+
+export interface DirEntry {
+  name: string
+  path: string
+}
+
+export interface FolderInfo {
+  path: string
+  exists: boolean
+  isGit: boolean
+  /** Ramo corrente, letto da .git/HEAD. */
+  branch: string | null
+  /** Presenza di CLAUDE.md o AGENTS.md. */
+  hasInstructions: boolean
+  /** Transcript gia' presenti per questa cartella. */
+  sessionCount: number
+  /** Il dialogo di fiducia di Claude Code e' gia' stato accettato. */
+  trusted: boolean
+}
+
+/** Da dove arriva una voce del selettore. */
+export type CandidateSource = 'favorite' | 'recent' | 'claude' | 'typed' | 'browse'
+
+export interface FolderCandidate {
+  path: string
+  source: CandidateSource
+  lastUsed: number
+  /** Indici dei caratteri che corrispondono alla ricerca, per evidenziarli. */
+  positions?: number[]
+  info?: FolderInfo
+}
+
 export interface AppConfig {
   /** Cartella usata al primo avvio e come fallback. */
   defaultCwd: string

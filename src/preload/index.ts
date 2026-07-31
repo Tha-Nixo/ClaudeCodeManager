@@ -1,8 +1,10 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { CmApi } from '@shared/api'
+import type { CmApi, ListDirResult } from '@shared/api'
 import type {
   AppConfig,
   CreateSessionResult,
+  FolderCandidate,
+  FolderInfo,
   LaunchOptions,
   PtyDataEvent,
   PtyExitEvent
@@ -37,6 +39,17 @@ const api: CmApi = {
       ipcRenderer.on('pty:exit', listener)
       return () => ipcRenderer.removeListener('pty:exit', listener)
     }
+  },
+
+  folders: {
+    search: (query: string): Promise<FolderCandidate[]> =>
+      ipcRenderer.invoke('folders:search', query),
+    list: (path: string): Promise<ListDirResult> => ipcRenderer.invoke('folders:list', path),
+    drives: (): Promise<string[]> => ipcRenderer.invoke('folders:drives'),
+    info: (path: string): Promise<FolderInfo> => ipcRenderer.invoke('folders:info', path),
+    favorites: (): Promise<string[]> => ipcRenderer.invoke('folders:favorites'),
+    toggleFavorite: (path: string): Promise<string[]> =>
+      ipcRenderer.invoke('folders:toggleFavorite', path)
   },
 
   config: {

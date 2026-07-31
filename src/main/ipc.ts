@@ -1,7 +1,10 @@
 import { BrowserWindow, ipcMain } from 'electron'
 import type { AppConfig, LaunchOptions } from '@shared/types'
+import { folderInfo, listDir, listDrives } from './fs/browse'
+import { invalidateIndex, searchFolders } from './indexer/sources'
 import type { PtyManager } from './pty/manager'
 import { getConfig, setConfig } from './store/config'
+import { getFavorites, toggleFavorite, touchRecent } from './store/folders'
 
 /**
  * Unico punto di contatto fra renderer e main. Ogni canale è registrato qui
@@ -10,7 +13,13 @@ import { getConfig, setConfig } from './store/config'
 export function registerIpc(ptys: PtyManager, getWindow: () => BrowserWindow | null): void {
   // --- PTY ------------------------------------------------------------------
 
-  ipcMain.handle('pty:create', (_e, opts: LaunchOptions) => ptys.create(opts))
+  ipcMain.handle('pty:create', (_e, opts: LaunchOptions) => {
+    const result = ptys.create(opts)
+    // La cartella entra fra i recenti solo se il processo e' davvero partito.
+    touchRecent(result.cwd)
+    invalidateIndex()
+    return result
+  })
 
   // write e resize sono ad alta frequenza: fire-and-forget, niente round trip.
   ipcMain.on('pty:write', (_e, id: string, data: string) => ptys.write(id, data))
@@ -29,6 +38,19 @@ export function registerIpc(ptys: PtyManager, getWindow: () => BrowserWindow | n
   })
   ptys.on('exit', (id, exitCode, signal) => {
     getWindow()?.webContents.send('pty:exit', { id, exitCode, signal })
+  })
+
+  // --- Cartelle -------------------------------------------------------------
+
+  ipcMain.handle('folders:search', (_e, query: string) => searchFolders(query))
+  ipcMain.handle('folders:list', (_e, path: string) => listDir(path))
+  ipcMain.handle('folders:drives', () => listDrives())
+  ipcMain.handle('folders:info', (_e, path: string) => folderInfo(path))
+  ipcMain.handle('folders:favorites', () => getFavorites())
+  ipcMain.handle('folders:toggleFavorite', (_e, path: string) => {
+    const next = toggleFavorite(path)
+    invalidateIndex()
+    return next
   })
 
   // --- Config ---------------------------------------------------------------
