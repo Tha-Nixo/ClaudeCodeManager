@@ -5,6 +5,7 @@ import { spawn as ptySpawn, type IPty } from '@lydell/node-pty'
 import type { CreateSessionResult, LaunchOptions } from '@shared/types'
 import { buildClaudeArgs, expectedClaudeSessionId, resolveClaudeExecutable } from '../claude/cli'
 import { ensureBootstrapScript, powershellArgs } from './bootstrap'
+import { buildPtyEnv } from './env'
 
 /** Intervallo di accorpamento dell'output prima di attraversare l'IPC. */
 const FLUSH_MS = 8
@@ -50,15 +51,11 @@ export class PtyManager extends EventEmitter<PtyManagerEvents> {
       cols: opts.cols ?? 120,
       rows: opts.rows ?? 30,
       cwd,
-      env: {
-        ...process.env,
-        TERM: 'xterm-256color',
-        COLORTERM: 'truecolor',
-        TERM_PROGRAM: 'ClaudeManager',
-        CM_CWD: cwd,
-        CM_CLAUDE: resolveClaudeExecutable(),
-        CM_ARGS_JSON: JSON.stringify(args)
-      }
+      env: buildPtyEnv({
+        cwd,
+        claudeExe: resolveClaudeExecutable(),
+        argsJson: JSON.stringify(args)
+      })
     })
 
     const session: PtySession = {

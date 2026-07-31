@@ -1,5 +1,6 @@
 import { join } from 'node:path'
-import { app, BrowserWindow, session, shell } from 'electron'
+import { app, BrowserWindow, Menu, session, shell } from 'electron'
+import { installDevBridge } from './dev/bridge'
 import { registerIpc } from './ipc'
 import { PtyManager } from './pty/manager'
 
@@ -80,8 +81,15 @@ if (!app.requestSingleInstanceLock()) {
   })
 
   void app.whenReady().then(() => {
+    // Il menu predefinito di Electron va rimosso, non nascosto: porta con sé
+    // Ctrl+R (ricarica il renderer, azzerando tutti i buffer dei terminali),
+    // Ctrl+W e Ctrl+Q, e fa sì che il solo Alt attivi la barra dei menu —
+    // cioè proprio il tasto che il compositor usa come modificatore.
+    Menu.setApplicationMenu(null)
+
     applyProductionCsp()
     registerIpc(ptys, () => mainWindow)
+    installDevBridge(() => mainWindow)
     createWindow()
 
     app.on('activate', () => {

@@ -44,4 +44,10 @@ export function registerIpc(ptys: PtyManager, getWindow: () => BrowserWindow | n
   })
   ipcMain.on('win:minimize', () => getWindow()?.minimize())
   ipcMain.on('win:quit', () => getWindow()?.close())
+  ipcMain.on('win:toggle-devtools', () => {
+    const wc = getWindow()?.webContents
+    if (!wc) return
+    if (wc.isDevToolsOpened()) wc.closeDevTools()
+    else wc.openDevTools({ mode: 'detach' })
+  })
 }

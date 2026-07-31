@@ -1,82 +1,293 @@
-import { useEffect, useRef, useState } from 'react'
-import { createSession, wireTerminalEvents } from './terminal/registry'
-import { shortenPath } from './util/path'
-
-type PaneStatus = 'starting' | 'running' | 'exited' | 'error'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import type { AppConfig, LaunchOptions } from '@shared/types'
+import { Desktop } from './compositor/Desktop'
+import type { Rect } from './compositor/geometry'
+import { paneInDirection } from './compositor/geometry'
+import {
+  EMPTY_LAYOUT,
+  addPane,
+  allPanes,
+  collectLeaves,
+  isFloating,
+  removePane,
+  setFocus,
+  setRatio,
+  swapPanes,
+  toggleFloat,
+  toggleZoom,
+  updateFloating,
+  type Direction,
+  type Layout,
+  type SplitDir
+} from './compositor/layout'
+import { installKeyHandler, type Action } from './keys/bindings'
+import type { SessionMeta } from './state/types'
+import {
+  destroySession,
+  ensureSession,
+  focusPane,
+  isStarted,
+  setSessionEvents,
+  wireTerminalEvents
+} from './terminal/registry'
 
 export default function App(): React.JSX.Element {
-  const slotRef = useRef<HTMLDivElement>(null)
-  const startedRef = useRef(false)
+  const [config, setConfig] = useState<AppConfig | null>(null)
+  const [layout, setLayout] = useState<Layout>(EMPTY_LAYOUT)
+  const [sessions, setSessions] = useState<Record<string, SessionMeta>>({})
 
-  const [cwd, setCwd] = useState('')
-  const [status, setStatus] = useState<PaneStatus>('starting')
-  const [errorMsg, setErrorMsg] = useState<string | null>(null)
-  const [dims, setDims] = useState<{ cols: number; rows: number } | null>(null)
+  // Geometrie correnti dei riquadri. Sono un ref e non uno stato: servono solo
+  // dentro i gestori (focus direzionale, passaggio a flottante) e non devono
+  // provocare render.
+  const rectsRef = useRef<Record<string, Rect>>({})
+  const layoutRef = useRef(layout)
+  const sessionsRef = useRef(sessions)
+  layoutRef.current = layout
+  sessionsRef.current = sessions
 
-  // Instrada gli eventi del PTY verso i terminali. Una volta sola.
+  const bootstrapped = useRef(false)
+
+  const patchSession = useCallback((paneId: string, patch: Partial<SessionMeta>) => {
+    setSessions((prev) => (prev[paneId] ? { ...prev, [paneId]: { ...prev[paneId], ...patch } } : prev))
+  }, [])
+
+  // --- Creazione e chiusura sessioni ----------------------------------------
+
+  const newSession = useCallback((opts: LaunchOptions, dir: SplitDir) => {
+    const paneId = crypto.randomUUID()
+    setSessions((prev) => ({
+      ...prev,
+      [paneId]: { paneId, cwd: opts.cwd, title: null, status: 'starting', launch: opts }
+    }))
+    setLayout((prev) => addPane(prev, paneId, dir))
+  }, [])
+
+  /** Un riquadro largo si divide in verticale, uno alto in orizzontale. */
+  const naturalSplit = useCallback((paneId: string | null): SplitDir => {
+    const rect = paneId ? rectsRef.current[paneId] : null
+    if (!rect) return 'h'
+    return rect.w >= rect.h ? 'h' : 'v'
+  }, [])
+
+  const newSessionHere = useCallback(
+    (dir?: SplitDir) => {
+      const focused = layoutRef.current.focused
+      const cwd = (focused ? sessionsRef.current[focused]?.cwd : null) ?? config?.defaultCwd
+      if (!cwd) return
+      newSession(
+        {
+          cwd,
+          model: config?.launchDefaults.model,
+          effort: config?.launchDefaults.effort,
+          permissionMode: config?.launchDefaults.permissionMode
+        },
+        dir ?? naturalSplit(focused)
+      )
+    },
+    [config, newSession, naturalSplit]
+  )
+
+  const closePane = useCallback((paneId: string) => {
+    setLayout((prev) => removePane(prev, paneId))
+    setSessions((prev) => {
+      const next = { ...prev }
+      delete next[paneId]
+      return next
+    })
+    void destroySession(paneId)
+  }, [])
+
+  const onSlotReady = useCallback(
+    (paneId: string, slot: HTMLDivElement) => {
+      const meta = sessionsRef.current[paneId]
+      if (!meta || isStarted(paneId)) return
+      void ensureSession(paneId, slot, meta.launch)
+        .then(() => patchSession(paneId, { status: 'running' }))
+        .catch((err: unknown) =>
+          patchSession(paneId, {
+            status: 'error',
+            error: err instanceof Error ? err.message : String(err)
+          })
+        )
+    },
+    [patchSession]
+  )
+
+  // --- Azioni da tastiera ---------------------------------------------------
+
+  const focusDir = useCallback((dir: Direction) => {
+    const current = layoutRef.current.focused
+    if (!current) return
+    const rects = rectsRef.current
+    const panes = allPanes(layoutRef.current).map((id) => ({
+      id,
+      ...(rects[id] ?? { x: 0, y: 0, w: 0, h: 0 }),
+      floating: isFloating(layoutRef.current, id),
+      hidden: false,
+      z: 0
+    }))
+    const target = paneInDirection(panes, current, dir)
+    if (target) setLayout((prev) => setFocus(prev, target))
+  }, [])
+
+  const movePane = useCallback((dir: Direction) => {
+    const current = layoutRef.current.focused
+    if (!current) return
+    const rects = rectsRef.current
+    const tiled = collectLeaves(layoutRef.current.root)
+    if (!tiled.includes(current)) return
+
+    const panes = tiled.map((id) => ({
+      id,
+      ...(rects[id] ?? { x: 0, y: 0, w: 0, h: 0 }),
+      floating: false,
+      hidden: false,
+      z: 0
+    }))
+    const target = paneInDirection(panes, current, dir)
+    if (target) setLayout((prev) => swapPanes(prev, current, target))
+  }, [])
+
+  const runAction = useCallback(
+    (action: Action) => {
+      const focused = layoutRef.current.focused
+
+      switch (action) {
+        case 'new-session':
+        case 'new-session-here':
+          newSessionHere()
+          return
+        case 'split-h':
+          newSessionHere('h')
+          return
+        case 'split-v':
+          newSessionHere('v')
+          return
+        case 'close-pane':
+          if (focused) closePane(focused)
+          return
+        case 'toggle-float': {
+          if (!focused) return
+          const rect = rectsRef.current[focused]
+          if (!rect) return
+          // Passando a flottante si rimpicciolisce un po', così si vede subito
+          // che il riquadro si è staccato dal mosaico.
+          const target = isFloating(layoutRef.current, focused)
+            ? rect
+            : { x: rect.x + 24, y: rect.y + 24, w: Math.max(320, rect.w * 0.7), h: Math.max(200, rect.h * 0.7) }
+          setLayout((prev) => toggleFloat(prev, focused, target))
+          return
+        }
+        case 'toggle-zoom':
+          if (focused) setLayout((prev) => toggleZoom(prev, focused))
+          return
+        case 'focus-left':
+          focusDir('left')
+          return
+        case 'focus-right':
+          focusDir('right')
+          return
+        case 'focus-up':
+          focusDir('up')
+          return
+        case 'focus-down':
+          focusDir('down')
+          return
+        case 'move-left':
+          movePane('left')
+          return
+        case 'move-right':
+          movePane('right')
+          return
+        case 'move-up':
+          movePane('up')
+          return
+        case 'move-down':
+          movePane('down')
+          return
+        case 'toggle-fullscreen':
+          window.cm.win.toggleFullscreen()
+          return
+        case 'toggle-devtools':
+          window.cm.win.toggleDevTools()
+          return
+        case 'quit':
+          window.cm.win.quit()
+          return
+        case 'toggle-usage':
+          // Arriva con M5.
+          return
+        default: {
+          const match = /^focus-([1-9])$/.exec(action)
+          if (match) {
+            const target = allPanes(layoutRef.current)[Number(match[1]) - 1]
+            if (target) setLayout((prev) => setFocus(prev, target))
+          }
+        }
+      }
+    },
+    [closePane, focusDir, movePane, newSessionHere]
+  )
+
+  // --- Effetti --------------------------------------------------------------
+
   useEffect(() => wireTerminalEvents(), [])
 
-  // Segnala la morte della shell nel pallino di stato.
-  useEffect(() => window.cm.pty.onExit(() => setStatus('exited')), [])
-
-  // Scorciatoie sempre disponibili. Sono anche l'unica via d'uscita da una
-  // finestra senza bordi a schermo intero: vanno registrate prima di tutto.
   useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent): void => {
-      if (e.key === 'F11') {
-        e.preventDefault()
-        window.cm.win.toggleFullscreen()
-      } else if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'q') {
-        e.preventDefault()
-        window.cm.win.quit()
-      }
-    }
-    window.addEventListener('keydown', onKeyDown, { capture: true })
-    return () => window.removeEventListener('keydown', onKeyDown, { capture: true })
-  }, [])
+    setSessionEvents({
+      onExit: (paneId) => patchSession(paneId, { status: 'exited' }),
+      onTitle: (paneId, title) => patchSession(paneId, { title: title || null })
+    })
+    return () => setSessionEvents(null)
+  }, [patchSession])
 
-  // Avvio della prima sessione.
+  useEffect(
+    () => installKeyHandler({ isEnabled: () => true, onAction: runAction }),
+    [runAction]
+  )
+
+  // Il fuoco della tastiera segue il riquadro attivo.
   useEffect(() => {
-    if (startedRef.current) return
-    startedRef.current = true
+    if (layout.focused) focusPane(layout.focused)
+  }, [layout.focused])
 
-    void (async () => {
-      const slot = slotRef.current
-      if (!slot) return
-      try {
-        const config = await window.cm.config.get()
-        setCwd(config.defaultCwd)
-        const { host } = await createSession(slot, {
-          cwd: config.defaultCwd,
-          model: config.launchDefaults.model,
-          effort: config.launchDefaults.effort,
-          permissionMode: config.launchDefaults.permissionMode
-        })
-        host.onResize = setDims
-        setDims(host.dimensions)
-        setStatus('running')
-      } catch (err) {
-        setErrorMsg(err instanceof Error ? err.message : String(err))
-        setStatus('error')
-      }
-    })()
-  }, [])
+  // Prima sessione all'avvio.
+  useEffect(() => {
+    if (bootstrapped.current) return
+    bootstrapped.current = true
+    void window.cm.config.get().then((cfg) => {
+      setConfig(cfg)
+      newSession(
+        {
+          cwd: cfg.defaultCwd,
+          model: cfg.launchDefaults.model,
+          effort: cfg.launchDefaults.effort,
+          permissionMode: cfg.launchDefaults.permissionMode
+        },
+        'h'
+      )
+    })
+  }, [newSession])
+
+  const paneCount = allPanes(layout).length
 
   return (
     <div className="cm-desktop">
       <header className="cm-topbar">
         <span className="cm-topbar__brand">ClaudeManager</span>
+        <span className="cm-topbar__count">
+          {paneCount} {paneCount === 1 ? 'sessione' : 'sessioni'}
+        </span>
         <span className="cm-topbar__hint">
-          <span className="cm-kbd">F11</span> schermo intero ·{' '}
-          <span className="cm-kbd">Ctrl+Shift+Q</span> esci
+          <span className="cm-kbd">Alt+N</span> nuova ·{' '}
+          <span className="cm-kbd">Alt+←→↑↓</span> fuoco ·{' '}
+          <span className="cm-kbd">Alt+F</span> flottante ·{' '}
+          <span className="cm-kbd">Alt+Z</span> zoom ·{' '}
+          <span className="cm-kbd">Alt+W</span> chiudi
         </span>
         <div className="cm-topbar__spacer" />
         <div className="cm-topbar__buttons">
-          <button
-            className="cm-iconbtn"
-            title="Riduci a icona"
-            onClick={() => window.cm.win.minimize()}
-          >
+          <button className="cm-iconbtn" title="Riduci a icona" onClick={() => window.cm.win.minimize()}>
             ─
           </button>
           <button
@@ -96,42 +307,19 @@ export default function App(): React.JSX.Element {
         </div>
       </header>
 
-      <main className="cm-stage">
-        <section className="cm-pane cm-pane--focused" style={{ inset: 0 }}>
-          <div className="cm-pane__header">
-            <span className={`cm-pane__dot cm-pane__dot--${statusClass(status)}`} />
-            <span className="cm-pane__path" title={cwd}>
-              {cwd ? shortenPath(cwd, 70) : 'avvio…'}
-            </span>
-            <span className="cm-pane__meta">
-              {dims ? `${dims.cols}×${dims.rows}` : ''}
-              {status === 'exited' ? ' · shell terminata' : ''}
-            </span>
-          </div>
-
-          <div className="cm-pane__body" ref={slotRef}>
-            {status === 'error' && (
-              <div className="cm-notice">
-                <div className="cm-notice__title">Impossibile avviare il terminale</div>
-                <div>{errorMsg}</div>
-              </div>
-            )}
-          </div>
-        </section>
-      </main>
+      <Desktop
+        layout={layout}
+        sessions={sessions}
+        onFocusPane={(id) => setLayout((prev) => setFocus(prev, id))}
+        onClosePane={closePane}
+        onSlotReady={onSlotReady}
+        onSetRatio={(path, ratio) => setLayout((prev) => setRatio(prev, path, ratio))}
+        onMoveFloating={(id, x, y) => setLayout((prev) => updateFloating(prev, id, { x, y }))}
+        onResizeFloating={(id, w, h) => setLayout((prev) => updateFloating(prev, id, { w, h }))}
+        onRectsChange={(rects) => {
+          rectsRef.current = rects
+        }}
+      />
     </div>
   )
-}
-
-function statusClass(status: PaneStatus): string {
-  switch (status) {
-    case 'running':
-      return 'running'
-    case 'exited':
-      return 'exited'
-    case 'error':
-      return 'exited'
-    default:
-      return 'idle'
-  }
 }

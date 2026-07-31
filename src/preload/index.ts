@@ -47,7 +47,8 @@ const api: CmApi = {
   win: {
     toggleFullscreen: (): void => ipcRenderer.send('win:toggle-fullscreen'),
     minimize: (): void => ipcRenderer.send('win:minimize'),
-    quit: (): void => ipcRenderer.send('win:quit')
+    quit: (): void => ipcRenderer.send('win:quit'),
+    toggleDevTools: (): void => ipcRenderer.send('win:toggle-devtools')
   }
 }
 

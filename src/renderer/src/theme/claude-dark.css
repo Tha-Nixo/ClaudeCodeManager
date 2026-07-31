@@ -81,9 +81,20 @@ body {
   flex: 1 1 auto;
 }
 
+.cm-topbar__count {
+  padding: 1px 7px;
+  border: 1px solid var(--cm-border-idle);
+  border-radius: 10px;
+  color: var(--cm-text-dim);
+  font-size: 11px;
+}
+
 .cm-topbar__hint {
   color: var(--cm-text-dim);
   font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .cm-topbar__buttons {
@@ -141,6 +152,109 @@ body {
   border-color: var(--cm-border-focus);
 }
 
+.cm-pane--floating {
+  box-shadow:
+    0 12px 32px rgb(0 0 0 / 55%),
+    0 2px 6px rgb(0 0 0 / 40%);
+}
+
+.cm-pane--floating .cm-pane__header {
+  cursor: move;
+}
+
+/* Angolo di ridimensionamento dei riquadri flottanti. */
+.cm-pane__resize {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 16px;
+  height: 16px;
+  cursor: nwse-resize;
+  background: linear-gradient(
+    135deg,
+    transparent 0 50%,
+    var(--cm-border-idle) 50% 62%,
+    transparent 62% 74%,
+    var(--cm-border-idle) 74% 86%,
+    transparent 86%
+  );
+}
+
+.cm-pane__index {
+  min-width: 14px;
+  color: var(--cm-text-dim);
+  font-family: var(--cm-font-mono);
+  font-size: 11px;
+  text-align: center;
+}
+
+.cm-pane__close {
+  margin-left: 4px;
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--cm-text-dim);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.cm-pane__close:hover {
+  background: var(--cm-error);
+  color: #fff;
+}
+
+/* --- Canali di ridimensionamento ------------------------------------------ */
+
+.cm-gutter {
+  position: absolute;
+  z-index: 50;
+  background: transparent;
+}
+
+.cm-gutter--h {
+  cursor: col-resize;
+}
+
+.cm-gutter--v {
+  cursor: row-resize;
+}
+
+.cm-gutter::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  border-radius: 2px;
+  background: transparent;
+  transition: background 120ms ease;
+}
+
+.cm-gutter--h::after {
+  width: 2px;
+  height: 28px;
+}
+
+.cm-gutter--v::after {
+  width: 28px;
+  height: 2px;
+}
+
+.cm-gutter:hover::after {
+  background: var(--cm-border-focus);
+}
+
+/* Durante un trascinamento il cursore non deve cambiare passando sopra il
+   terminale, e il testo non deve venire selezionato. */
+body.cm-dragging,
+body.cm-dragging * {
+  cursor: inherit !important;
+  user-select: none !important;
+}
+
 .cm-pane__header {
   display: flex;
   align-items: center;
@@ -161,7 +275,12 @@ body {
   background: var(--cm-text-dim);
 }
 
-.cm-pane__dot--running {
+.cm-pane__dot--starting {
+  background: var(--cm-text-dim);
+  animation: cm-pulse 1.4s ease-in-out infinite;
+}
+
+.cm-pane__dot--busy {
   background: var(--cm-accent);
   animation: cm-pulse 1.4s ease-in-out infinite;
 }
@@ -170,11 +289,12 @@ body {
   background: var(--cm-waiting);
 }
 
-.cm-pane__dot--idle {
+.cm-pane__dot--running {
   background: var(--cm-ok);
 }
 
-.cm-pane__dot--exited {
+.cm-pane__dot--exited,
+.cm-pane__dot--error {
   background: var(--cm-error);
 }
 

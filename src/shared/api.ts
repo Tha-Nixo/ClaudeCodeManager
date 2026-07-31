@@ -33,5 +33,6 @@ export interface CmApi {
     toggleFullscreen(): void
     minimize(): void
     quit(): void
+    toggleDevTools(): void
   }
 }
