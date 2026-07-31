@@ -22,8 +22,10 @@ import {
 } from './compositor/layout'
 import { installKeyHandler, type Action } from './keys/bindings'
 import { Selector } from './selector/Selector'
+import { fromPersisted, toPersisted } from './state/persistence'
 import { paneStatusFromLive, type SessionMeta } from './state/types'
-import { basename } from './util/path'
+import { UsagePanel, formatCost, formatTokens } from './usage/UsagePanel'
+import { basename, isUsefulTitle } from './util/path'
 import {
   destroySession,
   ensureSession,
@@ -38,8 +40,14 @@ export default function App(): React.JSX.Element {
   const [layout, setLayout] = useState<Layout>(EMPTY_LAYOUT)
   const [sessions, setSessions] = useState<Record<string, SessionMeta>>({})
   const [selectorOpen, setSelectorOpen] = useState(false)
-  const selectorOpenRef = useRef(false)
-  selectorOpenRef.current = selectorOpen
+  const [usageOpen, setUsageOpen] = useState(false)
+  const [usageBadge, setUsageBadge] = useState<{ cost: number; tokens: number } | null>(null)
+
+  // Un overlay aperto disattiva le scorciatoie del compositor. Il ref serve
+  // perché il gestore tastiera è registrato una volta sola e non vedrebbe
+  // i valori aggiornati dello stato.
+  const overlayOpenRef = useRef(false)
+  overlayOpenRef.current = selectorOpen || usageOpen
 
   // Geometrie correnti dei riquadri. Sono un ref e non uno stato: servono solo
   // dentro i gestori (focus direzionale, passaggio a flottante) e non devono
@@ -231,7 +239,7 @@ export default function App(): React.JSX.Element {
           window.cm.win.quit()
           return
         case 'toggle-usage':
-          // Arriva con M5.
+          setUsageOpen((open) => !open)
           return
         default: {
           const match = /^focus-([1-9])$/.exec(action)
@@ -252,7 +260,8 @@ export default function App(): React.JSX.Element {
   useEffect(() => {
     setSessionEvents({
       onExit: (paneId) => patchSession(paneId, { status: 'exited' }),
-      onTitle: (paneId, title) => patchSession(paneId, { title: title || null })
+      onTitle: (paneId, title) =>
+        patchSession(paneId, { title: isUsefulTitle(title) ? title.trim() : null })
     })
     return () => setSessionEvents(null)
   }, [patchSession])
@@ -302,12 +311,26 @@ export default function App(): React.JSX.Element {
     return window.cm.claude.onLiveChange(applyLive)
   }, [applyLive])
 
-  // Con il selettore aperto il compositor non intercetta nulla: le frecce e
-  // l'Invio devono restare all'overlay, che gestisce da sé anche Esc.
+  // Con un overlay aperto il compositor non intercetta nulla: le frecce e
+  // l'Invio devono restare all'overlay.
   useEffect(
-    () => installKeyHandler({ isEnabled: () => !selectorOpenRef.current, onAction: runAction }),
+    () => installKeyHandler({ isEnabled: () => !overlayOpenRef.current, onAction: runAction }),
     [runAction]
   )
+
+  // Esc chiude gli overlay. Il selettore lo gestisce da sé perché ha il fuoco;
+  // il pannello utilizzo no, quindi serve un ascoltatore qui.
+  useEffect(() => {
+    if (!usageOpen) return
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        setUsageOpen(false)
+      }
+    }
+    window.addEventListener('keydown', onKey, { capture: true })
+    return () => window.removeEventListener('keydown', onKey, { capture: true })
+  }, [usageOpen])
 
   // Il fuoco della tastiera segue il riquadro attivo, ma non glielo si ruba
   // mentre il selettore è aperto: scriverebbe nel terminale sottostante.
@@ -315,12 +338,25 @@ export default function App(): React.JSX.Element {
     if (layout.focused && !selectorOpen) focusPane(layout.focused)
   }, [layout.focused, selectorOpen])
 
-  // Prima sessione all'avvio.
+  // Avvio: si prova a ripristinare il layout precedente, altrimenti si apre
+  // una sessione sulla cartella predefinita.
   useEffect(() => {
     if (bootstrapped.current) return
     bootstrapped.current = true
-    void window.cm.config.get().then((cfg) => {
+
+    void (async () => {
+      const cfg = await window.cm.config.get()
       setConfig(cfg)
+
+      const stored = await window.cm.layout.load()
+      const restored = stored ? fromPersisted(stored, cfg) : null
+
+      if (restored) {
+        setSessions(restored.sessions)
+        setLayout(restored.layout)
+        return
+      }
+
       newSession(
         {
           cwd: cfg.defaultCwd,
@@ -331,8 +367,31 @@ export default function App(): React.JSX.Element {
         },
         'h'
       )
-    })
+    })()
   }, [newSession])
+
+  // Salvataggio del layout ad ogni cambiamento. Il main accorpa le scritture,
+  // quindi trascinare un canale non produce decine di scritture su disco.
+  useEffect(() => {
+    if (!bootstrapped.current) return
+    // Non si sovrascrive il file salvato finché il ripristino non ha prodotto
+    // almeno un riquadro: un salvataggio a metà strada lo cancellerebbe.
+    if (allPanes(layout).length === 0) return
+    window.cm.layout.save(toPersisted(layout, sessions))
+  }, [layout, sessions])
+
+  // Costo di oggi nella barra superiore. La scansione è incrementale, quindi
+  // un aggiornamento al minuto costa quasi nulla.
+  useEffect(() => {
+    const refresh = (): void => {
+      void window.cm.usage
+        .summary()
+        .then((s) => setUsageBadge({ cost: s.todayCost, tokens: s.todayTokens }))
+    }
+    refresh()
+    const id = setInterval(refresh, 60_000)
+    return () => clearInterval(id)
+  }, [])
 
   const paneCount = allPanes(layout).length
 
@@ -343,6 +402,15 @@ export default function App(): React.JSX.Element {
         <span className="cm-topbar__count">
           {paneCount} {paneCount === 1 ? 'sessione' : 'sessioni'}
         </span>
+        {usageBadge && (
+          <button
+            className="cm-topbar__usage"
+            title="Utilizzo di oggi · Alt+U per il dettaglio"
+            onClick={() => setUsageOpen(true)}
+          >
+            {formatCost(usageBadge.cost)} oggi · {formatTokens(usageBadge.tokens)} tok
+          </button>
+        )}
         <span className="cm-topbar__hint">
           <span className="cm-kbd">Alt+N</span> nuova ·{' '}
           <span className="cm-kbd">Alt+←→↑↓</span> fuoco ·{' '}
@@ -399,6 +467,8 @@ export default function App(): React.JSX.Element {
           }}
         />
       )}
+
+      {usageOpen && <UsagePanel onClose={() => setUsageOpen(false)} />}
     </div>
   )
 }

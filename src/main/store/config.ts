@@ -40,7 +40,8 @@ export function getConfig(): AppConfig {
     defaultCwd: stored?.defaultCwd ?? homedir(),
     launchDefaults: { ...DEFAULT_CONFIG.launchDefaults, ...stored?.launchDefaults },
     initialCols: stored?.initialCols ?? DEFAULT_CONFIG.initialCols,
-    initialRows: stored?.initialRows ?? DEFAULT_CONFIG.initialRows
+    initialRows: stored?.initialRows ?? DEFAULT_CONFIG.initialRows,
+    restoreResumesSessions: stored?.restoreResumesSessions ?? DEFAULT_CONFIG.restoreResumesSessions
   }
   return cached
 }

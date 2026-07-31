@@ -4,6 +4,7 @@ import { LiveSessions } from './claude/live'
 import { installDevBridge } from './dev/bridge'
 import { registerIpc } from './ipc'
 import { PtyManager } from './pty/manager'
+import { flushLayout } from './store/layout'
 
 const isDev = !app.isPackaged
 /** In sviluppo si può partire in finestra: CM_WINDOWED=1 npm run dev */
@@ -105,6 +106,9 @@ if (!app.requestSingleInstanceLock()) {
   // I processi PTY sono figli di questo processo: senza kill esplicito
   // resterebbero PowerShell orfani dopo la chiusura dell'app.
   app.on('before-quit', () => {
+    // Il salvataggio del layout è accorpato: alla chiusura può esserci una
+    // scrittura ancora in attesa, e va forzata prima di uscire.
+    flushLayout()
     live.stop()
     ptys.killAll()
   })

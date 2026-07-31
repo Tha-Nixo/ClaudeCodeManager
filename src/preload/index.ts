@@ -7,9 +7,11 @@ import type {
   FolderInfo,
   LaunchOptions,
   LiveSession,
+  PersistedLayout,
   PtyDataEvent,
   PtyExitEvent,
-  TranscriptSession
+  TranscriptSession,
+  UsageSummary
 } from '@shared/types'
 
 /**
@@ -63,6 +65,15 @@ const api: CmApi = {
     favorites: (): Promise<string[]> => ipcRenderer.invoke('folders:favorites'),
     toggleFavorite: (path: string): Promise<string[]> =>
       ipcRenderer.invoke('folders:toggleFavorite', path)
+  },
+
+  usage: {
+    summary: (): Promise<UsageSummary> => ipcRenderer.invoke('usage:summary')
+  },
+
+  layout: {
+    load: (): Promise<PersistedLayout | null> => ipcRenderer.invoke('layout:load'),
+    save: (layout: PersistedLayout): void => ipcRenderer.send('layout:save', layout)
   },
 
   config: {

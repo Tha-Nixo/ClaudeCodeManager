@@ -1,12 +1,14 @@
 import { BrowserWindow, ipcMain } from 'electron'
-import type { AppConfig, LaunchOptions } from '@shared/types'
+import type { AppConfig, LaunchOptions, PersistedLayout } from '@shared/types'
 import type { LiveSessions } from './claude/live'
-import { sessionsForFolder } from './claude/transcripts'
+import { isResumable, sessionsForFolder } from './claude/transcripts'
 import { folderInfo, listDir, listDrives } from './fs/browse'
 import { invalidateIndex, searchFolders } from './indexer/sources'
 import type { PtyManager } from './pty/manager'
 import { getConfig, setConfig } from './store/config'
 import { getFavorites, toggleFavorite, touchRecent } from './store/folders'
+import { loadLayout, saveLayout } from './store/layout'
+import { summarize } from './usage/scanner'
 
 /**
  * Unico punto di contatto fra renderer e main. Ogni canale è registrato qui
@@ -45,6 +47,31 @@ export function registerIpc(
   ptys.on('exit', (id, exitCode, signal) => {
     getWindow()?.webContents.send('pty:exit', { id, exitCode, signal })
   })
+
+  // --- Utilizzo -------------------------------------------------------------
+
+  ipcMain.handle('usage:summary', () => summarize())
+
+  // --- Layout ---------------------------------------------------------------
+
+  ipcMain.handle('layout:load', () => {
+    const stored = loadLayout()
+    if (!stored) return null
+    // Un id salvato non basta: il transcript deve esistere davvero, altrimenti
+    // il ripristino avvierebbe claude --resume su una sessione che Claude Code
+    // non conosce e il riquadro nascerebbe con un errore invece che pronto.
+    return {
+      ...stored,
+      panes: stored.panes.map((pane) => ({
+        ...pane,
+        claudeSessionId:
+          pane.claudeSessionId && isResumable(pane.cwd, pane.claudeSessionId)
+            ? pane.claudeSessionId
+            : null
+      }))
+    }
+  })
+  ipcMain.on('layout:save', (_e, layout: PersistedLayout) => saveLayout(layout))
 
   // --- Sessioni Claude ------------------------------------------------------
 

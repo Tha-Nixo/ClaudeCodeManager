@@ -97,6 +97,45 @@ export interface TranscriptSession {
   sizeBytes: number
 }
 
+// --- Layout persistente -----------------------------------------------------
+
+/**
+ * Istantanea del compositor salvata fra un avvio e l'altro.
+ * L'albero è tenuto come JSON opaco: la sua forma è definita dal motore di
+ * layout nel renderer, e il main non ha motivo di conoscerla.
+ */
+export interface PersistedLayout {
+  version: number
+  savedAt: number
+  /** Serializzazione di `Layout` del renderer. */
+  tree: unknown
+  panes: PersistedPane[]
+}
+
+export interface PersistedPane {
+  paneId: string
+  cwd: string
+  launch: LaunchOptions
+  /** Sessione Claude da riprendere al ripristino, se nota. */
+  claudeSessionId: string | null
+}
+
+// --- Statistiche di utilizzo ------------------------------------------------
+
+export interface UsageSummary {
+  todayCost: number
+  todayTokens: number
+  weekCost: number
+  weekTokens: number
+  totalCost: number
+  totalTokens: number
+  /** Numero di transcript con almeno un turno conteggiato. */
+  sessions: number
+  byModel: { model: string; tokens: number; cost: number }[]
+  byProject: { path: string; tokens: number; cost: number }[]
+  generatedAt: number
+}
+
 // --- Esplorazione cartelle --------------------------------------------------
 
 export interface DirEntry {
@@ -142,6 +181,11 @@ export interface AppConfig {
   /** Numero di colonne/righe iniziali prima che FitAddon misuri l'elemento. */
   initialCols: number
   initialRows: number
+  /**
+   * Al ripristino del layout riprende anche la conversazione di ogni riquadro
+   * con --resume, invece di aprire sessioni vuote sulle stesse cartelle.
+   */
+  restoreResumesSessions: boolean
 }
 
 export const DEFAULT_CONFIG: Omit<AppConfig, 'defaultCwd'> = {
@@ -151,5 +195,6 @@ export const DEFAULT_CONFIG: Omit<AppConfig, 'defaultCwd'> = {
     permissionMode: 'default'
   },
   initialCols: 120,
-  initialRows: 30
+  initialRows: 30,
+  restoreResumesSessions: true
 }

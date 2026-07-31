@@ -16,6 +16,19 @@ import { transcriptsFor } from './paths'
 const TAIL_BYTES = 192 * 1024
 const HEAD_BYTES = 96 * 1024
 
+/**
+ * Una sessione è riprendibile solo se ha davvero un transcript su disco.
+ *
+ * Serve perché l'id viene assegnato con --session-id al momento dello spawn,
+ * ma Claude Code scrive il file solo quando la sessione acquisisce contenuto.
+ * Un riquadro aperto e mai usato lascia quindi un id che esiste per noi e non
+ * per Claude: riprenderlo fa fallire l'avvio con "No conversation found".
+ */
+export function isResumable(folder: string, sessionId: string): boolean {
+  if (!sessionId) return false
+  return transcriptsFor(folder).some((file) => basename(file, '.jsonl') === sessionId)
+}
+
 export function sessionsForFolder(folder: string): TranscriptSession[] {
   const files = transcriptsFor(folder)
   const out: TranscriptSession[] = []

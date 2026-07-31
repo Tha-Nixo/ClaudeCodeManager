@@ -6,9 +6,11 @@ import type {
   FolderInfo,
   LaunchOptions,
   LiveSession,
+  PersistedLayout,
   PtyDataEvent,
   PtyExitEvent,
-  TranscriptSession
+  TranscriptSession,
+  UsageSummary
 } from './types'
 
 export interface ListDirResult {
@@ -53,6 +55,14 @@ export interface CmApi {
     info(path: string): Promise<FolderInfo>
     favorites(): Promise<string[]>
     toggleFavorite(path: string): Promise<string[]>
+  }
+  usage: {
+    summary(): Promise<UsageSummary>
+  }
+  layout: {
+    load(): Promise<PersistedLayout | null>
+    /** Fire-and-forget: il main accorpa le scritture. */
+    save(layout: PersistedLayout): void
   }
   config: {
     get(): Promise<AppConfig>

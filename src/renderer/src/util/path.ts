@@ -21,3 +21,20 @@ export function basename(fullPath: string): string {
   const parts = fullPath.split(/[\\/]/).filter(Boolean)
   return parts[parts.length - 1] ?? fullPath
 }
+
+/**
+ * Filtra i titoli che il terminale riceve via sequenza OSC.
+ *
+ * Claude Code imposta un titolo utile ("✳ ClaudeManager"), ma quando esce è
+ * PowerShell a riprendersi il controllo e a scrivere il proprio percorso
+ * completo: senza questo filtro il riquadro finirebbe per intitolarsi
+ * "Administrator: C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe".
+ */
+export function isUsefulTitle(title: string): boolean {
+  const trimmed = title.trim()
+  if (trimmed.length === 0) return false
+  if (/\.(exe|cmd|bat|ps1)\b/i.test(trimmed)) return false
+  // Un percorso assoluto come titolo è sempre la shell, non l'applicazione.
+  if (/^[a-zA-Z]:[\\/]/.test(trimmed)) return false
+  return true
+}
