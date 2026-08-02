@@ -6,6 +6,12 @@ arrivano funzioni nuove, il terzo per le correzioni.
 
 <!-- nuove versioni qui sotto -->
 
+## 1.0.1 — 2026-08-02
+
+- Anche la copia portabile controlla se è uscita una versione nuova e lo dice,
+  con il collegamento per scaricarla. Non può sostituirsi da sola, ma non
+  saperlo nemmeno non serviva a nessuno.
+
 ## 1.0.0 — 2026-08-02
 
 Prima versione pubblica.

@@ -27,10 +27,18 @@ function git(...params) {
   return execFileSync('git', params, { cwd: root, encoding: 'utf8' }).trim()
 }
 
-function run(command, params) {
+/**
+ * Esegue un comando mostrandolo.
+ *
+ * `shell` serve solo per npm e npx, che su Windows sono file .cmd e non si
+ * possono avviare direttamente. Va acceso il meno possibile: con la shell di
+ * mezzo gli argomenti vengono concatenati invece che passati uno per uno, e un
+ * messaggio di commit con dentro un apice basterebbe a rompere il comando.
+ */
+function run(command, params, needsShell = false) {
   console.log(`  $ ${command} ${params.join(' ')}`)
   if (dryRun) return
-  execFileSync(command, params, { cwd: root, stdio: 'inherit', shell: true })
+  execFileSync(command, params, { cwd: root, stdio: 'inherit', shell: needsShell })
 }
 
 function nextVersion(current, kind) {
@@ -102,7 +110,7 @@ const changelog = readFileSync(changelogPath, 'utf8')
 // La voce nuova va sotto l'intestazione, non in fondo: si legge dall'alto.
 const marker = '<!-- nuove versioni qui sotto -->'
 const updated = changelog.includes(marker)
-  ? changelog.replace(marker, `${marker}\n\n${entry}`)
+  ? changelog.replace(`${marker}\n`, `${marker}\n\n${entry}`)
   : `${changelog}\n${entry}`
 
 console.log(entry)
@@ -120,13 +128,14 @@ if (publish === 'never') {
   console.log('\nGH_TOKEN assente: i pacchetti vengono costruiti ma non caricati su GitHub.\n')
 }
 
-run('npm', ['run', 'typecheck'])
-run('npx', ['electron-vite', 'build'])
-run('npx', ['electron-builder', '--publish', publish])
+run('npm', ['run', 'typecheck'], true)
+run('npx', ['electron-vite', 'build'], true)
+run('npx', ['electron-builder', '--publish', publish], true)
 
+// git si avvia direttamente: niente shell, quindi niente virgolette a mano.
 run('git', ['add', 'package.json', 'CHANGELOG.md'])
-run('git', ['commit', '-m', `"${tag}"`])
-run('git', ['tag', '-a', tag, '-m', `"${tag}"`])
+run('git', ['commit', '-m', tag])
+run('git', ['tag', '-a', tag, '-m', tag])
 
 console.log(`\nFatto. Restano da fare a mano:`)
 console.log(`  git push && git push origin ${tag}`)
