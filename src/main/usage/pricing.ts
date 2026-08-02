@@ -56,6 +56,30 @@ export const PRICING: Record<string, ModelPrice> = {
   'claude-haiku-4-5': { label: 'Haiku 4.5', input: 1, output: 5 }
 }
 
+/**
+ * Finestra di contesto per modello, in token.
+ *
+ * Non c'è niente da "rilevare": sui modelli correnti il milione di token è
+ * insieme il valore predefinito e il massimo, senza intestazioni beta da
+ * attivare. L'unica eccezione è Haiku, che si ferma a 200.000.
+ *
+ * Il numero serve come denominatore dell'indicatore di riempimento del
+ * contesto. Quando il modello non è in tabella si prende la finestra della
+ * famiglia, e il riquadro lo segnala come approssimato invece di mostrare una
+ * percentuale che sembra esatta.
+ */
+export const CONTEXT_WINDOWS: Record<string, number> = {
+  'claude-fable-5': 1_000_000,
+  'claude-mythos-5': 1_000_000,
+  'claude-opus-5': 1_000_000,
+  'claude-opus-4-8': 1_000_000,
+  'claude-opus-4-7': 1_000_000,
+  'claude-opus-4-6': 1_000_000,
+  'claude-sonnet-5': 1_000_000,
+  'claude-sonnet-4-6': 1_000_000,
+  'claude-haiku-4-5': 200_000
+}
+
 /** Ultima spiaggia per modelli non ancora in tabella. */
 const FAMILY_FALLBACK: { keyword: string; key: string }[] = [
   { keyword: 'fable', key: 'claude-fable-5' },
@@ -64,6 +88,27 @@ const FAMILY_FALLBACK: { keyword: string; key: string }[] = [
   { keyword: 'sonnet', key: 'claude-sonnet-5' },
   { keyword: 'haiku', key: 'claude-haiku-4-5' }
 ]
+
+/**
+ * Finestra di contesto del modello, con l'indicazione se è dedotta.
+ * Ritorna 0 quando non si sa nulla del modello: meglio nessuna percentuale
+ * che una sbagliata.
+ */
+export function contextWindowFor(model: string | null | undefined): {
+  window: number
+  approximate: boolean
+} {
+  if (!model) return { window: 0, approximate: false }
+  const id = model.toLowerCase()
+
+  const exact = CONTEXT_WINDOWS[id]
+  if (exact) return { window: exact, approximate: false }
+
+  for (const { keyword, key } of FAMILY_FALLBACK) {
+    if (id.includes(keyword)) return { window: CONTEXT_WINDOWS[key] ?? 0, approximate: true }
+  }
+  return { window: 0, approximate: false }
+}
 
 export interface ResolvedPrice extends ModelPrice {
   /** true quando il prezzo viene da una corrispondenza per famiglia. */

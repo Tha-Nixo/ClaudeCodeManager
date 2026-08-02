@@ -249,6 +249,51 @@ export interface UsageSummary {
   generatedAt: number
 }
 
+/** Utilizzo di una singola sessione, per il pannello di monitoraggio. */
+export interface SessionUsage {
+  sessionId: string
+  cwd: string | null
+  turns: number
+  tokens: number
+  cost: number
+  lastAt: number
+  /**
+   * Token in ingresso dell'ultimo turno, cache compresa: approssima quanto è
+   * pieno il contesto in questo momento.
+   */
+  contextTokens: number
+  /** Finestra del modello; 0 quando il modello non è riconosciuto. */
+  contextWindow: number
+  /** La finestra è dedotta dalla famiglia del modello, non certa. */
+  contextApproximate: boolean
+  model: string | null
+}
+
+/** Riga del pannello di monitoraggio: un riquadro con i suoi numeri. */
+export interface MonitorPane {
+  paneId: string
+  index: number
+  /** Etichetta già pronta: titolo del terminale o cartella accorciata. */
+  label: string
+  /** Percorso completo, locale o `utente@host:/cartella` se remoto. */
+  where: string
+  status: string
+  waitingFor?: string | null
+  remote: boolean
+  claudeSessionId: string | null
+  usage?: SessionUsage
+}
+
+/** Tutto ciò che il pannello mostra, sia agganciato sia staccato. */
+export interface MonitorState {
+  panes: MonitorPane[]
+  /** Costo e token di oggi, come nella barra superiore. */
+  todayCost: number
+  todayTokens: number
+  /** Epoch ms dell'ultimo aggiornamento. */
+  updatedAt: number
+}
+
 // --- Esplorazione cartelle --------------------------------------------------
 
 export interface DirEntry {

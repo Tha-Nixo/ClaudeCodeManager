@@ -3,6 +3,7 @@ import type {
   AppConfig,
   IndexKind,
   LaunchOptions,
+  MonitorPane,
   PersistedLayout,
   SshConnection,
   SshTarget
@@ -12,6 +13,8 @@ import { isResumable, sessionsForFolder } from './claude/transcripts'
 import { folderInfo, listDir, listDrives } from './fs/browse'
 import { allStatuses, cancel as cancelIndex, rescan } from './indexer/diskIndex'
 import { invalidateIndex, searchFolders } from './indexer/sources'
+import { publishPanes, subscribe, unsubscribe } from './monitor/state'
+import { closeMonitorWindow, isMonitorOpen, openMonitorWindow } from './monitor/window'
 import type { PtyManager } from './pty/manager'
 import {
   isRemoteResumable,
@@ -149,6 +152,23 @@ export function registerIpc(
 
   live.on('change', (sessions) => {
     getWindow()?.webContents.send('claude:live-change', sessions)
+  })
+
+  // --- Pannello di monitoraggio ---------------------------------------------
+
+  ipcMain.on('monitor:panes', (_e, panes: MonitorPane[]) => publishPanes(panes))
+  ipcMain.handle('monitor:subscribe', (e) => subscribe(e.sender))
+  ipcMain.on('monitor:unsubscribe', (e) => unsubscribe(e.sender))
+  ipcMain.handle('monitor:detached', () => isMonitorOpen())
+  ipcMain.handle('monitor:detach', () => {
+    openMonitorWindow(!app.isPackaged)
+    // Chi ha chiesto lo stacco deve poter aggiornare subito la propria
+    // interfaccia senza aspettare un giro di aggiornamento.
+    getWindow()?.webContents.send('monitor:detached-change', true)
+  })
+  ipcMain.handle('monitor:attach', () => {
+    closeMonitorWindow()
+    getWindow()?.webContents.send('monitor:detached-change', false)
   })
 
   // --- Aggiornamenti --------------------------------------------------------

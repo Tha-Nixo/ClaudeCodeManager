@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { app, type BrowserWindow } from 'electron'
+import { app, BrowserWindow } from 'electron'
 
 /**
  * Ponte di sviluppo per pilotare e fotografare l'app da fuori.
@@ -20,13 +20,25 @@ import { app, type BrowserWindow } from 'electron'
 /** Sottoinsieme dei modificatori accettati da webContents.sendInputEvent. */
 type InputModifier = 'shift' | 'control' | 'alt' | 'meta'
 
-type Command =
-  | { type: 'key'; key: string; modifiers?: InputModifier[]; repeat?: number }
-  | { type: 'text'; text: string }
-  | { type: 'click'; x: number; y: number }
-  | { type: 'drag'; from: { x: number; y: number }; to: { x: number; y: number }; steps?: number }
-  | { type: 'shot'; path: string }
-  | { type: 'eval'; js: string; path: string }
+/**
+ * Finestra a cui inviare il comando.
+ *
+ * Da quando esiste il pannello staccabile le finestre sono due, e una che
+ * non si può né fotografare né interrogare è una che nessun test copre.
+ * Si indica per titolo, che è l'unico identificatore stabile fra un avvio e
+ * l'altro; assente, vale la finestra principale.
+ */
+type WindowTarget = { window?: string }
+
+type Command = WindowTarget &
+  (
+    | { type: 'key'; key: string; modifiers?: InputModifier[]; repeat?: number }
+    | { type: 'text'; text: string }
+    | { type: 'click'; x: number; y: number }
+    | { type: 'drag'; from: { x: number; y: number }; to: { x: number; y: number }; steps?: number }
+    | { type: 'shot'; path: string }
+    | { type: 'eval'; js: string; path: string }
+  )
 
 const POLL_MS = 250
 
@@ -74,8 +86,10 @@ async function run(lines: string[], getWindow: () => BrowserWindow | null): Prom
       continue
     }
 
-    const win = getWindow()
-    if (!win) return
+    const win = resolveWindow(cmd.window, getWindow)
+    // Una finestra chiesta e non trovata è un test che sta misurando altro:
+    // meglio saltare il comando che dirigerlo alla finestra sbagliata.
+    if (!win) continue
     const wc = win.webContents
 
     switch (cmd.type) {
@@ -138,6 +152,20 @@ async function run(lines: string[], getWindow: () => BrowserWindow | null): Prom
       }
     }
   }
+}
+
+/** Finestra il cui titolo contiene il frammento indicato, o la principale. */
+function resolveWindow(
+  match: string | undefined,
+  getWindow: () => BrowserWindow | null
+): BrowserWindow | null {
+  if (!match) return getWindow()
+  const needle = match.toLowerCase()
+  return (
+    BrowserWindow.getAllWindows().find(
+      (w) => !w.isDestroyed() && w.getTitle().toLowerCase().includes(needle)
+    ) ?? null
+  )
 }
 
 function delay(ms: number): Promise<void> {

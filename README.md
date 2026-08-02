@@ -36,6 +36,10 @@ proprio terminale e il proprio processo `claude`.
   server*: si salvano le connessioni, si sfogliano le cartelle remote con gli
   stessi badge di quelle locali, e si riprendono le conversazioni gia' presenti
   la'. La cartella remota resta ricordata per la volta dopo.
+- **Cassetto di monitoraggio.** Una linguetta sul bordo destro apre un
+  pannello con costo e token del giorno e, per ogni sessione, quanto e' pieno
+  il contesto. Si puo' staccare in una finestra a se', sempre in primo piano e
+  spostabile su un altro monitor.
 - **Aggiornamenti.** Entrambe le versioni controllano se ne e' uscita una
   nuova. L'installer la scarica da solo e la applica alla chiusura dell'app,
   mai a sorpresa mentre si lavora; il portabile, che non puo' sostituirsi da
@@ -244,6 +248,25 @@ Alcune scelte che non si deducono dal codice:
 - **La sezione della versione sta in cima alle impostazioni**, perché la
   pastiglia della barra porta lì: in fondo, chi la preme troverebbe il pannello
   all'inizio e dovrebbe cercarsi da solo quello che ha appena chiesto.
+- **Il riempimento del contesto si misura sommando `input_tokens`,
+  `cache_read` e `cache_creation` dell'ultimo turno.** Il solo `input_tokens`
+  è la parte *non* servita dalla cache, e in una sessione lunga è quasi zero:
+  su una conversazione occupata al 68% valeva 2 token contro 683.052 di
+  cache: un indicatore costruito su quel campo mostrerebbe sempre 0%.
+- **Il cassetto restringe il palco invece di coprirlo**, con un margine e non
+  con un padding: il compositor misura il riquadro di delimitazione, che il
+  padding non riduce. La misurazione dei terminali resta congelata per la
+  durata dell'animazione, come per i cambi di layout.
+- **Il pannello staccato è lo stesso bundle con `#monitor` in coda.** Un
+  secondo punto d'ingresso raddoppierebbe la build e obbligherebbe a duplicare
+  il montaggio del tema; l'ancora non tocca il percorso del file, quindi
+  funziona identica col server di sviluppo e con `file://`. La finestra
+  applica il tema da sola: vive in un processo di rendering suo e non eredita
+  niente dalla principale.
+- **Gli osservatori del pannello sono tenuti per identità, non contati.** Un
+  contatore si sbilancia al primo caso storto — finestra chiusa senza
+  disiscriversi, renderer ricaricato, crash — e lascia acceso per sempre un
+  timer che rilegge i transcript ogni due secondi per nessuno.
 
 ## Limiti noti
 

@@ -9,6 +9,8 @@ import type {
   IndexStatus,
   LaunchOptions,
   LiveSession,
+  MonitorPane,
+  MonitorState,
   PersistedLayout,
   PtyDataEvent,
   PtyExitEvent,
@@ -95,6 +97,21 @@ export interface CmApi {
   }
   usage: {
     summary(): Promise<UsageSummary>
+  }
+  monitor: {
+    /** Il renderer principale pubblica i propri riquadri. Fire-and-forget. */
+    publish(panes: MonitorPane[]): void
+    /** Avvia gli aggiornamenti e ritorna lo stato corrente. */
+    subscribe(): Promise<MonitorState>
+    unsubscribe(): void
+    /** Ritorna la funzione per disiscriversi. */
+    onState(cb: (state: MonitorState) => void): () => void
+    /** La finestra staccata è aperta. */
+    isDetached(): Promise<boolean>
+    detach(): Promise<void>
+    attach(): Promise<void>
+    /** Ritorna la funzione per disiscriversi. */
+    onDetachedChange(cb: (detached: boolean) => void): () => void
   }
   update: {
     /** Versione dell'app in esecuzione. */

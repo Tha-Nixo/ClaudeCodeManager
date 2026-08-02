@@ -10,6 +10,8 @@ import type {
   IndexStatus,
   LaunchOptions,
   LiveSession,
+  MonitorPane,
+  MonitorState,
   PersistedLayout,
   PtyDataEvent,
   PtyExitEvent,
@@ -109,6 +111,25 @@ const api: CmApi = {
 
   usage: {
     summary: (): Promise<UsageSummary> => ipcRenderer.invoke('usage:summary')
+  },
+
+  monitor: {
+    publish: (panes: MonitorPane[]): void => ipcRenderer.send('monitor:panes', panes),
+    subscribe: (): Promise<MonitorState> => ipcRenderer.invoke('monitor:subscribe'),
+    unsubscribe: (): void => ipcRenderer.send('monitor:unsubscribe'),
+    onState: (cb: (state: MonitorState) => void): (() => void) => {
+      const listener = (_e: unknown, state: MonitorState): void => cb(state)
+      ipcRenderer.on('monitor:state', listener)
+      return () => ipcRenderer.removeListener('monitor:state', listener)
+    },
+    isDetached: (): Promise<boolean> => ipcRenderer.invoke('monitor:detached'),
+    detach: (): Promise<void> => ipcRenderer.invoke('monitor:detach'),
+    attach: (): Promise<void> => ipcRenderer.invoke('monitor:attach'),
+    onDetachedChange: (cb: (detached: boolean) => void): (() => void) => {
+      const listener = (_e: unknown, detached: boolean): void => cb(detached)
+      ipcRenderer.on('monitor:detached-change', listener)
+      return () => ipcRenderer.removeListener('monitor:detached-change', listener)
+    }
   },
 
   update: {

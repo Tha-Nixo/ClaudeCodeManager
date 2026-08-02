@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { AppConfig, LaunchOptions, LiveSession, UpdateState } from '@shared/types'
 import { Desktop } from './compositor/Desktop'
 import type { Rect } from './compositor/geometry'
@@ -34,12 +34,17 @@ import {
   ensureSession,
   focusPane,
   isStarted,
+  setFitSuspendedAll,
   setSessionEvents,
   wireTerminalEvents
 } from './terminal/registry'
+import { Drawer } from './monitor/Drawer'
 
 /** Stati che meritano una pastiglia nella barra: gli altri non chiedono nulla. */
 const UPDATE_VISIBLE = new Set(['available', 'downloading', 'ready'])
+
+/** Deve combaciare con la transizione di .cm-drawer nel foglio di stile. */
+const DRAWER_MS = 220
 
 export default function App(): React.JSX.Element {
   const [config, setConfig] = useState<AppConfig | null>(null)
@@ -50,6 +55,8 @@ export default function App(): React.JSX.Element {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [usageBadge, setUsageBadge] = useState<{ cost: number; tokens: number } | null>(null)
   const [update, setUpdate] = useState<UpdateState | null>(null)
+  const [drawerOpen, setDrawerOpen] = useState(false)
+  const [detached, setDetached] = useState(false)
 
   // Un overlay aperto disattiva le scorciatoie del compositor. Il ref serve
   // perché il gestore tastiera è registrato una volta sola e non vedrebbe
@@ -466,10 +473,58 @@ export default function App(): React.JSX.Element {
     return window.cm.update.onChange(setUpdate)
   }, [])
 
-  const paneCount = allPanes(layout).length
+  useEffect(() => {
+    void window.cm.monitor.isDetached().then(setDetached)
+    return window.cm.monitor.onDetachedChange(setDetached)
+  }, [])
+
+  // Memorizzato: `allPanes` crea un array nuovo ad ogni chiamata, e usato
+  // come dipendenza di un effetto lo farebbe scattare ad ogni render.
+  const paneOrder = useMemo(() => allPanes(layout), [layout])
+  const paneCount = paneOrder.length
+
+  /**
+   * I riquadri vivono qui, ma il pannello di monitoraggio può stare in
+   * un'altra finestra che non vede questo stato: si pubblica al main, che li
+   * ritrasmette a chiunque guardi. Si manda solo quello che serve al pannello,
+   * non l'intero SessionMeta.
+   */
+  useEffect(() => {
+    window.cm.monitor.publish(
+      paneOrder.map((paneId, i) => {
+        const meta = sessions[paneId]
+        const remote = meta?.launch.remote
+        return {
+          paneId,
+          index: i + 1,
+          label: meta?.title ?? basename(remote ? remote.path : (meta?.cwd ?? '')),
+          where: remote ? `${remote.user}@${remote.host}:${remote.path}` : (meta?.cwd ?? ''),
+          // Una sessione remota scrive il proprio stato sul server: dire
+          // "pronta" sarebbe inventare, come nell'intestazione del riquadro.
+          status: remote && meta?.status === 'running' ? 'remote' : (meta?.status ?? 'starting'),
+          waitingFor: meta?.waitingFor ?? null,
+          remote: Boolean(remote),
+          claudeSessionId: meta?.claudeSessionId ?? null
+        }
+      })
+    )
+  }, [paneOrder, sessions])
+
+  /**
+   * Aprire e chiudere il cassetto restringe il palco, e il ResizeObserver del
+   * compositor scatterebbe ad ogni fotogramma dell'animazione: sarebbe una
+   * dozzina di pty.resize per gesto, con Claude Code che ridisegna ogni volta.
+   * Si congela la misurazione per la durata della transizione, esattamente
+   * come per le animazioni di layout.
+   */
+  useEffect(() => {
+    setFitSuspendedAll(true)
+    const id = setTimeout(() => setFitSuspendedAll(false), DRAWER_MS)
+    return () => clearTimeout(id)
+  }, [drawerOpen])
 
   return (
-    <div className="cm-desktop">
+    <div className={`cm-desktop ${drawerOpen && !detached ? 'cm-desktop--drawer' : ''}`}>
       <header className="cm-topbar">
         <span className="cm-topbar__brand">ClaudeManager</span>
         <span className="cm-topbar__count">
@@ -539,6 +594,15 @@ export default function App(): React.JSX.Element {
           </button>
         </div>
       </header>
+
+      <Drawer
+        open={drawerOpen}
+        onToggle={() => setDrawerOpen((v) => !v)}
+        detached={detached}
+        onDetach={() => void window.cm.monitor.detach()}
+        onAttach={() => void window.cm.monitor.attach()}
+        onFocusPane={(id) => setLayout((prev) => setFocus(prev, id))}
+      />
 
       <Desktop
         layout={layout}

@@ -1,10 +1,18 @@
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import { app } from 'electron'
-import type { UsageSummary } from '@shared/types'
+import type { SessionUsage, UsageSummary } from '@shared/types'
 import { projectsDir } from '../claude/paths'
 import { readJson, writeJsonAtomic } from '../store/config'
-import { ZERO_TOKENS, addTokens, costOf, isBillable, type TokenCounts } from './pricing'
+import {
+  ZERO_TOKENS,
+  addTokens,
+  contextWindowFor,
+  costOf,
+  isBillable,
+  totalTokens,
+  type TokenCounts
+} from './pricing'
 
 /**
  * Contabilità dei token a partire dai transcript di Claude Code.
@@ -20,7 +28,9 @@ import { ZERO_TOKENS, addTokens, costOf, isBillable, type TokenCounts } from './
  * stazionario cambia solo il transcript della sessione attiva.
  */
 
-const CACHE_VERSION = 3
+// Alzata a 4 per i campi dell'ultimo turno: la riscansione completa che ne
+// consegue costa qualche decina di millisecondi, una volta sola.
+const CACHE_VERSION = 4
 
 interface FileContribution {
   mtimeMs: number
@@ -34,6 +44,18 @@ interface FileContribution {
   byModel: Record<string, TokenCounts>
   /** Token per giorno (YYYY-MM-DD) e modello. */
   byDay: Record<string, Record<string, TokenCounts>>
+  /**
+   * Token in ingresso dell'ULTIMO turno assistant, cache compresa.
+   *
+   * Approssima quanto è pieno il contesto adesso: ogni richiesta rimanda
+   * l'intera conversazione, quindi l'ingresso dell'ultimo turno è la
+   * dimensione corrente della conversazione. `input_tokens` da solo non
+   * basta: è la sola parte NON servita dalla cache, e in una sessione lunga
+   * è la minoranza.
+   */
+  lastContext: number
+  /** Modello dell'ultimo turno, per sapere contro quale finestra rapportarlo. */
+  lastModel: string | null
 }
 
 interface UsageCache {
@@ -87,7 +109,9 @@ function parseTranscript(file: string): Omit<FileContribution, 'mtimeMs' | 'size
     firstAt: 0,
     lastAt: 0,
     byModel: {},
-    byDay: {}
+    byDay: {},
+    lastContext: 0,
+    lastModel: null
   }
 
   let raw: string
@@ -161,6 +185,12 @@ function parseTranscript(file: string): Omit<FileContribution, 'mtimeMs' | 'size
     const key = rec.message?.id
     const turn: Turn = { model, tokens, timestamp }
 
+    // Ordine del file, non del timestamp: l'ultimo turno scritto è quello che
+    // descrive il contesto adesso, e i timestamp fra sotto-agenti e sessione
+    // principale non sono necessariamente monotoni.
+    contribution.lastContext = tokens.input + tokens.cacheRead + tokens.cacheWrite5m + tokens.cacheWrite1h
+    contribution.lastModel = model
+
     // Senza message.id non c'è modo di deduplicare: si tiene comunque il
     // turno, usando una chiave unica.
     byMessageId.set(key || `anon-${byMessageId.size}`, turn)
@@ -232,6 +262,48 @@ export function scan(force = false): void {
   }
 
   if (changed) writeJsonAtomic(cachePath(), state)
+}
+
+/**
+ * Utilizzo per singola sessione, indicizzato per sessionId.
+ *
+ * Serve al pannello di monitoraggio, che ragiona per riquadro e non per
+ * cartella o modello come fa `summarize`. La scansione è la stessa: chiamarli
+ * entrambi nello stesso giro non costa il doppio, perché `scan` ha una
+ * frequenza minima propria.
+ */
+export function sessionUsage(): Record<string, SessionUsage> {
+  scan()
+  const state = loadCache()
+  const out: Record<string, SessionUsage> = {}
+
+  for (const file of Object.values(state.files)) {
+    let tokens = 0
+    let cost = 0
+    for (const [model, counts] of Object.entries(file.byModel)) {
+      tokens += totalTokens(counts)
+      cost += costOf(model, counts)
+    }
+
+    const { window, approximate } = contextWindowFor(file.lastModel)
+
+    // Un sotto-agente ha un transcript proprio ma lo stesso id non esiste
+    // altrove, quindi la mappa non ha collisioni: una voce per file.
+    out[file.sessionId] = {
+      sessionId: file.sessionId,
+      cwd: file.cwd,
+      turns: file.turns,
+      tokens,
+      cost,
+      lastAt: file.lastAt,
+      contextTokens: file.lastContext,
+      contextWindow: window,
+      contextApproximate: approximate,
+      model: file.lastModel
+    }
+  }
+
+  return out
 }
 
 function dayKey(offsetDays: number): string {

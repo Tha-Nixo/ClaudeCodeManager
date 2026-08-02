@@ -37,6 +37,10 @@
 
   --cm-radius: 6px;
   --cm-gap: 8px;
+  /* DRAWER_MS in App.tsx deve restare allineata a --cm-drawer-ms: la
+     misurazione dei terminali resta congelata per quella durata. */
+  --cm-drawer-w: 320px;
+  --cm-drawer-ms: 220ms;
   --cm-font-ui: 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif;
   --cm-font-mono: 'Cascadia Code', 'Cascadia Mono', Consolas, 'Courier New', monospace;
 
@@ -159,6 +163,16 @@ body {
   flex: 1 1 auto;
   padding: var(--cm-gap);
   min-height: 0;
+  /* Il cassetto restringe il palco invece di coprirlo: nessun riquadro
+     finisce nascosto sotto al pannello. Il margine (non il padding) perché
+     il compositor misura il riquadro di delimitazione, che il padding non
+     riduce. */
+  margin-right: 0;
+  transition: margin-right var(--cm-drawer-ms) var(--cm-ease);
+}
+
+.cm-desktop--drawer .cm-stage {
+  margin-right: var(--cm-drawer-w);
 }
 
 /* --- Riquadro sessione ---------------------------------------------------- */
@@ -1337,6 +1351,238 @@ body.cm-dragging .cm-pane__header {
 .cm-chip--danger {
   border-color: var(--cm-error);
   color: var(--cm-error);
+}
+
+/* --- Cassetto di monitoraggio --------------------------------------------- */
+
+.cm-drawer {
+  position: fixed;
+  top: 34px; /* sotto la barra superiore */
+  right: 0;
+  bottom: 0;
+  width: var(--cm-drawer-w);
+  display: flex;
+  flex-direction: column;
+  background: var(--cm-panel);
+  border-left: 1px solid var(--cm-border-idle);
+  /* Fuori campo quando chiuso, invece che nascosto: la transizione parte
+     dalla posizione reale e non serve gestire display. */
+  transform: translateX(100%);
+  transition: transform var(--cm-drawer-ms) var(--cm-ease);
+  z-index: 40;
+}
+
+.cm-drawer--open {
+  transform: translateX(0);
+}
+
+/* La linguetta resta sempre a vista e segue il bordo del cassetto. */
+.cm-drawer__tab {
+  position: fixed;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 16px;
+  height: 64px;
+  padding: 0;
+  border: 1px solid var(--cm-border-idle);
+  border-right: none;
+  border-radius: 6px 0 0 6px;
+  background: var(--cm-panel);
+  color: var(--cm-text-dim);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  z-index: 41;
+  transition:
+    right var(--cm-drawer-ms) var(--cm-ease),
+    color var(--cm-fast) var(--cm-ease),
+    border-color var(--cm-fast) var(--cm-ease);
+}
+
+.cm-drawer__tab:hover {
+  color: var(--cm-text);
+  border-color: var(--cm-accent);
+}
+
+.cm-drawer__tab--open {
+  right: var(--cm-drawer-w);
+}
+
+.cm-drawer__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--cm-border-idle);
+  flex: 0 0 auto;
+}
+
+.cm-drawer__title {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--cm-text-dim);
+}
+
+/* --- Pannello di monitoraggio --------------------------------------------- */
+
+.cm-monitor__body {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+.cm-monitor__totals {
+  display: flex;
+  gap: 10px;
+  padding: 10px;
+  border-bottom: 1px solid var(--cm-border-idle);
+  flex: 0 0 auto;
+}
+
+.cm-monitor__total {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.cm-monitor__total-value {
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+  color: var(--cm-text);
+}
+
+.cm-monitor__total-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--cm-text-dim);
+}
+
+.cm-monitor__list {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.cm-monitor__row {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--cm-border-idle);
+}
+
+.cm-monitor__row--clickable {
+  cursor: pointer;
+  transition: background var(--cm-fast) var(--cm-ease);
+}
+
+.cm-monitor__row--clickable:hover {
+  background: var(--cm-panel-raised);
+}
+
+.cm-monitor__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.cm-monitor__index {
+  color: var(--cm-text-dim);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  min-width: 10px;
+}
+
+.cm-monitor__remote {
+  color: var(--cm-accent);
+  font-size: 10px;
+}
+
+.cm-monitor__label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+.cm-monitor__cost {
+  flex: 0 0 auto;
+  color: var(--cm-text-dim);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.cm-monitor__bar {
+  height: 3px;
+  margin: 6px 0 4px;
+  border-radius: 2px;
+  background: var(--cm-border-idle);
+  overflow: hidden;
+}
+
+.cm-monitor__fill {
+  height: 100%;
+  background: var(--cm-accent);
+  transition: width var(--cm-move) var(--cm-ease);
+}
+
+/* Vicino al limite il colore cambia: è il momento in cui serve saperlo. */
+.cm-monitor__fill--high {
+  background: var(--cm-waiting);
+}
+
+.cm-monitor__detail {
+  color: var(--cm-text-dim);
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.cm-monitor__empty {
+  padding: 16px 12px;
+  color: var(--cm-text-dim);
+  font-size: 12px;
+  line-height: 1.6;
+  text-align: center;
+}
+
+.cm-monitor__foot {
+  flex: 0 0 auto;
+  padding: 7px 10px;
+  border-top: 1px solid var(--cm-border-idle);
+  color: var(--cm-text-dim);
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+/* --- Finestra staccata ---------------------------------------------------- */
+
+.cm-monitorwin {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--cm-panel);
+  border: 1px solid var(--cm-border-idle);
+}
+
+.cm-monitorwin__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--cm-border-idle);
+  flex: 0 0 auto;
+  /* Solo l'intestazione trascina la finestra: il resto deve restare
+     cliccabile, e un'area di trascinamento estesa impedirebbe di selezionare
+     un riquadro. */
+  -webkit-app-region: drag;
+}
+
+.cm-monitorwin__btn {
+  -webkit-app-region: no-drag;
 }
 
 /* --- Aggiornamenti -------------------------------------------------------- */
