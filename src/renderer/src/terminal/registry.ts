@@ -14,6 +14,12 @@ const hosts = new Map<string, TerminalHost>()
 const ptyByPane = new Map<string, string>()
 const paneByPty = new Map<string, string>()
 const starting = new Set<string>()
+/**
+ * Riquadri chiusi mentre il loro PTY stava ancora nascendo. Non si può
+ * ucciderli subito perché il processo non esiste ancora: si annota qui
+ * l'annullamento e ci pensa `ensureSession` appena la creazione ritorna.
+ */
+const cancelled = new Set<string>()
 
 let wired = false
 
@@ -67,10 +73,20 @@ export function isStarted(paneId: string): boolean {
  * giuste: all'inverso Claude partirebbe a 80x24 per poi ridisegnare tutto.
  * Idempotente, così un doppio render non spawna due processi.
  */
+export interface EnsureOptions {
+  /**
+   * Consultata quando il PTY è pronto: il fuoco va dato solo se nel frattempo
+   * il riquadro è ancora quello attivo. Fra la richiesta e la risposta l'utente
+   * può averne aperto o selezionato un altro.
+   */
+  shouldFocus?: () => boolean
+}
+
 export async function ensureSession(
   paneId: string,
   slot: HTMLElement,
-  opts: LaunchOptions
+  opts: LaunchOptions,
+  options: EnsureOptions = {}
 ): Promise<CreateSessionResult | null> {
   const existing = hosts.get(paneId)
   if (existing) {
@@ -87,19 +103,32 @@ export async function ensureSession(
 
   try {
     const result = await window.cm.pty.create(opts)
+
+    // Il riquadro può essere stato chiuso mentre il processo nasceva. Non
+    // registrarlo nelle mappe non basta: il PowerShell e il claude dentro
+    // esistono già e nessuno li ucciderebbe più, perché destroySession è
+    // passata quando non c'era ancora nulla da uccidere.
+    if (cancelled.has(paneId)) {
+      host.dispose()
+      await window.cm.pty.kill(result.id)
+      return null
+    }
+
     hosts.set(paneId, host)
     ptyByPane.set(paneId, result.id)
     paneByPty.set(result.id, paneId)
     host.bind(result.id)
-    // Un riquadro appena creato è sempre quello attivo: senza questo, il
-    // terminale resta senza fuoco e i tasti finiscono su <body>.
-    host.focus()
+    // Un riquadro appena creato è normalmente quello attivo, ma fra la
+    // richiesta e la risposta il fuoco può essere passato altrove: rubarlo
+    // manderebbe i tasti in un terminale che l'utente non sta guardando.
+    if (options.shouldFocus?.() ?? true) host.focus()
     return result
   } catch (err) {
     host.dispose()
     throw err
   } finally {
     starting.delete(paneId)
+    cancelled.delete(paneId)
   }
 }
 
@@ -118,6 +147,13 @@ export function refit(paneId: string): void {
 }
 
 export async function destroySession(paneId: string): Promise<void> {
+  // Creazione ancora in volo: qui non c'è niente da chiudere, si annota
+  // l'annullamento e ci pensa ensureSession quando il PTY sarà nato.
+  if (starting.has(paneId)) {
+    cancelled.add(paneId)
+    return
+  }
+
   const host = hosts.get(paneId)
   const ptyId = ptyByPane.get(paneId)
 
@@ -135,4 +171,5 @@ export function disposeAllHosts(): void {
   ptyByPane.clear()
   paneByPty.clear()
   starting.clear()
+  cancelled.clear()
 }

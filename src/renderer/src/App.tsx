@@ -61,6 +61,8 @@ export default function App(): React.JSX.Element {
   sessionsRef.current = sessions
 
   const bootstrapped = useRef(false)
+  /** Alzato quando il ripristino ha finito: da lì in poi si può salvare. */
+  const restoreDone = useRef(false)
 
   const patchSession = useCallback((paneId: string, patch: Partial<SessionMeta>) => {
     setSessions((prev) => (prev[paneId] ? { ...prev, [paneId]: { ...prev[paneId], ...patch } } : prev))
@@ -119,7 +121,9 @@ export default function App(): React.JSX.Element {
     (paneId: string, slot: HTMLDivElement) => {
       const meta = sessionsRef.current[paneId]
       if (!meta || isStarted(paneId)) return
-      void ensureSession(paneId, slot, meta.launch)
+      void ensureSession(paneId, slot, meta.launch, {
+        shouldFocus: () => layoutRef.current.focused === paneId
+      })
         .then((result) =>
           patchSession(paneId, {
             status: 'running',
@@ -139,38 +143,56 @@ export default function App(): React.JSX.Element {
 
   // --- Azioni da tastiera ---------------------------------------------------
 
-  const focusDir = useCallback((dir: Direction) => {
-    const current = layoutRef.current.focused
-    if (!current) return
+  /**
+   * Riquadri con la geometria corrente, per il calcolo del vicino.
+   *
+   * Il flag `hidden` deve riflettere lo zoom: sotto zoom gli altri riquadri
+   * conservano il proprio rettangolo (per non innescare un resize del PTY),
+   * quindi senza questo il fuoco si sposterebbe su un riquadro invisibile e
+   * un Alt+W successivo chiuderebbe una sessione che l'utente non vede.
+   */
+  const paneRects = useCallback(() => {
+    const layout = layoutRef.current
     const rects = rectsRef.current
-    const panes = allPanes(layoutRef.current).map((id) => ({
+    return allPanes(layout).map((id) => ({
       id,
       ...(rects[id] ?? { x: 0, y: 0, w: 0, h: 0 }),
-      floating: isFloating(layoutRef.current, id),
-      hidden: false,
+      floating: isFloating(layout, id),
+      hidden: layout.zoomed !== null && id !== layout.zoomed,
       z: 0
     }))
-    const target = paneInDirection(panes, current, dir)
-    if (target) setLayout((prev) => setFocus(prev, target))
   }, [])
 
-  const movePane = useCallback((dir: Direction) => {
-    const current = layoutRef.current.focused
-    if (!current) return
-    const rects = rectsRef.current
-    const tiled = collectLeaves(layoutRef.current.root)
-    if (!tiled.includes(current)) return
+  const focusDir = useCallback(
+    (dir: Direction) => {
+      const current = layoutRef.current.focused
+      if (!current) return
+      const target = paneInDirection(paneRects(), current, dir)
+      if (target) setLayout((prev) => setFocus(prev, target))
+    },
+    [paneRects]
+  )
 
-    const panes = tiled.map((id) => ({
-      id,
-      ...(rects[id] ?? { x: 0, y: 0, w: 0, h: 0 }),
-      floating: false,
-      hidden: false,
-      z: 0
-    }))
-    const target = paneInDirection(panes, current, dir)
-    if (target) setLayout((prev) => swapPanes(prev, current, target))
-  }, [])
+  const movePane = useCallback(
+    (dir: Direction) => {
+      const layout = layoutRef.current
+      const current = layout.focused
+      if (!current) return
+      const tiled = collectLeaves(layout.root)
+      if (!tiled.includes(current)) return
+      // Scambiare di posto due riquadri mentre uno zoom nasconde tutto non
+      // produce nulla di visibile: si rimanderebbe l'effetto all'uscita.
+      if (layout.zoomed !== null) return
+
+      const target = paneInDirection(
+        paneRects().filter((p) => tiled.includes(p.id)),
+        current,
+        dir
+      )
+      if (target) setLayout((prev) => swapPanes(prev, current, target))
+    },
+    [paneRects]
+  )
 
   const runAction = useCallback(
     (action: Action) => {
@@ -250,7 +272,12 @@ export default function App(): React.JSX.Element {
           const match = /^focus-([1-9])$/.exec(action)
           if (match) {
             const target = allPanes(layoutRef.current)[Number(match[1]) - 1]
-            if (target) setLayout((prev) => setFocus(prev, target))
+            if (!target) return
+            setLayout((prev) =>
+              // Saltare a un riquadro nascosto dallo zoom non mostrerebbe
+              // nulla: si esce dallo zoom, che è ciò che l'utente intende.
+              setFocus(prev.zoomed !== null && prev.zoomed !== target ? { ...prev, zoomed: null } : prev, target)
+            )
           }
         }
       }
@@ -294,7 +321,11 @@ export default function App(): React.JSX.Element {
           }
 
           const live = byId.get(meta.claudeSessionId)
-          const status = live ? paneStatusFromLive(live.status) : meta.status
+          // Sparita dal registro significa che quel processo claude è finito
+          // (tipicamente con /exit, lasciando viva la shell). Conservare
+          // l'ultimo stato lascerebbe il riquadro "al lavoro" per sempre:
+          // la shell c'è ancora, quindi lo stato giusto è "pronta".
+          const status = live ? paneStatusFromLive(live.status) : 'running'
           const waitingFor = live?.waitingFor ?? null
 
           if (status !== meta.status || waitingFor !== (meta.waitingFor ?? null)) {
@@ -350,25 +381,37 @@ export default function App(): React.JSX.Element {
     bootstrapped.current = true
 
     void (async () => {
-      const cfg = await window.cm.config.get()
-      setConfig(cfg)
+      let cfg: AppConfig | null = null
+      try {
+        cfg = await window.cm.config.get()
+        setConfig(cfg)
 
-      const stored = await window.cm.layout.load()
-      const restored = stored ? fromPersisted(stored, cfg) : null
+        const stored = await window.cm.layout.load()
+        const restored = stored ? fromPersisted(stored, cfg) : null
 
-      if (restored) {
-        setSessions(restored.sessions)
-        setLayout(restored.layout)
-        return
+        if (restored) {
+          setSessions(restored.sessions)
+          setLayout(restored.layout)
+          return
+        }
+      } catch (err) {
+        // Un layout.json corrotto o un canale che fallisce non devono lasciare
+        // l'app su uno stage vuoto: si ricade sulla sessione predefinita.
+        console.error('ripristino fallito, avvio sulla cartella predefinita', err)
+      } finally {
+        restoreDone.current = true
       }
+
+      const fallback = cfg ?? (await window.cm.config.get().catch(() => null))
+      if (!fallback) return
 
       newSession(
         {
-          cwd: cfg.defaultCwd,
-          model: cfg.launchDefaults.model,
-          effort: cfg.launchDefaults.effort,
-          permissionMode: cfg.launchDefaults.permissionMode,
-          name: basename(cfg.defaultCwd)
+          cwd: fallback.defaultCwd,
+          model: fallback.launchDefaults.model,
+          effort: fallback.launchDefaults.effort,
+          permissionMode: fallback.launchDefaults.permissionMode,
+          name: basename(fallback.defaultCwd)
         },
         'h'
       )
@@ -378,10 +421,11 @@ export default function App(): React.JSX.Element {
   // Salvataggio del layout ad ogni cambiamento. Il main accorpa le scritture,
   // quindi trascinare un canale non produce decine di scritture su disco.
   useEffect(() => {
-    if (!bootstrapped.current) return
-    // Non si sovrascrive il file salvato finché il ripristino non ha prodotto
-    // almeno un riquadro: un salvataggio a metà strada lo cancellerebbe.
-    if (allPanes(layout).length === 0) return
+    // La guardia vale solo finché il ripristino non è concluso: un salvataggio
+    // durante quella finestra cancellerebbe il file che si sta leggendo. Dopo,
+    // anche "nessun riquadro" è uno stato legittimo da persistere, altrimenti
+    // chiudere tutti i riquadri e uscire riaprirebbe quelli di prima.
+    if (!restoreDone.current) return
     window.cm.layout.save(toPersisted(layout, sessions))
   }, [layout, sessions])
 

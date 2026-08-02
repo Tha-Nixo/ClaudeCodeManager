@@ -15,7 +15,12 @@ import { join } from 'node:path'
  * `project` di history.jsonl, che contiene gia' il percorso non codificato.
  */
 export function encodeProjectDir(fullPath: string): string {
-  return fullPath.replace(/[^a-zA-Z0-9]/g, '-')
+  // I separatori vanno normalizzati PRIMA di codificare: 'C:\foo\' e 'C:\foo'
+  // sono la stessa cartella, ma darebbero 'C--foo-' e 'C--foo', e solo il
+  // secondo corrisponde a quello che scrive Claude Code. La radice di
+  // un'unità ('C:\') fa eccezione, perché lì il separatore è significativo.
+  const normalized = fullPath.replace(/[\\/]+/g, '\\').replace(/(?<!:)\\+$/, '')
+  return normalized.replace(/[^a-zA-Z0-9]/g, '-')
 }
 
 export function claudeHome(): string {

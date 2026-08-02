@@ -74,20 +74,27 @@ export function registerIpc(
   // --- Layout ---------------------------------------------------------------
 
   ipcMain.handle('layout:load', () => {
-    const stored = loadLayout()
-    if (!stored) return null
-    // Un id salvato non basta: il transcript deve esistere davvero, altrimenti
-    // il ripristino avvierebbe claude --resume su una sessione che Claude Code
-    // non conosce e il riquadro nascerebbe con un errore invece che pronto.
-    return {
-      ...stored,
-      panes: stored.panes.map((pane) => ({
-        ...pane,
-        claudeSessionId:
-          pane.claudeSessionId && isResumable(pane.cwd, pane.claudeSessionId)
-            ? pane.claudeSessionId
-            : null
-      }))
+    try {
+      const stored = loadLayout()
+      if (!stored) return null
+      // Un id salvato non basta: il transcript deve esistere davvero, altrimenti
+      // il ripristino avvierebbe claude --resume su una sessione che Claude Code
+      // non conosce e il riquadro nascerebbe con un errore invece che pronto.
+      return {
+        ...stored,
+        panes: stored.panes.map((pane) => ({
+          ...pane,
+          claudeSessionId:
+            typeof pane.claudeSessionId === 'string' &&
+            isResumable(pane.cwd, pane.claudeSessionId)
+              ? pane.claudeSessionId
+              : null
+        }))
+      }
+    } catch (err) {
+      // Meglio partire sulla cartella predefinita che non partire affatto.
+      console.error('lettura del layout fallita', err)
+      return null
     }
   })
   ipcMain.on('layout:save', (_e, layout: PersistedLayout) => saveLayout(layout))

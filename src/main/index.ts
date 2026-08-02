@@ -39,12 +39,36 @@ function createWindow(): void {
     mainWindow = null
   })
 
-  // I link esterni non devono mai navigare dentro la finestra dell'app.
+  // I link esterni non devono mai navigare dentro la finestra dell'app, e
+  // vanno consegnati al sistema solo se sono http/https: shell.openExternal
+  // apre anche file:, ms-settings: e qualunque altro schema registrato, e
+  // l'URL arriva dal renderer, che non è una fonte fidata.
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    void shell.openExternal(url)
+    try {
+      const parsed = new URL(url)
+      if (parsed.protocol === 'https:' || parsed.protocol === 'http:') {
+        void shell.openExternal(url)
+      }
+    } catch {
+      // URL malformato: si ignora.
+    }
     return { action: 'deny' }
   })
   mainWindow.webContents.on('will-navigate', (event) => event.preventDefault())
+
+  // Un renderer che riparte (ricarica in sviluppo, crash del processo) perde
+  // ogni riferimento ai PTY: resterebbero processi vivi che nessuna interfaccia
+  // può più raggiungere né chiudere.
+  // Si uccide all'INIZIO del nuovo caricamento, non alla fine: così i vecchi
+  // processi sono già spariti quando il nuovo renderer inizia a ricrearne.
+  let loadedOnce = false
+  mainWindow.webContents.on('did-start-loading', () => {
+    if (loadedOnce) ptys.killAll()
+  })
+  mainWindow.webContents.on('did-stop-loading', () => {
+    loadedOnce = true
+  })
+  mainWindow.webContents.on('render-process-gone', () => ptys.killAll())
 
   if (isDev && process.env.ELECTRON_RENDERER_URL) {
     void mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL)

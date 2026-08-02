@@ -96,7 +96,10 @@ export function Desktop({
   /** Spostamento di un riquadro flottante afferrandone l'intestazione. */
   const onFloatDragStart = useCallback(
     (e: React.PointerEvent, paneId: string) => {
-      const pane = panes.find((p) => p.id === paneId)
+      // L'origine va letta da layout.floating, non dai rettangoli calcolati:
+      // sotto zoom quelli sono stati sovrascritti con le misure dello stage, e
+      // partire da lì distruggerebbe la geometria memorizzata del riquadro.
+      const pane = layout.floating.find((f) => f.id === paneId)
       if (!pane) return
       e.preventDefault()
       const startX = e.clientX
@@ -120,12 +123,12 @@ export function Desktop({
       window.addEventListener('pointermove', move)
       window.addEventListener('pointerup', up)
     },
-    [panes, stage, onMoveFloating]
+    [layout.floating, stage, onMoveFloating]
   )
 
   const onFloatResizeStart = useCallback(
     (e: React.PointerEvent, paneId: string) => {
-      const pane = panes.find((p) => p.id === paneId)
+      const pane = layout.floating.find((f) => f.id === paneId)
       if (!pane) return
       e.preventDefault()
       e.stopPropagation()
@@ -150,7 +153,7 @@ export function Desktop({
       window.addEventListener('pointermove', move)
       window.addEventListener('pointerup', up)
     },
-    [panes, onResizeFloating]
+    [layout.floating, onResizeFloating]
   )
 
   const ordered = [...panes].sort((a, b) => a.z - b.z)

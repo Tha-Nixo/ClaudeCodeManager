@@ -18,6 +18,8 @@ import { claudeHome } from './paths'
  */
 
 const DEBOUNCE_MS = 120
+/** Cadenza con cui si riprova a installare il watcher quando non è possibile. */
+const RETRY_MS = 5_000
 
 export interface LiveEvents {
   change: [sessions: LiveSession[]]
@@ -26,6 +28,8 @@ export interface LiveEvents {
 export class LiveSessions extends EventEmitter<LiveEvents> {
   private watcher: FSWatcher | null = null
   private timer: NodeJS.Timeout | null = null
+  private retry: NodeJS.Timeout | null = null
+  private stopped = false
   private current: LiveSession[] = []
 
   get sessions(): LiveSession[] {
@@ -33,22 +37,62 @@ export class LiveSessions extends EventEmitter<LiveEvents> {
   }
 
   start(): void {
-    const dir = sessionsDir()
     this.refresh()
-
-    if (!existsSync(dir)) return
-    try {
-      this.watcher = watch(dir, () => this.schedule())
-    } catch {
-      // Senza watcher restano i dati letti all'avvio: nessun crash.
-    }
+    this.arm()
   }
 
   stop(): void {
+    this.stopped = true
     if (this.timer) clearTimeout(this.timer)
     this.timer = null
+    if (this.retry) clearInterval(this.retry)
+    this.retry = null
     this.watcher?.close()
     this.watcher = null
+  }
+
+  /**
+   * Installa il watcher, e se non è possibile riprova.
+   *
+   * La cartella non esiste finché Claude Code non avvia la prima sessione: al
+   * primo avvio dell'app, quindi, spesso non c'è. Senza il ritentativo lo
+   * stato dei riquadri resterebbe congelato per tutta la vita dell'app.
+   */
+  private arm(): void {
+    if (this.stopped || this.watcher) return
+
+    const dir = sessionsDir()
+    if (!existsSync(dir)) {
+      this.scheduleRetry()
+      return
+    }
+
+    try {
+      const watcher = watch(dir, () => this.schedule())
+      // Un evento 'error' senza ascoltatore su un FSWatcher viene rilanciato e
+      // abbatte il main, portandosi dietro tutti i PTY. Qui invece si chiude
+      // il watcher e si riprova.
+      watcher.on('error', () => {
+        watcher.close()
+        if (this.watcher === watcher) this.watcher = null
+        this.scheduleRetry()
+      })
+      this.watcher = watcher
+      if (this.retry) {
+        clearInterval(this.retry)
+        this.retry = null
+      }
+    } catch {
+      this.scheduleRetry()
+    }
+  }
+
+  private scheduleRetry(): void {
+    if (this.stopped || this.retry) return
+    this.retry = setInterval(() => {
+      this.refresh()
+      this.arm()
+    }, RETRY_MS)
   }
 
   /** Più scritture ravvicinate producono un solo aggiornamento. */

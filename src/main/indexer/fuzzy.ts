@@ -30,7 +30,12 @@ export function fuzzyMatch(pattern: string, text: string): FuzzyResult | null {
   if (pattern.length > text.length) return null
 
   const lowerPattern = pattern.toLowerCase()
-  const lowerText = text.toLowerCase()
+  // toLowerCase() può ALLUNGARE la stringa (es. 'İ' diventa due unità), e in
+  // quel caso gli indici trovati su lowerText non sarebbero validi su text.
+  // Quando le lunghezze divergono si rinuncia alla ricerca senza distinzione
+  // fra maiuscole e minuscole invece di leggere fuori dai limiti.
+  const lowered = text.toLowerCase()
+  const lowerText = lowered.length === text.length ? lowered : text
 
   // Inizio del nome finale: i riscontri da qui in poi valgono di piu'.
   const lastSep = Math.max(text.lastIndexOf('\\'), text.lastIndexOf('/'))
@@ -50,9 +55,10 @@ export function fuzzyMatch(pattern: string, text: string): FuzzyResult | null {
 
     score += SCORE_MATCH
 
-    const prevChar = found > 0 ? text[found - 1] : '\\'
+    const prevChar = (found > 0 ? text[found - 1] : '\\') ?? '\\'
+    const here = text[found] ?? ''
     if (BOUNDARY.test(prevChar)) score += BONUS_BOUNDARY
-    else if (prevChar === prevChar.toLowerCase() && text[found] !== text[found].toLowerCase()) {
+    else if (prevChar === prevChar.toLowerCase() && here !== here.toLowerCase()) {
       score += BONUS_CAMEL
     }
 

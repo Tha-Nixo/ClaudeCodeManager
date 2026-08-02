@@ -30,11 +30,30 @@ export function saveLayout(layout: PersistedLayout): void {
   }, SAVE_DEBOUNCE_MS)
 }
 
+/**
+ * Il file su disco è stato scritto dal renderer, può essere di una versione
+ * precedente o modificato a mano: ogni riquadro viene validato prima di
+ * restituirlo. Un `cwd` mancante farebbe fallire l'intero avvio più a valle,
+ * lasciando l'app su uno stage vuoto.
+ */
 export function loadLayout(): PersistedLayout | null {
   const stored = readJson<PersistedLayout>(file())
   if (!stored || stored.version !== CURRENT_VERSION) return null
-  if (!Array.isArray(stored.panes) || stored.panes.length === 0) return null
-  return stored
+  if (!Array.isArray(stored.panes)) return null
+
+  const panes = stored.panes.filter(
+    (pane): pane is PersistedLayout['panes'][number] =>
+      Boolean(pane) &&
+      typeof pane.paneId === 'string' &&
+      pane.paneId.length > 0 &&
+      typeof pane.cwd === 'string' &&
+      pane.cwd.length > 0 &&
+      Boolean(pane.launch) &&
+      typeof pane.launch === 'object'
+  )
+
+  if (panes.length === 0) return null
+  return { ...stored, panes }
 }
 
 /** Scrittura immediata: da usare alla chiusura, quando non c'è più tempo. */

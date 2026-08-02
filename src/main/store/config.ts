@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { app } from 'electron'
@@ -25,11 +25,26 @@ export function defaultRoots(): string[] {
  * Un crash a metà scrittura lascia il file precedente intatto invece di
  * un JSON troncato che all'avvio successivo farebbe perdere la configurazione.
  */
-export function writeJsonAtomic(target: string, value: unknown): void {
-  mkdirSync(dirname(target), { recursive: true })
+export function writeJsonAtomic(target: string, value: unknown): boolean {
   const tmp = `${target}.tmp`
-  writeFileSync(tmp, JSON.stringify(value, null, 2), 'utf8')
-  renameSync(tmp, target)
+  try {
+    mkdirSync(dirname(target), { recursive: true })
+    writeFileSync(tmp, JSON.stringify(value, null, 2), 'utf8')
+    renameSync(tmp, target)
+    return true
+  } catch (err) {
+    // Disco pieno, permessi, file in uso: perdere una scrittura è accettabile,
+    // far morire il processo principale con dentro tutti i PTY no. Alcune di
+    // queste chiamate avvengono dentro un timer, dove un'eccezione non
+    // catturata abbatterebbe l'app.
+    console.error(`scrittura di ${target} fallita`, err)
+    try {
+      rmSync(tmp, { force: true })
+    } catch {
+      // Nulla da fare: il file temporaneo resta e verrà sovrascritto.
+    }
+    return false
+  }
 }
 
 export function readJson<T>(target: string): T | null {

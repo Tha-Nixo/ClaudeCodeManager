@@ -25,6 +25,13 @@ export interface GutterLayout extends Rect {
 /** Larghezza del canale fra due riquadri; l'area sensibile è più grande. */
 export const GAP = 8
 const GUTTER_HIT = 5
+/** Striscia di riquadro flottante che deve restare sempre dentro lo stage. */
+const MIN_VISIBLE = 80
+const HEADER_VISIBLE = 30
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value))
+}
 
 export interface ComputedLayout {
   panes: PaneLayout[]
@@ -38,7 +45,21 @@ export function computeLayout(layout: Layout, stage: Rect): ComputedLayout {
   if (layout.root) walk(layout.root, stage, '', panes, gutters)
 
   for (const f of layout.floating) {
-    panes.push({ id: f.id, x: f.x, y: f.y, w: f.w, h: f.h, floating: true, hidden: false, z: 100 + f.z })
+    // Le coordinate salvate possono venire da uno schermo più grande: senza
+    // riportarle dentro lo stage, dopo un ripristino il riquadro resterebbe
+    // fuori campo e irraggiungibile. Gli stessi limiti usati nel trascinamento.
+    const w = Math.min(f.w, Math.max(MIN_VISIBLE, stage.w))
+    const h = Math.min(f.h, Math.max(MIN_VISIBLE, stage.h))
+    panes.push({
+      id: f.id,
+      x: clamp(f.x, stage.x - w + MIN_VISIBLE, stage.x + Math.max(0, stage.w - MIN_VISIBLE)),
+      y: clamp(f.y, stage.y, stage.y + Math.max(0, stage.h - HEADER_VISIBLE)),
+      w,
+      h,
+      floating: true,
+      hidden: false,
+      z: 100 + f.z
+    })
   }
 
   if (layout.zoomed) {
@@ -78,10 +99,12 @@ function walk(
     const bw = usable - aw
     walk(node.a, { ...rect, w: aw }, `${path}a`, panes, gutters)
     walk(node.b, { ...rect, x: rect.x + aw + GAP, w: bw }, `${path}b`, panes, gutters)
+    // Il canale reale va da rect.x+aw a rect.x+aw+GAP: l'area sensibile va
+    // centrata su quello, altrimenti si affera un divisore che sta altrove.
     gutters.push({
       path,
       dir: 'h',
-      x: rect.x + aw - GUTTER_HIT + GAP / 2,
+      x: rect.x + aw - GUTTER_HIT,
       y: rect.y,
       w: GAP + GUTTER_HIT * 2,
       h: rect.h
@@ -96,7 +119,7 @@ function walk(
       path,
       dir: 'v',
       x: rect.x,
-      y: rect.y + ah - GUTTER_HIT + GAP / 2,
+      y: rect.y + ah - GUTTER_HIT,
       w: rect.w,
       h: GAP + GUTTER_HIT * 2
     })
@@ -148,12 +171,15 @@ export function ratioFromPointer(
   dir: SplitDir,
   pointer: { x: number; y: number }
 ): number {
+  // Il puntatore afferra il CENTRO del canale, che sta a GAP/2 oltre il bordo
+  // del primo figlio. Senza sottrarlo il divisore salterebbe di 4px appena lo
+  // si tocca, prima ancora di muovere il mouse.
   if (dir === 'h') {
     const usable = Math.max(1, splitRect.w - GAP)
-    return (pointer.x - splitRect.x) / usable
+    return (pointer.x - splitRect.x - GAP / 2) / usable
   }
   const usable = Math.max(1, splitRect.h - GAP)
-  return (pointer.y - splitRect.y) / usable
+  return (pointer.y - splitRect.y - GAP / 2) / usable
 }
 
 /**

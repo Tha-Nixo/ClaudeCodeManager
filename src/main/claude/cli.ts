@@ -11,14 +11,38 @@ import type { LaunchOptions } from '@shared/types'
  * - `--fork-session` ha senso solo insieme a `--resume`/`--continue`.
  * - il prompt iniziale è un argomento POSIZIONALE e deve stare in fondo.
  */
+const MODELS = new Set(['fable', 'opus', 'sonnet', 'haiku'])
+const EFFORTS = new Set(['low', 'medium', 'high', 'xhigh', 'max'])
+const PERMISSION_MODES = new Set([
+  'acceptEdits',
+  'auto',
+  'bypassPermissions',
+  'manual',
+  'dontAsk',
+  'plan'
+])
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/**
+ * Le opzioni arrivano dal renderer, che non è una fonte fidata: ogni valore
+ * che finisce nella riga di comando di claude viene confrontato con
+ * l'elenco dei valori ammessi. Uno sconosciuto viene scartato, non passato.
+ */
+function pick(value: string | undefined, allowed: Set<string>): string | null {
+  if (!value || value === 'default') return null
+  return allowed.has(value) ? value : null
+}
+
 export function buildClaudeArgs(opts: LaunchOptions, newSessionId: string): string[] {
   const args: string[] = []
+
+  const resume = opts.resumeSessionId && UUID.test(opts.resumeSessionId) ? opts.resumeSessionId : null
 
   if (opts.continueLast) {
     args.push('--continue')
     if (opts.forkSession) args.push('--fork-session')
-  } else if (opts.resumeSessionId) {
-    args.push('--resume', opts.resumeSessionId)
+  } else if (resume) {
+    args.push('--resume', resume)
     if (opts.forkSession) args.push('--fork-session')
   } else {
     // Pre-assegniamo l'id così sappiamo dove finirà il transcript e con quale
@@ -26,15 +50,28 @@ export function buildClaudeArgs(opts: LaunchOptions, newSessionId: string): stri
     args.push('--session-id', newSessionId)
   }
 
-  if (opts.model && opts.model !== 'default') args.push('--model', opts.model)
-  if (opts.effort && opts.effort !== 'default') args.push('--effort', opts.effort)
-  if (opts.permissionMode && opts.permissionMode !== 'default') {
-    args.push('--permission-mode', opts.permissionMode)
+  const model = pick(opts.model, MODELS)
+  if (model) args.push('--model', model)
+
+  const effort = pick(opts.effort, EFFORTS)
+  if (effort) args.push('--effort', effort)
+
+  const permissionMode = pick(opts.permissionMode, PERMISSION_MODES)
+  if (permissionMode) args.push('--permission-mode', permissionMode)
+
+  // Il nome finisce nel prompt box e nel titolo: si tiene su una sola riga e
+  // si scartano i caratteri di controllo.
+  if (opts.name) {
+    const name = opts.name.replace(/[\p{Cc}\p{Cf}]/gu, '').trim().slice(0, 64)
+    if (name) args.push('--name', name)
   }
-  if (opts.name) args.push('--name', opts.name)
 
   const prompt = opts.initialPrompt?.trim()
-  if (prompt) args.push(prompt)
+  if (prompt) {
+    // '--' chiude le opzioni: senza, un prompt che inizia con un trattino
+    // verrebbe letto come flag della CLI invece che come testo.
+    args.push('--', prompt)
+  }
 
   return args
 }
@@ -51,7 +88,10 @@ export function expectedClaudeSessionId(
 ): string | null {
   if (opts.forkSession) return null
   if (opts.continueLast) return null
-  if (opts.resumeSessionId) return opts.resumeSessionId
+  // Stessa validazione di buildClaudeArgs: un id non valido viene scartato lì,
+  // quindi la sessione userà comunque quello nuovo. Ritornare l'id rifiutato
+  // scollegherebbe il riquadro dal registro delle sessioni vive.
+  if (opts.resumeSessionId && UUID.test(opts.resumeSessionId)) return opts.resumeSessionId
   return newSessionId
 }
 
