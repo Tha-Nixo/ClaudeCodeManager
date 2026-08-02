@@ -32,6 +32,10 @@ proprio terminale e il proprio processo `claude`.
   Alto contrasto) piu' i tuoi: basta lasciare un file JSON in
   `%APPDATA%\claudemanager\themes\`. Ogni tema definisce sia l'interfaccia sia
   i 16 colori ANSI del terminale, e si applica subito ai riquadri gia' aperti.
+- **Sessioni remote via SSH.** Un riquadro puo' aprire Claude Code *sul tuo
+  server*: si salvano le connessioni, si sfogliano le cartelle remote con gli
+  stessi badge di quelle locali, e si riprendono le conversazioni gia' presenti
+  la'. La cartella remota resta ricordata per la volta dopo.
 
 ## Scorciatoie
 
@@ -57,13 +61,43 @@ quindi `@`, `#`, `[`, `]`, `{`, `}` continuano a funzionare normalmente.
 | `Ctrl+Shift+Q` | Esce |
 
 Dentro il selettore: `↑↓` scorre, `Invio` apre, `Ctrl+Invio` entra nella
-cartella, `Tab` cambia modo, `Ctrl+D` aggiunge ai preferiti, `Esc` annulla.
+cartella, `Tab` gira fra i tre modi (Ricerca, Esplora, Remoto), `Ctrl+D`
+aggiunge ai preferiti, `Esc` annulla.
+
+## Sessioni remote
+
+Nel selettore, il modo **Remoto** elenca i server salvati. Per aggiungerne uno
+servono indirizzo, utente e, se non e' quella predefinita, la porta o la chiave
+privata. Il pulsante **Prova la connessione** dice subito se si entra, quale
+sistema c'e' dall'altra parte e che versione di Claude Code e' installata.
+
+Scelto il server si sfogliano le sue cartelle, con gli stessi badge del locale
+(repository git, presenza di `CLAUDE.md`), e sotto compaiono le conversazioni
+gia' presenti **su quel server** per la cartella scelta: si riprendono come
+quelle locali.
+
+Il riquadro esegue `ssh -t` e avvia `claude` nella cartella remota. Alla
+chiusura della sessione si torna alla shell locale, quindi si puo' riconnettere
+senza aprire un altro riquadro.
+
+**Autenticazione:** ClaudeManager non chiede né memorizza password. Vale quello
+che ssh sa gia' fare da solo: chiavi in `~/.ssh` o un agent. Se il server non e'
+ancora fra quelli conosciuti, aprilo una volta a mano con `ssh` per accettarne
+la chiave.
+
+**Cosa non funziona da remoto:** il pallino di stato e le statistiche dei token
+leggono file locali, mentre una sessione remota li scrive sul server. Per questo
+un riquadro remoto mostra `remota` invece di `pronta`/`al lavoro`: dire di
+sapere cosa sta facendo Claude sarebbe inventare. La ripresa delle conversazioni
+invece funziona, perche' interroga il server quando serve.
 
 ## Requisiti
 
 - Windows 10/11 x64
 - [Claude Code](https://claude.com/claude-code) installato e raggiungibile
   (`claude` nel PATH, oppure `~/.local/bin/claude.exe`)
+- Per le sessioni remote: il client OpenSSH di Windows (Impostazioni → App →
+  Funzionalita' facoltative) e Claude Code installato sul server
 
 ## Sviluppo
 
@@ -101,6 +135,7 @@ Comandi accettati: `{"type":"key","key":"b","modifiers":["alt"]}`,
 src/
   main/          processo principale: possiede i PTY e ogni accesso al disco
     pty/         node-pty, script di bootstrap PowerShell, sanificazione env
+    ssh/         costruzione del comando ssh, interrogazioni del server
     claude/      percorsi, argomenti CLI, transcript, registro sessioni vive
     indexer/     sorgenti dell'indice, punteggio fuzzy, scansione del disco
     usage/       contabilità dei token e tariffe
@@ -145,6 +180,27 @@ Alcune scelte che non si deducono dal codice:
   propria copia della tavolozza e non legge il CSS, quindi va aggiornata
   esplicitamente su ogni istanza viva; quelle nuove nascono gia' col tema
   corrente.
+- **Il comando remoto usa solo apici singoli, e c'e' un controllo che lo
+  impone.** Fra noi e la shell del server ci sono due livelli di quoting, e
+  PowerShell 5.1 non sa consegnare un doppio apice a un eseguibile nativo: lo
+  passa senza protezione e la riga di comando si spezza. Finché il comando
+  remoto evita i doppi apici il problema non esiste, ma e' un invariante che
+  una modifica distratta romperebbe in silenzio, con il sintomo (un errore di
+  sintassi della shell remota) lontanissimo dalla causa. Per questo
+  `remoteCommand` solleva un'eccezione invece di produrre un comando fragile.
+- **Un riquadro remoto passa comunque per PowerShell**, che poi esegue `ssh`.
+  Avviare `ssh` direttamente sarebbe piu' corto, ma alla caduta della
+  connessione il riquadro si svuoterebbe; cosi' invece resta una shell locale
+  nella stessa cartella, con scritto perche' la sessione e' finita.
+- **Le interrogazioni del server sono script POSIX, senza `jq` né `python`.**
+  L'unica cosa che si puo' dare per scontata su una macchina altrui e' una
+  shell. Le etichette delle conversazioni remote si ricavano con `grep` sulla
+  coda del transcript: e' approssimativo sulle sequenze di escape, ma non
+  richiede di installare niente.
+- **Ogni chiamata al server usa `BatchMode=yes`.** Senza, ssh si fermerebbe a
+  chiedere una password che nessuno vedrebbe, e l'interfaccia resterebbe
+  appesa; con, fallisce subito e l'errore viene tradotto in una frase che dice
+  cosa fare.
 
 ## Limiti noti
 
@@ -155,6 +211,11 @@ Alcune scelte che non si deducono dal codice:
   non sono spesa reale, ma quanto sarebbe costato lo stesso lavoro via API.
 - Gli eseguibili non sono firmati: al primo avvio Windows mostra l'avviso
   SmartScreen.
+- Le sessioni remote non hanno stato in tempo reale né conteggio dei token: il
+  registro e i transcript da cui si ricavano stanno sul server.
+- Alla prima sessione su una cartella remota, Claude Code chiede se ci si fida
+  di quella cartella, esattamente come in locale. Va risposto dentro il
+  riquadro.
 
 ## Licenza
 

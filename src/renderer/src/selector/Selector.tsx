@@ -6,11 +6,23 @@ import type {
   LaunchOptions,
   ModelAlias,
   PermissionMode,
-  TranscriptSession
+  RemoteEntry,
+  SshConnection
 } from '@shared/types'
 import { basename, shortenPath } from '../util/path'
+import { RemotePanel } from './RemotePanel'
 
-type Mode = 'search' | 'browse'
+type Mode = 'search' | 'browse' | 'remote'
+
+/**
+ * Forma comune fra sessioni locali e remote: al selettore serve solo di che
+ * cosa si tratta e quando è stata toccata l'ultima volta.
+ */
+interface PastSession {
+  sessionId: string
+  label: string
+  modifiedAt: number
+}
 
 interface SelectorProps {
   defaults: {
@@ -70,7 +82,13 @@ export function Selector({
   const [permissionMode, setPermissionMode] = useState<PermissionMode>(defaults.permissionMode)
   const [prompt, setPrompt] = useState('')
 
-  const [pastSessions, setPastSessions] = useState<TranscriptSession[]>([])
+  const [remoteConn, setRemoteConn] = useState<SshConnection | null>(null)
+  const [remotePath, setRemotePath] = useState('')
+  const [remoteCursor, setRemoteCursor] = useState(0)
+  /** null quando il pannello remoto non sta esplorando cartelle. */
+  const [remoteEntries, setRemoteEntries] = useState<RemoteEntry[] | null>(null)
+
+  const [pastSessions, setPastSessions] = useState<PastSession[]>([])
   /** null = nuova sessione; altrimenti l'id da riprendere. */
   const [resumeId, setResumeId] = useState<string | null>(null)
   const [fork, setFork] = useState(false)
@@ -114,42 +132,73 @@ export function Selector({
   const selected = results[cursor] ?? null
   const browseEntries = dir?.entries ?? []
 
-  const currentPath = mode === 'search' ? (selected?.path ?? '') : browsePath
+  const currentPath =
+    mode === 'search' ? (selected?.path ?? '') : mode === 'browse' ? browsePath : remotePath
+
+  /** In modo remoto serve una connessione scelta, non basta un percorso. */
+  const canLaunch = mode === 'remote' ? Boolean(remoteConn && remotePath) : Boolean(currentPath)
 
   // Le sessioni pregresse della cartella evidenziata. Cambiando riga la
   // selezione di ripresa va azzerata: riprendere l'id di un'altra cartella
   // farebbe partire Claude nel posto sbagliato.
+  //
+  // Da remoto i transcript stanno sul server, quindi la lista costa una
+  // chiamata ssh: è la stessa informazione, presa da un'altra parte.
   useEffect(() => {
-    if (!currentPath) {
+    if (!currentPath || (mode === 'remote' && !remoteConn)) {
       setPastSessions([])
       setResumeId(null)
       return
     }
     let cancelled = false
     setResumeId(null)
-    void window.cm.claude.sessionsFor(currentPath).then((list) => {
+
+    const query =
+      mode === 'remote' && remoteConn
+        ? window.cm.ssh
+            .sessionsFor(remoteConn, currentPath)
+            .then((res) => (res.ok ? res.sessions : []))
+        : window.cm.claude.sessionsFor(currentPath)
+
+    void query.then((list) => {
       if (!cancelled) setPastSessions(list)
     })
     return () => {
       cancelled = true
     }
-  }, [currentPath])
+  }, [currentPath, mode, remoteConn])
 
   const launch = useCallback(
     (path: string) => {
       if (!path) return
+      if (mode === 'remote' && !remoteConn) return
+
       onOpen({
-        cwd: path,
+        // Da remoto la cartella locale è solo il punto da cui parte ssh; quella
+        // di lavoro è remote.path.
+        cwd: mode === 'remote' ? startPath : path,
         model,
         effort,
         permissionMode,
         initialPrompt: prompt.trim() || undefined,
         name: basename(path),
         resumeSessionId: resumeId ?? undefined,
-        forkSession: resumeId ? fork : undefined
+        forkSession: resumeId ? fork : undefined,
+        remote:
+          mode === 'remote' && remoteConn
+            ? {
+                connectionId: remoteConn.id,
+                name: remoteConn.name,
+                host: remoteConn.host,
+                user: remoteConn.user,
+                port: remoteConn.port,
+                identityFile: remoteConn.identityFile,
+                path
+              }
+            : undefined
       })
     },
-    [model, effort, permissionMode, prompt, resumeId, fork, onOpen]
+    [mode, remoteConn, startPath, model, effort, permissionMode, prompt, resumeId, fork, onOpen]
   )
 
   const toggleFav = useCallback((path: string) => {
@@ -167,12 +216,38 @@ export function Selector({
       }
       if (e.key === 'Tab') {
         e.preventDefault()
-        setMode((m) => (m === 'search' ? 'browse' : 'search'))
+        const order: Mode[] = ['search', 'browse', 'remote']
+        setMode((m) => order[(order.indexOf(m) + 1) % order.length])
         return
       }
       if (e.ctrlKey && e.key.toLowerCase() === 'd') {
         e.preventDefault()
-        if (currentPath) toggleFav(currentPath)
+        // I preferiti sono un indice di cartelle locali: una cartella remota
+        // non ha un percorso che significhi qualcosa fuori dalla sua connessione.
+        if (currentPath && mode !== 'remote') toggleFav(currentPath)
+        return
+      }
+
+      if (mode === 'remote') {
+        // Senza cartelle a schermo si sta scegliendo un server o compilando il
+        // modulo: le frecce e l'Invio devono restare ai campi.
+        if (!remoteEntries) return
+        if (e.key === 'ArrowDown') {
+          e.preventDefault()
+          setRemoteCursor((c) => Math.min(c + 1, remoteEntries.length - 1))
+        } else if (e.key === 'ArrowUp') {
+          e.preventDefault()
+          setRemoteCursor((c) => Math.max(c - 1, 0))
+        } else if (e.key === 'ArrowRight') {
+          e.preventDefault()
+          const entry = remoteEntries[remoteCursor]
+          if (entry) setRemotePath(entry.path)
+        } else if (e.key === 'Enter') {
+          e.preventDefault()
+          const entry = remoteEntries[remoteCursor]
+          if (e.ctrlKey && entry) setRemotePath(entry.path)
+          else launch(remotePath)
+        }
         return
       }
 
@@ -226,6 +301,9 @@ export function Selector({
       dir,
       browsePath,
       currentPath,
+      remoteEntries,
+      remoteCursor,
+      remotePath,
       launch,
       onCancel,
       toggleFav
@@ -258,12 +336,19 @@ export function Selector({
             placeholder={
               mode === 'search'
                 ? 'Cerca una cartella, o incolla un percorso…'
-                : 'Frecce per navigare · Invio apre questa cartella'
+                : mode === 'browse'
+                  ? 'Frecce per navigare · Invio apre questa cartella'
+                  : remoteConn
+                    ? 'Percorso sul server · Invio apre questa cartella'
+                    : 'Scegli un server salvato o aggiungine uno'
             }
-            value={mode === 'search' ? query : browsePath}
-            onChange={(e) =>
-              mode === 'search' ? setQuery(e.target.value) : setBrowsePath(e.target.value)
-            }
+            value={mode === 'search' ? query : mode === 'browse' ? browsePath : remotePath}
+            onChange={(e) => {
+              if (mode === 'search') setQuery(e.target.value)
+              else if (mode === 'browse') setBrowsePath(e.target.value)
+              else setRemotePath(e.target.value)
+            }}
+            disabled={mode === 'remote' && !remoteConn}
             spellCheck={false}
             autoComplete="off"
           />
@@ -279,6 +364,12 @@ export function Selector({
               onClick={() => setMode('browse')}
             >
               Esplora
+            </button>
+            <button
+              className={`cm-chip ${mode === 'remote' ? 'cm-chip--on' : ''}`}
+              onClick={() => setMode('remote')}
+            >
+              Remoto
             </button>
           </div>
         </div>
@@ -300,12 +391,26 @@ export function Selector({
                 />
               ))
             )
-          ) : (
+          ) : mode === 'browse' ? (
             <BrowseList
               dir={dir}
               cursor={browseCursor}
               onHover={setBrowseCursor}
               onEnter={setBrowsePath}
+            />
+          ) : (
+            <RemotePanel
+              connection={remoteConn}
+              path={remotePath}
+              cursor={remoteCursor}
+              onCursor={setRemoteCursor}
+              onSelect={(conn, path) => {
+                setRemoteConn(conn)
+                setRemotePath(path)
+              }}
+              onPathChange={setRemotePath}
+              onBrowsing={setRemoteEntries}
+              onLaunch={() => launch(remotePath)}
             />
           )}
         </div>
@@ -314,7 +419,8 @@ export function Selector({
           <div className="cm-resume">
             <div className="cm-resume__head">
               <span className="cm-field__label">
-                Sessioni precedenti in {basename(currentPath)}
+                {mode === 'remote' ? 'Sessioni sul server in ' : 'Sessioni precedenti in '}
+                {basename(currentPath)}
               </span>
               {resumeId && (
                 <label className="cm-resume__fork">
@@ -363,10 +469,16 @@ export function Selector({
           />
           <button
             className="cm-selector__go"
-            disabled={!currentPath}
+            disabled={!canLaunch}
             onClick={() => launch(currentPath)}
           >
-            {resumeId ? (fork ? 'Duplica e apri' : 'Riprendi') : 'Apri sessione'}
+            {resumeId
+              ? fork
+                ? 'Duplica e apri'
+                : 'Riprendi'
+              : mode === 'remote'
+                ? 'Apri sul server'
+                : 'Apri sessione'}
           </button>
         </div>
 

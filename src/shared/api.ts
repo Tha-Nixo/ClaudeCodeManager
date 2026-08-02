@@ -12,6 +12,11 @@ import type {
   PersistedLayout,
   PtyDataEvent,
   PtyExitEvent,
+  RemoteDirListing,
+  RemoteProbe,
+  RemoteSession,
+  SshConnection,
+  SshTarget,
   TranscriptSession,
   UsageSummary
 } from './types'
@@ -64,6 +69,20 @@ export interface CmApi {
     catalog(): Promise<ThemeCatalog>
     /** Apre la cartella dei temi personali nell'esplora risorse. */
     openDir(): Promise<void>
+  }
+  ssh: {
+    list(): Promise<SshConnection[]>
+    /** Crea o aggiorna; null se i dati non bastano a comporre una connessione. */
+    save(input: Partial<SshConnection>): Promise<SshConnection | null>
+    delete(id: string): Promise<void>
+    /** Prova la connessione e riporta home, sistema e versione di Claude Code. */
+    probe(target: SshTarget): Promise<RemoteProbe>
+    listDir(target: SshTarget, path: string): Promise<RemoteDirListing>
+    /** Conversazioni già presenti sul server per una cartella remota. */
+    sessionsFor(
+      target: SshTarget,
+      path: string
+    ): Promise<{ ok: boolean; error?: string; sessions: RemoteSession[] }>
   }
   index: {
     status(): Promise<IndexStatus[]>

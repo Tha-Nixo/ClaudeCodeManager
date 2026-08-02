@@ -1238,6 +1238,117 @@ body.cm-dragging .cm-pane__header {
   font-size: 11px;
 }
 
+/* --- Connessioni remote --------------------------------------------------- */
+
+.cm-remote {
+  display: flex;
+  flex-direction: column;
+}
+
+.cm-remote__bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--cm-border-idle);
+  /* La barra resta a vista mentre si scorre un elenco lungo di cartelle. */
+  position: sticky;
+  top: 0;
+  background: var(--cm-panel);
+  z-index: 1;
+}
+
+.cm-remote__where {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--cm-text-dim);
+  font-size: 11px;
+}
+
+.cm-remote__add {
+  margin: 8px 10px;
+  padding: 8px;
+  border: 1px dashed var(--cm-border-idle);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--cm-text-dim);
+  font-size: 12px;
+  cursor: pointer;
+  transition: border-color var(--cm-fast) var(--cm-ease),
+    color var(--cm-fast) var(--cm-ease);
+}
+
+.cm-remote__add:hover {
+  border-color: var(--cm-accent);
+  color: var(--cm-text);
+}
+
+.cm-remote__form {
+  padding: 12px 14px;
+  gap: 12px;
+}
+
+.cm-remote__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 10px;
+}
+
+.cm-field__input {
+  padding: 6px 8px;
+  border: 1px solid var(--cm-border-idle);
+  border-radius: 5px;
+  background: var(--cm-panel);
+  color: var(--cm-text);
+  font-size: 12px;
+  outline: none;
+}
+
+.cm-field__input:focus {
+  border-color: var(--cm-border-focus);
+}
+
+.cm-remote__probe {
+  padding: 8px 10px;
+  border: 1px solid var(--cm-ok);
+  border-radius: 6px;
+  color: var(--cm-text);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.cm-remote__probe--bad {
+  border-color: var(--cm-error);
+}
+
+.cm-remote__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.cm-remote__spacer {
+  flex: 1 1 auto;
+}
+
+.cm-chip--danger {
+  border-color: var(--cm-error);
+  color: var(--cm-error);
+}
+
+.cm-pane__remote {
+  flex: 0 0 auto;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--cm-panel-raised);
+  color: var(--cm-accent);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
 /* --- Stati vuoti / errore ------------------------------------------------- */
 
 .cm-notice {

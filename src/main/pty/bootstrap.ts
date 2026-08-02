@@ -18,38 +18,53 @@ const BOOTSTRAP_PS1 = `# ClaudeManager - script generato automaticamente, le mod
 $ErrorActionPreference = 'Continue'
 
 $cmCwd    = $env:CM_CWD
-$cmClaude = $env:CM_CLAUDE
+$cmExe    = $env:CM_EXE
 $cmArgs   = $env:CM_ARGS_JSON
+$cmLabel  = $env:CM_LABEL
 
 # Non lasciamo le variabili in giro nella shell interattiva né nei processi figli.
 Remove-Item Env:CM_CWD       -ErrorAction SilentlyContinue
-Remove-Item Env:CM_CLAUDE    -ErrorAction SilentlyContinue
+Remove-Item Env:CM_EXE       -ErrorAction SilentlyContinue
 Remove-Item Env:CM_ARGS_JSON -ErrorAction SilentlyContinue
+Remove-Item Env:CM_LABEL     -ErrorAction SilentlyContinue
 
 if ($cmCwd -and (Test-Path -LiteralPath $cmCwd)) {
   Set-Location -LiteralPath $cmCwd
 }
 
-if (-not $cmClaude) { $cmClaude = 'claude' }
+if (-not $cmExe) { $cmExe = 'claude' }
 
-$claudeArgs = @()
+$cmdArgs = @()
 if ($cmArgs) {
   try {
     $parsed = ConvertFrom-Json $cmArgs
-    if ($null -ne $parsed) { $claudeArgs = @($parsed) }
+    if ($null -ne $parsed) { $cmdArgs = @($parsed) }
   } catch {
-    Write-Host "ClaudeManager: argomenti non validi, avvio claude senza flag." -ForegroundColor DarkYellow
+    Write-Host "ClaudeManager: argomenti non validi." -ForegroundColor DarkYellow
   }
 }
 
-$resolved = Get-Command $cmClaude -ErrorAction SilentlyContinue
+$resolved = Get-Command $cmExe -ErrorAction SilentlyContinue
 if (-not $resolved) {
   Write-Host ""
-  Write-Host "  Claude Code non trovato ('$cmClaude')." -ForegroundColor Red
-  Write-Host "  Installalo oppure aggiungilo al PATH, poi digita 'claude' qui sotto." -ForegroundColor DarkGray
+  if ($cmExe -eq 'ssh') {
+    Write-Host "  Client ssh non trovato." -ForegroundColor Red
+    Write-Host "  Su Windows 10 e 11 si attiva da Impostazioni -> App -> Funzionalita' facoltative." -ForegroundColor DarkGray
+  } else {
+    Write-Host "  Claude Code non trovato ('$cmExe')." -ForegroundColor Red
+    Write-Host "  Installalo oppure aggiungilo al PATH, poi digita 'claude' qui sotto." -ForegroundColor DarkGray
+  }
   Write-Host ""
 } else {
-  & $cmClaude @claudeArgs
+  if ($cmLabel) { Write-Host "  $cmLabel" -ForegroundColor DarkGray }
+  & $cmExe @cmdArgs
+  # Con una connessione remota vale la pena dire perche' e' finita: senza
+  # questo una caduta di rete lascerebbe solo un prompt locale inspiegabile.
+  if ($cmExe -eq 'ssh') {
+    Write-Host ""
+    Write-Host "  Connessione chiusa (codice $LASTEXITCODE). Sei tornato sulla shell locale." -ForegroundColor DarkGray
+    Write-Host ""
+  }
 }
 `
 

@@ -13,6 +13,11 @@ import type {
   PersistedLayout,
   PtyDataEvent,
   PtyExitEvent,
+  RemoteDirListing,
+  RemoteProbe,
+  RemoteSession,
+  SshConnection,
+  SshTarget,
   TranscriptSession,
   UsageSummary
 } from '@shared/types'
@@ -73,6 +78,21 @@ const api: CmApi = {
   theme: {
     catalog: (): Promise<ThemeCatalog> => ipcRenderer.invoke('theme:catalog'),
     openDir: (): Promise<void> => ipcRenderer.invoke('theme:openDir')
+  },
+
+  ssh: {
+    list: (): Promise<SshConnection[]> => ipcRenderer.invoke('ssh:list'),
+    save: (input: Partial<SshConnection>): Promise<SshConnection | null> =>
+      ipcRenderer.invoke('ssh:save', input),
+    delete: (id: string): Promise<void> => ipcRenderer.invoke('ssh:delete', id),
+    probe: (target: SshTarget): Promise<RemoteProbe> => ipcRenderer.invoke('ssh:probe', target),
+    listDir: (target: SshTarget, path: string): Promise<RemoteDirListing> =>
+      ipcRenderer.invoke('ssh:listDir', target, path),
+    sessionsFor: (
+      target: SshTarget,
+      path: string
+    ): Promise<{ ok: boolean; error?: string; sessions: RemoteSession[] }> =>
+      ipcRenderer.invoke('ssh:sessionsFor', target, path)
   },
 
   index: {

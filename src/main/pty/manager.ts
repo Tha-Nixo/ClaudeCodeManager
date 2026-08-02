@@ -6,6 +6,7 @@ import type { CreateSessionResult, LaunchOptions } from '@shared/types'
 import { buildClaudeArgs, expectedClaudeSessionId, resolveClaudeExecutable } from '../claude/cli'
 import { ensureBootstrapScript, powershellArgs } from './bootstrap'
 import { buildPtyEnv } from './env'
+import { buildSshInvocation, sshDestination } from '../ssh/command'
 
 /** Intervallo di accorpamento dell'output prima di attraversare l'IPC. */
 const FLUSH_MS = 8
@@ -40,11 +41,19 @@ export class PtyManager extends EventEmitter<PtyManagerEvents> {
 
   create(opts: LaunchOptions): CreateSessionResult {
     const id = randomUUID()
-    const args = buildClaudeArgs(opts, id)
     const claudeSessionId = expectedClaudeSessionId(opts, id)
 
     const cwd = existsSync(opts.cwd) ? opts.cwd : process.env.USERPROFILE || process.cwd()
     const script = ensureBootstrapScript()
+
+    // Un riquadro remoto avvia ssh, che a sua volta esegue claude sul server.
+    // Il bootstrap resta lo stesso: cambiano solo eseguibile e argomenti, e
+    // così alla chiusura della connessione si resta comunque sulla shell
+    // locale invece di veder sparire il riquadro.
+    const remote = opts.remote
+    const invocation = remote
+      ? buildSshInvocation(opts, id)
+      : { file: resolveClaudeExecutable(), args: buildClaudeArgs(opts, id) }
 
     const pty = ptySpawn('powershell.exe', powershellArgs(script), {
       name: 'xterm-256color',
@@ -53,8 +62,11 @@ export class PtyManager extends EventEmitter<PtyManagerEvents> {
       cwd,
       env: buildPtyEnv({
         cwd,
-        claudeExe: resolveClaudeExecutable(),
-        argsJson: JSON.stringify(args)
+        exe: invocation.file,
+        argsJson: JSON.stringify(invocation.args),
+        label: remote
+          ? `Connessione a ${sshDestination(remote)} — ${remote.path}`
+          : undefined
       })
     })
 
@@ -78,7 +90,7 @@ export class PtyManager extends EventEmitter<PtyManagerEvents> {
       this.emit('exit', id, exitCode, signal)
     })
 
-    return { id, claudeSessionId: claudeSessionId ?? '', cwd, args }
+    return { id, claudeSessionId: claudeSessionId ?? '', cwd, args: invocation.args }
   }
 
   write(id: string, data: string): void {

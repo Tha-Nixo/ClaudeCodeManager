@@ -1,15 +1,20 @@
 /**
- * Accorcia un percorso Windows per la barra del titolo di un riquadro,
- * tenendo le ultime componenti: sono quelle che identificano il progetto.
+ * Accorcia un percorso per la barra del titolo di un riquadro, tenendo le
+ * ultime componenti: sono quelle che identificano il progetto.
  * `C:\Users\x\Desktop\ClaudeManager` -> `…\Desktop\ClaudeManager`
+ *
+ * Il separatore viene dedotto dal percorso stesso, perché con le connessioni
+ * remote qui passano anche percorsi POSIX: ricomporre `/home/nixo/app` con le
+ * barre rovesciate lo farebbe sembrare un percorso Windows inesistente.
  */
 export function shortenPath(fullPath: string, maxLength = 48): string {
   if (fullPath.length <= maxLength) return fullPath
 
+  const sep = fullPath.includes('\\') ? '\\' : '/'
   const parts = fullPath.split(/[\\/]/).filter(Boolean)
   let out = ''
   for (let i = parts.length - 1; i >= 0; i--) {
-    const next = `\\${parts[i]}${out}`
+    const next = `${sep}${parts[i]}${out}`
     if (next.length + 1 > maxLength) break
     out = next
   }

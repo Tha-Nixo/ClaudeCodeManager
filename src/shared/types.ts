@@ -22,6 +22,76 @@ export type ModelAlias = 'default' | 'fable' | 'opus' | 'sonnet' | 'haiku'
 /** Livelli accettati da `claude --effort`. 'default' = non passare il flag. */
 export type Effort = 'default' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 
+// --- Connessioni remote -----------------------------------------------------
+
+/** Parametri di connessione a un server. */
+export interface SshTarget {
+  host: string
+  user: string
+  /** 22 se omessa. */
+  port?: number
+  /** Percorso locale della chiave privata; se omesso decide ssh. */
+  identityFile?: string
+}
+
+export interface SshConnection extends SshTarget {
+  id: string
+  /** Etichetta mostrata nel selettore. */
+  name: string
+  /** Cartella remota di partenza. */
+  remotePath: string
+  /** Epoch ms dell'ultimo utilizzo, per l'ordinamento. */
+  lastUsed: number
+}
+
+/** Riferimento remoto di un riquadro: la connessione più la cartella scelta. */
+export interface RemoteLaunch extends SshTarget {
+  connectionId: string
+  /** Cartella remota in cui avviare claude. */
+  path: string
+  /** Nome della connessione, per l'intestazione del riquadro. */
+  name: string
+}
+
+/** Esito della ricognizione di un server. */
+export interface RemoteProbe {
+  ok: boolean
+  /** Messaggio già leggibile quando `ok` è falso. */
+  error?: string
+  home: string
+  /** Percorso di claude sul server; vuoto se non installato. */
+  claudePath: string
+  claudeVersion: string
+  /** Uscita di `uname -sr`. */
+  os: string
+}
+
+export interface RemoteEntry {
+  name: string
+  path: string
+  isGit: boolean
+  hasInstructions: boolean
+}
+
+export interface RemoteDirListing {
+  ok: boolean
+  error?: string
+  /** Percorso assoluto risolto dal server, con `~` già espanso. */
+  path: string
+  parent: string | null
+  entries: RemoteEntry[]
+}
+
+/** Conversazione già presente sul server, riprendibile con --resume. */
+export interface RemoteSession {
+  sessionId: string
+  label: string
+  aiTitle: string | null
+  lastPrompt: string | null
+  modifiedAt: number
+  sizeBytes: number
+}
+
 export interface LaunchOptions {
   /** Cartella in cui aprire la sessione. Percorso Windows assoluto. */
   cwd: string
@@ -41,6 +111,12 @@ export interface LaunchOptions {
   /** Dimensioni iniziali del PTY, misurate dal renderer prima dello spawn. */
   cols?: number
   rows?: number
+  /**
+   * Quando presente il riquadro apre una connessione ssh ed esegue claude sul
+   * server, invece di lanciarlo in locale. `cwd` resta la cartella locale da
+   * cui parte ssh; la cartella di lavoro remota è `remote.path`.
+   */
+  remote?: RemoteLaunch
 }
 
 export interface CreateSessionResult {

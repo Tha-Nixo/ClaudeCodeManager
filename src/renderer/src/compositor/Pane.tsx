@@ -45,7 +45,18 @@ export function Pane({
     [onSlotReady]
   )
 
+  const remote = meta.launch.remote
   const dotClass = `cm-pane__dot cm-pane__dot--${meta.status}`
+
+  // Il registro delle sessioni vive sta sul computer locale; una sessione
+  // remota scrive il proprio sul server, quindi qui non arriva mai. Dire
+  // "pronta" sarebbe un'affermazione che non possiamo verificare: mentre la
+  // connessione è viva si mostra "remota", e restano veri gli stati che
+  // dipendono dal processo ssh locale (avvio, uscita, errore).
+  const statusText =
+    remote && meta.status === 'running' ? 'remota' : STATUS_LABEL[meta.status]
+
+  const where = remote ? `${remote.user}@${remote.host}:${remote.path}` : meta.cwd
 
   return (
     <section
@@ -79,13 +90,21 @@ export function Pane({
         title="Trascina per spostare il riquadro · doppio clic per chiuderlo"
       >
         <span className="cm-pane__index">{index}</span>
-        <span className={dotClass} title={STATUS_LABEL[meta.status]} />
-        <span className="cm-pane__path" title={meta.cwd}>
-          {meta.title ?? shortenPath(meta.cwd, 52)}
+        <span className={dotClass} title={statusText} />
+        {remote && (
+          <span
+            className="cm-pane__remote"
+            title={`Sessione su ${remote.user}@${remote.host}${remote.port && remote.port !== 22 ? `:${remote.port}` : ''}`}
+          >
+            ☁ {remote.name}
+          </span>
+        )}
+        <span className="cm-pane__path" title={where}>
+          {meta.title ?? shortenPath(remote ? remote.path : meta.cwd, 52)}
         </span>
         <span className="cm-pane__meta">
           {rect.floating ? 'flottante · ' : ''}
-          {STATUS_LABEL[meta.status]}
+          {statusText}
         </span>
         <button
           className="cm-pane__close"

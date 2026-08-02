@@ -1,12 +1,31 @@
 import { BrowserWindow, ipcMain, shell } from 'electron'
-import type { AppConfig, IndexKind, LaunchOptions, PersistedLayout } from '@shared/types'
+import type {
+  AppConfig,
+  IndexKind,
+  LaunchOptions,
+  PersistedLayout,
+  SshConnection,
+  SshTarget
+} from '@shared/types'
 import type { LiveSessions } from './claude/live'
 import { isResumable, sessionsForFolder } from './claude/transcripts'
 import { folderInfo, listDir, listDrives } from './fs/browse'
 import { allStatuses, cancel as cancelIndex, rescan } from './indexer/diskIndex'
 import { invalidateIndex, searchFolders } from './indexer/sources'
 import type { PtyManager } from './pty/manager'
+import {
+  isRemoteResumable,
+  listDir as listRemoteDir,
+  listSessions as listRemoteSessions,
+  probe
+} from './ssh/remote'
 import { getConfig, setConfig } from './store/config'
+import {
+  deleteConnection,
+  listConnections,
+  saveConnection,
+  touchConnection
+} from './store/connections'
 import { getFavorites, toggleFavorite, touchRecent } from './store/folders'
 import { loadLayout, saveLayout } from './store/layout'
 import { ensureThemesDir, loadThemes } from './theme/store'
@@ -25,9 +44,15 @@ export function registerIpc(
 
   ipcMain.handle('pty:create', (_e, opts: LaunchOptions) => {
     const result = ptys.create(opts)
-    // La cartella entra fra i recenti solo se il processo e' davvero partito.
-    touchRecent(result.cwd)
-    invalidateIndex()
+    if (opts.remote) {
+      // Per un riquadro remoto la cartella locale non significa niente: quello
+      // che vale la pena ricordare e' la connessione con la sua ultima cartella.
+      touchConnection(opts.remote.connectionId, opts.remote.path)
+    } else {
+      // La cartella entra fra i recenti solo se il processo e' davvero partito.
+      touchRecent(result.cwd)
+      invalidateIndex()
+    }
     return result
   })
 
@@ -83,24 +108,31 @@ export function registerIpc(
 
   // --- Layout ---------------------------------------------------------------
 
-  ipcMain.handle('layout:load', () => {
+  ipcMain.handle('layout:load', async () => {
     try {
       const stored = loadLayout()
       if (!stored) return null
       // Un id salvato non basta: il transcript deve esistere davvero, altrimenti
       // il ripristino avvierebbe claude --resume su una sessione che Claude Code
       // non conosce e il riquadro nascerebbe con un errore invece che pronto.
-      return {
-        ...stored,
-        panes: stored.panes.map((pane) => ({
-          ...pane,
-          claudeSessionId:
-            typeof pane.claudeSessionId === 'string' &&
-            isResumable(pane.cwd, pane.claudeSessionId)
-              ? pane.claudeSessionId
-              : null
-        }))
-      }
+      //
+      // Per i riquadri remoti il transcript sta sul server, quindi il controllo
+      // e' una chiamata ssh: si fanno in parallelo e con un tetto di tempo, cosi'
+      // un server spento ritarda l'avvio di qualche secondo invece di impedirlo.
+      const panes = await Promise.all(
+        stored.panes.map(async (pane) => {
+          const id = typeof pane.claudeSessionId === 'string' ? pane.claudeSessionId : null
+          if (!id) return { ...pane, claudeSessionId: null }
+
+          const remote = pane.launch?.remote
+          const alive = remote
+            ? await isRemoteResumable(remote, remote.path, id)
+            : isResumable(pane.cwd, id)
+
+          return { ...pane, claudeSessionId: alive ? id : null }
+        })
+      )
+      return { ...stored, panes }
     } catch (err) {
       // Meglio partire sulla cartella predefinita che non partire affatto.
       console.error('lettura del layout fallita', err)
@@ -117,6 +149,21 @@ export function registerIpc(
   live.on('change', (sessions) => {
     getWindow()?.webContents.send('claude:live-change', sessions)
   })
+
+  // --- Connessioni remote ---------------------------------------------------
+
+  ipcMain.handle('ssh:list', () => listConnections())
+  ipcMain.handle('ssh:save', (_e, input: Partial<SshConnection>) => saveConnection(input))
+  ipcMain.handle('ssh:delete', (_e, id: string) => {
+    deleteConnection(id)
+  })
+  ipcMain.handle('ssh:probe', (_e, target: SshTarget) => probe(target))
+  ipcMain.handle('ssh:listDir', (_e, target: SshTarget, path: string) =>
+    listRemoteDir(target, path)
+  )
+  ipcMain.handle('ssh:sessionsFor', (_e, target: SshTarget, path: string) =>
+    listRemoteSessions(target, path)
+  )
 
   // --- Cartelle -------------------------------------------------------------
 

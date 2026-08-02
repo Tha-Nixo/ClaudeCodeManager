@@ -26,23 +26,30 @@ const SESSION_MARKERS = [
 
 export interface PtyEnvOptions {
   cwd: string
-  claudeExe: string
+  /** Eseguibile avviato dal bootstrap: `claude` in locale, `ssh` da remoto. */
+  exe: string
   argsJson: string
+  /** Riga mostrata prima dell'avvio, per dire dove si sta entrando. */
+  label?: string
+}
+
+/** process.env senza i marcatori di sessione Claude Code. */
+export function ptyEnv(): Record<string, string | undefined> {
+  const env: Record<string, string | undefined> = { ...process.env }
+  for (const key of SESSION_MARKERS) delete env[key]
+  return env
 }
 
 export function buildPtyEnv(opts: PtyEnvOptions): Record<string, string | undefined> {
-  const env: Record<string, string | undefined> = { ...process.env }
-
-  for (const key of SESSION_MARKERS) delete env[key]
-
   return {
-    ...env,
+    ...ptyEnv(),
     TERM: 'xterm-256color',
     COLORTERM: 'truecolor',
     TERM_PROGRAM: 'ClaudeManager',
     CM_CWD: opts.cwd,
-    CM_CLAUDE: opts.claudeExe,
-    CM_ARGS_JSON: opts.argsJson
+    CM_EXE: opts.exe,
+    CM_ARGS_JSON: opts.argsJson,
+    CM_LABEL: opts.label ?? ''
   }
 }
 
