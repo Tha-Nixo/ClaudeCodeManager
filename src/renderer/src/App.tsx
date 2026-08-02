@@ -38,6 +38,9 @@ import {
   wireTerminalEvents
 } from './terminal/registry'
 
+/** Stati che meritano una pastiglia nella barra: gli altri non chiedono nulla. */
+const UPDATE_VISIBLE = new Set(['available', 'downloading', 'ready'])
+
 export default function App(): React.JSX.Element {
   const [config, setConfig] = useState<AppConfig | null>(null)
   const [layout, setLayout] = useState<Layout>(EMPTY_LAYOUT)
@@ -481,22 +484,24 @@ export default function App(): React.JSX.Element {
             {formatCost(usageBadge.cost)} oggi · {formatTokens(usageBadge.tokens)} tok
           </button>
         )}
-        {update && (update.status === 'ready' || update.status === 'downloading') && (
+        {update && UPDATE_VISIBLE.has(update.status) && (
           <button
-            className={`cm-topbar__update ${update.status === 'ready' ? 'cm-topbar__update--ready' : ''}`}
+            className={`cm-topbar__update ${update.status === 'downloading' ? '' : 'cm-topbar__update--ready'}`}
             title={
               update.status === 'ready'
-                ? `La versione ${update.version} è pronta. Verrà installata alla chiusura, oppure premi qui per riavviare adesso.`
-                : 'Scaricamento del nuovo aggiornamento in corso'
+                ? `La versione ${update.version} è pronta. Verrà installata alla chiusura, oppure apri le impostazioni per riavviare adesso.`
+                : update.status === 'available'
+                  ? `La versione ${update.version} è uscita. Questa copia va aggiornata a mano.`
+                  : 'Scaricamento della versione nuova in corso'
             }
-            onClick={() => {
-              // Riavviare chiude tutte le sessioni: va chiesto, non fatto e basta.
-              if (update.status === 'ready') setSettingsOpen(true)
-            }}
+            // Nessuna azione irreversibile da qui: riavviare chiude tutte le
+            // sessioni, quindi la pastiglia porta alle impostazioni e la
+            // decisione si prende là.
+            onClick={() => update.status !== 'downloading' && setSettingsOpen(true)}
           >
-            {update.status === 'ready'
-              ? `↑ ${update.version} pronta`
-              : `↓ ${update.percent ?? 0}%`}
+            {update.status === 'downloading'
+              ? `↓ ${update.percent ?? 0}%`
+              : `↑ ${update.version} ${update.status === 'ready' ? 'pronta' : 'disponibile'}`}
           </button>
         )}
         <span className="cm-topbar__hint">

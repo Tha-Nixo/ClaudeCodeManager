@@ -104,6 +104,8 @@ export interface CmApi {
     check(): Promise<UpdateState>
     /** Riavvia e installa l'aggiornamento già scaricato. */
     install(): Promise<void>
+    /** Apre nel browser la pagina da cui scaricare la versione nuova. */
+    openRelease(): Promise<void>
     /** Ritorna la funzione per disiscriversi. */
     onChange(cb: (state: UpdateState) => void): () => void
   }

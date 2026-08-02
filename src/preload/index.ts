@@ -116,6 +116,7 @@ const api: CmApi = {
     state: (): Promise<UpdateState> => ipcRenderer.invoke('update:state'),
     check: (): Promise<UpdateState> => ipcRenderer.invoke('update:check'),
     install: (): Promise<void> => ipcRenderer.invoke('update:install'),
+    openRelease: (): Promise<void> => ipcRenderer.invoke('update:openRelease'),
     onChange: (cb: (state: UpdateState) => void): (() => void) => {
       const listener = (_e: unknown, state: UpdateState): void => cb(state)
       ipcRenderer.on('update:change', listener)

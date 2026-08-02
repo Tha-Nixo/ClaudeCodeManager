@@ -29,7 +29,7 @@ import {
 import { getFavorites, toggleFavorite, touchRecent } from './store/folders'
 import { loadLayout, saveLayout } from './store/layout'
 import { ensureThemesDir, loadThemes } from './theme/store'
-import { check, currentState, installNow } from './update/updater'
+import { check, currentState, installNow, releaseUrl } from './update/updater'
 import { summarize } from './usage/scanner'
 
 /**
@@ -159,6 +159,9 @@ export function registerIpc(
     installNow()
   })
   ipcMain.handle('update:version', () => app.getVersion())
+  ipcMain.handle('update:openRelease', async () => {
+    await shell.openExternal(releaseUrl())
+  })
 
   // --- Connessioni remote ---------------------------------------------------
 

@@ -179,12 +179,16 @@ export interface TranscriptSession {
 
 /**
  * Stato del controllo aggiornamenti.
- * 'unsupported' non è un errore: è il caso normale in sviluppo e con
- * l'eseguibile portabile, che non può sostituirsi da solo.
+ *
+ * 'available' e 'ready' sono due cose diverse: 'available' vuol dire che una
+ * versione nuova esiste ma va installata a mano, ed è il caso della copia
+ * portabile; 'ready' vuol dire che è già scaricata e pronta a sostituirsi.
+ * 'unsupported' non è un errore: è il caso normale in sviluppo.
  */
 export type UpdateStatus =
   | 'idle'
   | 'checking'
+  | 'available'
   | 'downloading'
   | 'ready'
   | 'error'
@@ -198,8 +202,10 @@ export interface UpdateState {
   percent?: number
   /** Note della release, se il formato le rende leggibili come testo. */
   notes?: string
-  /** Spiegazione per 'error' e 'unsupported'. */
+  /** Spiegazione per 'error', 'available' e 'unsupported'. */
   message?: string
+  /** Pagina da cui scaricare, quando l'installazione va fatta a mano. */
+  releaseUrl?: string
   /** Epoch ms dell'ultimo controllo andato a buon fine. */
   checkedAt?: number
 }

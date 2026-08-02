@@ -36,6 +36,10 @@ proprio terminale e il proprio processo `claude`.
   server*: si salvano le connessioni, si sfogliano le cartelle remote con gli
   stessi badge di quelle locali, e si riprendono le conversazioni gia' presenti
   la'. La cartella remota resta ricordata per la volta dopo.
+- **Aggiornamenti.** Entrambe le versioni controllano se ne e' uscita una
+  nuova. L'installer la scarica da solo e la applica alla chiusura dell'app,
+  mai a sorpresa mentre si lavora; il portabile, che non puo' sostituirsi da
+  solo, avvisa e basta e offre il collegamento per scaricarla.
 
 ## Scorciatoie
 
@@ -225,11 +229,21 @@ Alcune scelte che non si deducono dal codice:
   Installare vuol dire riavviare, e un riavvio a sorpresa ucciderebbe tutte le
   sessioni Claude aperte. L'installazione avviene alla chiusura dell'app,
   oppure quando la si chiede esplicitamente dalle impostazioni.
-- **L'eseguibile portabile riconosce di non poter aggiornarsi** e non ci
-  prova: un `.exe` portabile non ha un installer che possa sostituirlo mentre
-  è in esecuzione, quindi scaricherebbe decine di megabyte per poi fallire.
-  Lo si distingue da `PORTABLE_EXECUTABLE_DIR`, che electron-builder valorizza
-  solo in quel target.
+- **L'eseguibile portabile controlla ma non scarica.** Non può sostituirsi da
+  solo — un `.exe` in esecuzione non si può rimpiazzare — e il file pubblicato
+  per l'aggiornamento automatico è comunque l'installer, che trasformerebbe a
+  sorpresa una copia portabile in una installata. Sapere che esiste una
+  versione nuova però serve lo stesso, quindi il controllo si fa e il risultato
+  si mostra, col collegamento da cui scaricarla. Lo si riconosce da
+  `PORTABLE_EXECUTABLE_DIR`, che electron-builder valorizza solo in quel target.
+- **Le note della release attraversano l'IPC come testo semplice.** GitHub le
+  restituisce come HTML già reso: passarlo così com'è vorrebbe dire consegnare
+  al renderer del markup di provenienza remota, e basterebbe che un giorno
+  qualcuno lo mostrasse con `dangerouslySetInnerHTML` perché diventi
+  un'iniezione. Vengono ridotte a testo nel main, prima del confine.
+- **La sezione della versione sta in cima alle impostazioni**, perché la
+  pastiglia della barra porta lì: in fondo, chi la preme troverebbe il pannello
+  all'inizio e dovrebbe cercarsi da solo quello che ha appena chiesto.
 
 ## Limiti noti
 

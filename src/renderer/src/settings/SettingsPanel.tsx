@@ -106,6 +106,11 @@ export function SettingsPanel({
         </header>
 
         <div className="cm-settings__body">
+          {/* In cima perche' la pastiglia della barra porta qui: se la sezione
+              fosse in fondo, chi la preme troverebbe il pannello all'inizio e
+              dovrebbe cercarsi da solo quello che ha appena chiesto. */}
+          <UpdateSection />
+
           <section className="cm-settings__section">
             <div className="cm-settings__row">
               <span className="cm-field__label">Tema</span>
@@ -246,8 +251,6 @@ export function SettingsPanel({
               )
             })}
           </section>
-
-          <UpdateSection />
         </div>
 
         <footer className="cm-usage__foot">
@@ -308,6 +311,11 @@ function UpdateSection(): React.JSX.Element {
         {status === 'downloading' &&
           `Scaricamento della versione ${state?.version} · ${state?.percent ?? 0}%`}
         {status === 'error' && `Controllo non riuscito: ${state?.message}`}
+        {status === 'available' && (
+          <>
+            È uscita la versione <strong>{state?.version}</strong>. {state?.message}
+          </>
+        )}
         {status === 'ready' && (
           <>
             La versione <strong>{state?.version}</strong> è pronta. Verrà installata da sola alla
@@ -315,6 +323,23 @@ function UpdateSection(): React.JSX.Element {
           </>
         )}
       </div>
+
+      {/* React lo rende come testo, e dal main arriva gia' ripulito dall'HTML. */}
+      {state?.notes && (status === 'available' || status === 'ready') && (
+        <div className="cm-update__notes">{state.notes}</div>
+      )}
+
+      {status === 'available' && (
+        <div className="cm-source__actions">
+          <span className="cm-source__progress">
+            Chiudi ClaudeManager prima di sostituire il file: un eseguibile in uso non si può
+            rimpiazzare.
+          </span>
+          <button className="cm-chip" onClick={() => void window.cm.update.openRelease()}>
+            Vai alla versione {state?.version}
+          </button>
+        </div>
+      )}
 
       {status === 'ready' && (
         <div className="cm-source__actions">

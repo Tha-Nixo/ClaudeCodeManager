@@ -1361,6 +1361,15 @@ body.cm-dragging .cm-pane__header {
   cursor: pointer;
 }
 
+.cm-update__notes {
+  margin-top: 6px;
+  padding: 7px 9px;
+  border-left: 2px solid var(--cm-border-idle);
+  color: var(--cm-text-dim);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
 .cm-update__version {
   color: var(--cm-text);
   font-size: 12px;
