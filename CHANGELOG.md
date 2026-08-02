@@ -6,6 +6,24 @@ arrivano funzioni nuove, il terzo per le correzioni.
 
 <!-- nuove versioni qui sotto -->
 
+## 1.1.0 — 2026-08-02
+
+- **Avvisi quando una sessione ti aspetta.** Con più riquadri aperti non si
+  possono guardare tutti: quando uno passa ad attendere una risposta arriva una
+  notifica di sistema e l'icona nella barra delle applicazioni lampeggia. Il
+  clic porta a quel riquadro, col fuoco già nel terminale. Si avvisa sul
+  *passaggio*, non finché ci resta, e mai mentre stai guardando l'app.
+- **Cassetto di monitoraggio.** Una linguetta sul bordo destro apre un pannello
+  con costo e token del giorno e, per ogni sessione, **quanto è pieno il
+  contesto**. Si stacca in una finestra a sé, sempre in primo piano e
+  spostabile su un altro monitor.
+- **Scorciatoie rimappabili.** Si preme la riga nelle impostazioni e poi la
+  combinazione voluta. Le personalizzazioni si sovrappongono alle predefinite,
+  e assegnando la stringa vuota si libera una combinazione senza rimpiazzarla —
+  per restituire `Alt+B` a readline, ad esempio.
+- **Ricerca nel terminale.** `Alt+S` cerca nello scrollback del riquadro
+  attivo, con evidenziazione delle occorrenze e spostamento avanti e indietro.
+
 ## 1.0.1 — 2026-08-02
 
 - Anche la copia portabile controlla se è uscita una versione nuova e lo dice,
