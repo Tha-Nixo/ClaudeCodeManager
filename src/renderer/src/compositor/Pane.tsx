@@ -3,6 +3,7 @@ import type { PaneLayout } from './geometry'
 import type { SessionMeta } from '../state/types'
 import { STATUS_LABEL } from '../state/types'
 import { shortenPath } from '../util/path'
+import { SearchBar } from '../terminal/SearchBar'
 
 interface PaneProps {
   meta: SessionMeta
@@ -10,6 +11,9 @@ interface PaneProps {
   focused: boolean
   /** Questo riquadro è quello che si sta trascinando. */
   dragging: boolean
+  /** Barra di ricerca aperta su questo riquadro. */
+  searching: boolean
+  onCloseSearch: () => void
   index: number
   onFocus: () => void
   onClose: () => void
@@ -24,6 +28,8 @@ export function Pane({
   rect,
   focused,
   dragging,
+  searching,
+  onCloseSearch,
   index,
   onFocus,
   onClose,
@@ -115,6 +121,8 @@ export function Pane({
           ✕
         </button>
       </header>
+
+      {searching && <SearchBar paneId={meta.paneId} onClose={onCloseSearch} />}
 
       <div className="cm-pane__body" ref={slotRef}>
         {meta.status === 'error' && (

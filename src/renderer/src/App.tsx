@@ -57,12 +57,17 @@ export default function App(): React.JSX.Element {
   const [update, setUpdate] = useState<UpdateState | null>(null)
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [detached, setDetached] = useState(false)
+  /** Riquadro con la barra di ricerca aperta, se ce n'è uno. */
+  const [searchPaneId, setSearchPaneId] = useState<string | null>(null)
 
   // Un overlay aperto disattiva le scorciatoie del compositor. Il ref serve
   // perché il gestore tastiera è registrato una volta sola e non vedrebbe
   // i valori aggiornati dello stato.
   const overlayOpenRef = useRef(false)
-  overlayOpenRef.current = selectorOpen || usageOpen || settingsOpen
+  // La barra di ricerca conta come overlay: il suo campo di testo deve
+  // ricevere i tasti, e il gestore del compositor è in fase di capture su
+  // window, quindi arriverebbe comunque prima dell'input.
+  overlayOpenRef.current = selectorOpen || usageOpen || settingsOpen || searchPaneId !== null
 
   // Geometrie correnti dei riquadri. Sono un ref e non uno stato: servono solo
   // dentro i gestori (focus direzionale, passaggio a flottante) e non devono
@@ -274,6 +279,11 @@ export default function App(): React.JSX.Element {
           return
         case 'quit':
           window.cm.win.quit()
+          return
+        case 'search-pane':
+          // La ricerca riguarda un terminale preciso: senza riquadro attivo
+          // non c'è niente in cui cercare.
+          setSearchPaneId((current) => (current ? null : layoutRef.current.focused))
           return
         case 'toggle-usage':
           setUsageOpen((open) => !open)
@@ -644,6 +654,8 @@ export default function App(): React.JSX.Element {
         onRectsChange={(rects) => {
           rectsRef.current = rects
         }}
+        searchPaneId={searchPaneId}
+        onCloseSearch={() => setSearchPaneId(null)}
       />
 
       {selectorOpen && config && (

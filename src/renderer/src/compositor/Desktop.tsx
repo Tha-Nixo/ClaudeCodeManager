@@ -25,6 +25,9 @@ interface DesktopProps {
   onResizeFloating: (paneId: string, w: number, h: number) => void
   onDropPane: (movingId: string, targetId: string, side: DropSide) => void
   onRectsChange: (rects: Record<string, Rect>) => void
+  /** Riquadro con la barra di ricerca aperta, se ce n'è uno. */
+  searchPaneId: string | null
+  onCloseSearch: () => void
 }
 
 const MIN_FLOAT = 220
@@ -49,7 +52,9 @@ export function Desktop({
   onMoveFloating,
   onResizeFloating,
   onDropPane,
-  onRectsChange
+  onRectsChange,
+  searchPaneId,
+  onCloseSearch
 }: DesktopProps): React.JSX.Element {
   const stageRef = useRef<HTMLDivElement>(null)
   const [stageSize, setStageSize] = useState({ w: 0, h: 0 })
@@ -323,6 +328,8 @@ export function Desktop({
               index={indexOf.get(rect.id) ?? 0}
               focused={layout.focused === rect.id}
               dragging={drag?.paneId === rect.id}
+              searching={searchPaneId === rect.id}
+              onCloseSearch={onCloseSearch}
               onFocus={() => onFocusPane(rect.id)}
               onClose={() => onClosePane(rect.id)}
               onSlotReady={(slot) => onSlotReady(rect.id, slot)}

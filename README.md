@@ -67,6 +67,7 @@ quindi `@`, `#`, `[`, `]`, `{`, `}` continuano a funzionare normalmente.
 | `Alt+←→↑↓` | Sposta il fuoco |
 | `Alt+Shift+←→↑↓` | Sposta il riquadro nel mosaico |
 | `Alt+1` … `Alt+9` | Va alla sessione N |
+| `Alt+S` | Cerca nello scrollback del riquadro attivo |
 | `Alt+U` | Pannello statistiche |
 | `Alt+,` | Impostazioni |
 | `F11` | Schermo intero |

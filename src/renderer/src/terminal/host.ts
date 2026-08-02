@@ -1,9 +1,15 @@
 import { Terminal, type ITheme } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
+import { SearchAddon } from '@xterm/addon-search'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { WebglAddon } from '@xterm/addon-webgl'
 import '@xterm/xterm/css/xterm.css'
 import { claudeDarkXterm } from '../theme/xterm-theme'
+
+/** Valore di una variabile CSS del tema, letto al momento dell'uso. */
+function readVar(name: string): string {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim()
+}
 
 /**
  * Un terminale xterm, gestito imperativamente e volutamente FUORI dalla
@@ -17,6 +23,7 @@ export class TerminalHost {
 
   private readonly term: Terminal
   private readonly fitAddon = new FitAddon()
+  private readonly searchAddon = new SearchAddon()
   private webgl: WebglAddon | null = null
   private observer: ResizeObserver | null = null
   private fitFrame = 0
@@ -76,6 +83,7 @@ export class TerminalHost {
     if (!this.opened) {
       this.term.open(this.element)
       this.term.loadAddon(this.fitAddon)
+      this.term.loadAddon(this.searchAddon)
       this.term.loadAddon(new WebLinksAddon())
       this.enableWebgl()
       this.opened = true
@@ -151,6 +159,47 @@ export class TerminalHost {
   }
 
   /** Cambia la tavolozza del terminale senza toccarne il contenuto. */
+  /**
+   * Cerca nello scrollback e porta la vista sulla corrispondenza.
+   *
+   * L'evidenziazione delle altre occorrenze richiede `decorations`, che
+   * servono a capire quante ce ne sono senza scorrere a mano. I colori
+   * arrivano dal tema attivo, altrimenti su un tema chiaro l'evidenziazione
+   * predefinita di xterm sparisce nel fondo.
+   */
+  search(query: string, direction: 'next' | 'previous'): boolean {
+    if (!query) {
+      this.searchAddon.clearDecorations()
+      return false
+    }
+
+    // I colori vengono da variabili che OGNI tema ha già. Aggiungerne una
+    // nuova al formato romperebbe i temi personali esistenti: un tema
+    // incompleto viene rifiutato, non completato con valori di ripiego.
+    const attivo = readVar('--cm-accent') || '#d97757'
+    const altre = readVar('--cm-panel-raised') || '#2e2d2b'
+    const righello = readVar('--cm-text-dim') || '#8c8b87'
+
+    const options = {
+      decorations: {
+        matchBackground: altre,
+        matchBorder: righello,
+        matchOverviewRuler: righello,
+        activeMatchBackground: attivo,
+        activeMatchBorder: attivo,
+        activeMatchColorOverviewRuler: attivo
+      }
+    }
+
+    return direction === 'next'
+      ? this.searchAddon.findNext(query, options)
+      : this.searchAddon.findPrevious(query, options)
+  }
+
+  clearSearch(): void {
+    this.searchAddon.clearDecorations()
+  }
+
   setTheme(theme: ITheme): void {
     if (this.disposed) return
     this.term.options.theme = theme

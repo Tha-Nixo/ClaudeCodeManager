@@ -142,6 +142,20 @@ export function focusPane(paneId: string): void {
   hosts.get(paneId)?.focus()
 }
 
+/** Cerca nello scrollback di un riquadro; falso se non trova niente. */
+export function searchPane(
+  paneId: string,
+  query: string,
+  direction: 'next' | 'previous'
+): boolean {
+  return hosts.get(paneId)?.search(query, direction) ?? false
+}
+
+/** Toglie le evidenziazioni: alla chiusura della barra non devono restare. */
+export function clearSearch(paneId: string): void {
+  hosts.get(paneId)?.clearSearch()
+}
+
 /** Rimisura il terminale: da chiamare dopo un cambio di geometria del riquadro. */
 export function refit(paneId: string): void {
   hosts.get(paneId)?.fitNow()

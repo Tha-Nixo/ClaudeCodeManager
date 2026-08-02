@@ -1353,6 +1353,61 @@ body.cm-dragging .cm-pane__header {
   color: var(--cm-error);
 }
 
+/* --- Ricerca nel terminale ------------------------------------------------ */
+
+.cm-search {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+  flex: 0 0 auto;
+  background: var(--cm-panel-raised);
+  border-bottom: 1px solid var(--cm-border-idle);
+}
+
+.cm-search__input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 3px 6px;
+  border: 1px solid var(--cm-border-idle);
+  border-radius: 4px;
+  background: var(--cm-panel);
+  color: var(--cm-text);
+  font-size: 12px;
+  outline: none;
+}
+
+.cm-search__input:focus {
+  border-color: var(--cm-border-focus);
+}
+
+.cm-search__none {
+  flex: 0 0 auto;
+  color: var(--cm-error);
+  font-size: 10px;
+}
+
+.cm-search__btn {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--cm-text-dim);
+  font-size: 11px;
+  cursor: pointer;
+  transition:
+    background var(--cm-fast) var(--cm-ease),
+    color var(--cm-fast) var(--cm-ease);
+}
+
+.cm-search__btn:hover {
+  background: var(--cm-panel);
+  color: var(--cm-text);
+}
+
 /* --- Editor delle scorciatoie --------------------------------------------- */
 
 .cm-keymap {

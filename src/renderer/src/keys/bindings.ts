@@ -35,6 +35,7 @@ export type Action =
   | 'focus-7'
   | 'focus-8'
   | 'focus-9'
+  | 'search-pane'
   | 'toggle-usage'
   | 'toggle-settings'
   | 'toggle-fullscreen'
@@ -71,6 +72,10 @@ export const DEFAULT_KEYMAP: Readonly<Record<string, Action>> = {
   'alt+8': 'focus-8',
   'alt+9': 'focus-9',
 
+  // 's' = cerca. Come le altre di Alt, e' rimappabile: chi usa Alt+S in
+  // readline puo' spostarla o liberarla dalle impostazioni.
+  'alt+s': 'search-pane',
+
   'alt+u': 'toggle-usage',
   'alt+,': 'toggle-settings',
   f11: 'toggle-fullscreen',
@@ -101,6 +106,7 @@ export const ACTION_LABELS: { action: Action; label: string }[] = [
   { action: 'move-right', label: 'Sposta il riquadro a destra' },
   { action: 'move-up', label: 'Sposta il riquadro in alto' },
   { action: 'move-down', label: 'Sposta il riquadro in basso' },
+  { action: 'search-pane', label: 'Cerca nel terminale' },
   { action: 'toggle-usage', label: 'Statistiche di utilizzo' },
   { action: 'toggle-settings', label: 'Impostazioni' },
   { action: 'toggle-fullscreen', label: 'Schermo intero' },
