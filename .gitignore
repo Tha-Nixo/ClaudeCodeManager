@@ -7,3 +7,6 @@ build/*.ico
 .vite/
 *.log
 .DS_Store
+# Configurazione dell'updater usata solo con CM_UPDATE_DEV=1: punta a una
+# build locale e non deve finire nel repository.
+dev-app-update.yml

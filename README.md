@@ -129,6 +129,12 @@ Variabili d'ambiente utili durante lo sviluppo:
 | --- | --- |
 | `CM_WINDOWED=1` | Avvia in finestra invece che a schermo intero |
 | `CM_DEV_BRIDGE=1` | Abilita il ponte di sviluppo (vedi sotto) |
+| `CM_UPDATE_DEV=1` | Accende gli aggiornamenti in sviluppo, leggendo `dev-app-update.yml` |
+
+`CM_UPDATE_DEV` esiste perché un canale di aggiornamento rotto non se ne accorge
+nessuno finché non serve davvero. Con un `dev-app-update.yml` che punta a un
+feed locale si può provare l'intero giro — confronto delle versioni,
+scaricamento, verifica dello sha512 — senza pubblicare niente.
 
 ### Ponte di sviluppo
 

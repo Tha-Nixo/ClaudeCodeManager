@@ -43,9 +43,18 @@ function isPortable(): boolean {
   return Boolean(process.env.PORTABLE_EXECUTABLE_DIR)
 }
 
+/**
+ * In sviluppo l'updater e' spento, il che lo rende anche non verificabile:
+ * un aggiornamento che non funziona non se ne accorge nessuno finche' non
+ * serve. Con CM_UPDATE_DEV=1 si accende usando l'app-update.yml prodotto
+ * dall'ultima build, cosi' si puo' controllare che il canale sia davvero
+ * raggiungibile. Nel pacchetto la variabile non cambia niente.
+ */
+const devOverride = (): boolean => !app.isPackaged && process.env.CM_UPDATE_DEV === '1'
+
 /** Perche' gli aggiornamenti non sono attivi, se non lo sono. */
 function unsupportedReason(): string | null {
-  if (!app.isPackaged) return 'Aggiornamenti non attivi durante lo sviluppo.'
+  if (!app.isPackaged && !devOverride()) return 'Aggiornamenti non attivi durante lo sviluppo.'
   if (isPortable()) {
     return "L'eseguibile portabile non puo' aggiornarsi da solo: scarica la nuova versione dalle release."
   }
@@ -69,6 +78,11 @@ export function initUpdater(send: (s: UpdateState) => void): void {
   autoUpdater.autoDownload = true
   autoUpdater.autoInstallOnAppQuit = true
   autoUpdater.logger = null
+
+  if (devOverride()) {
+    // Senza questo electron-updater rifiuta di partire fuori da un pacchetto.
+    autoUpdater.forceDevUpdateConfig = true
+  }
 
   autoUpdater.on('checking-for-update', () => setState({ status: 'checking' }))
 

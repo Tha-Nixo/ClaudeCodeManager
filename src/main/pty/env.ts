@@ -21,7 +21,16 @@ const SESSION_MARKERS = [
   'CLAUDE_CODE_CHILD_SESSION',
   'CLAUDE_CODE_SESSION_ID',
   'CLAUDE_CODE_ENTRYPOINT',
-  'CLAUDE_PID'
+  'CLAUDE_PID',
+  // Stesso problema, altro programma: l'eseguibile portabile prodotto da
+  // electron-builder marca il proprio ambiente con queste, ed e' cosi' che
+  // l'app riconosce di non potersi aggiornare da sola. Ereditate, farebbero
+  // credere "portabile" a qualunque programma avviato da un riquadro,
+  // compresa un'altra copia di ClaudeManager installata regolarmente, che
+  // spegnerebbe i propri aggiornamenti senza motivo.
+  'PORTABLE_EXECUTABLE_DIR',
+  'PORTABLE_EXECUTABLE_FILE',
+  'PORTABLE_EXECUTABLE_APP_FILENAME'
 ] as const
 
 export interface PtyEnvOptions {
