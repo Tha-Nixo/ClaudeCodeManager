@@ -26,6 +26,7 @@ import { Selector } from './selector/Selector'
 import { SettingsPanel } from './settings/SettingsPanel'
 import { fromPersisted, toPersisted } from './state/persistence'
 import { paneStatusFromLive, type SessionMeta } from './state/types'
+import { applyTheme } from './theme/apply'
 import { UsagePanel, formatCost, formatTokens } from './usage/UsagePanel'
 import { basename, isUsefulTitle } from './util/path'
 import {
@@ -287,6 +288,18 @@ export default function App(): React.JSX.Element {
   )
 
   // --- Effetti --------------------------------------------------------------
+
+  // Il tema si applica appena la configurazione arriva e a ogni cambio.
+  // Il catalogo viene riletto ogni volta perché un tema personale può essere
+  // stato modificato sul disco mentre l'app era aperta.
+  useEffect(() => {
+    if (!config) return
+    void window.cm.theme.catalog().then((catalog) => {
+      const theme =
+        catalog.themes.find((t) => t.id === config.themeId) ?? catalog.themes[0]
+      if (theme) applyTheme(theme)
+    })
+  }, [config?.themeId, config])
 
   useEffect(() => wireTerminalEvents(), [])
 

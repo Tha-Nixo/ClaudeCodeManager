@@ -1,3 +1,4 @@
+import type { ITheme } from '@xterm/xterm'
 import type { CreateSessionResult, LaunchOptions } from '@shared/types'
 import { TerminalHost } from './host'
 
@@ -96,7 +97,7 @@ export async function ensureSession(
   if (starting.has(paneId)) return null
   starting.add(paneId)
 
-  const host = new TerminalHost()
+  const host = new TerminalHost(currentTerminalTheme ?? undefined)
   host.onTitle = (title) => events?.onTitle(paneId, title)
   host.attach(slot)
   host.fitNow()
@@ -152,6 +153,24 @@ export function refit(paneId: string): void {
  */
 export function setFitSuspendedAll(suspended: boolean): void {
   for (const host of hosts.values()) host.setFitSuspended(suspended)
+}
+
+/**
+ * Tavolozza corrente del terminale.
+ *
+ * Serve conservarla qui e non solo applicarla ai terminali esistenti: un
+ * riquadro aperto dopo un cambio di tema deve nascere già con i colori
+ * giusti, altrimenti comparirebbe con la palette predefinita.
+ */
+let currentTerminalTheme: ITheme | null = null
+
+export function applyThemeToTerminals(theme: ITheme): void {
+  currentTerminalTheme = theme
+  for (const host of hosts.values()) host.setTheme(theme)
+}
+
+export function terminalTheme(): ITheme | null {
+  return currentTerminalTheme
 }
 
 export async function destroySession(paneId: string): Promise<void> {

@@ -1,3 +1,5 @@
+import { DEFAULT_THEME_ID } from './themes/builtin'
+
 /**
  * Tipi condivisi fra main, preload e renderer.
  * Nessun import da 'electron' o da moduli node qui dentro: questo file
@@ -221,6 +223,8 @@ export interface AppConfig {
   }
   /** Radici usate dagli indici 'roots' e 'git'. */
   scanRoots: string[]
+  /** Id del tema attivo, integrato o caricato da file. */
+  themeId: string
 }
 
 export const DEFAULT_CONFIG: Omit<AppConfig, 'defaultCwd'> = {
@@ -235,5 +239,6 @@ export const DEFAULT_CONFIG: Omit<AppConfig, 'defaultCwd'> = {
   // La scansione completa delle unità è l'unica disattivata di default: la
   // prima esecuzione richiede minuti e va decisa dall'utente.
   indexSources: { claude: true, roots: true, git: true, drive: false },
-  scanRoots: []
+  scanRoots: [],
+  themeId: DEFAULT_THEME_ID
 }

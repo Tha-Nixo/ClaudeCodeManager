@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { CmApi, ListDirResult } from '@shared/api'
+import type { ThemeCatalog } from '@shared/theme'
 import type {
   AppConfig,
   CreateSessionResult,
@@ -67,6 +68,11 @@ const api: CmApi = {
     favorites: (): Promise<string[]> => ipcRenderer.invoke('folders:favorites'),
     toggleFavorite: (path: string): Promise<string[]> =>
       ipcRenderer.invoke('folders:toggleFavorite', path)
+  },
+
+  theme: {
+    catalog: (): Promise<ThemeCatalog> => ipcRenderer.invoke('theme:catalog'),
+    openDir: (): Promise<void> => ipcRenderer.invoke('theme:openDir')
   },
 
   index: {

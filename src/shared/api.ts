@@ -1,3 +1,4 @@
+import type { ThemeCatalog } from './theme'
 import type {
   AppConfig,
   CreateSessionResult,
@@ -57,6 +58,12 @@ export interface CmApi {
     info(path: string): Promise<FolderInfo>
     favorites(): Promise<string[]>
     toggleFavorite(path: string): Promise<string[]>
+  }
+  theme: {
+    /** Temi integrati più quelli caricati da file, con gli eventuali errori. */
+    catalog(): Promise<ThemeCatalog>
+    /** Apre la cartella dei temi personali nell'esplora risorse. */
+    openDir(): Promise<void>
   }
   index: {
     status(): Promise<IndexStatus[]>

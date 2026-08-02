@@ -26,6 +26,15 @@
   --cm-waiting: #e0a458;
   --cm-error: #c15f3c;
 
+  /* Sovrascritte a runtime dal tema attivo: qui restano solo come ripiego
+     per il primo frame, prima che la configurazione sia stata letta. */
+  --cm-shadow: rgb(0 0 0 / 55%);
+  --cm-shadow-strong: rgb(0 0 0 / 60%);
+  --cm-on-accent: #1f1e1d;
+  /* Su un fondo rosso saturo il bianco resta la scelta giusta in ogni tema. */
+  --cm-on-danger: #ffffff;
+  --cm-overlay-veil: rgb(15 14 13 / 62%);
+
   --cm-radius: 6px;
   --cm-gap: 8px;
   --cm-font-ui: 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif;
@@ -142,7 +151,7 @@ body {
 .cm-iconbtn--danger:hover {
   background: var(--cm-error);
   border-color: var(--cm-error);
-  color: #fff;
+  color: var(--cm-on-danger);
 }
 
 .cm-stage {
@@ -238,7 +247,7 @@ body {
   padding: 3px 10px;
   border-radius: 999px;
   background: var(--cm-accent);
-  color: #1f1e1d;
+  color: var(--cm-on-accent);
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.02em;
@@ -255,8 +264,8 @@ body {
 
 .cm-pane--floating {
   box-shadow:
-    0 12px 32px rgb(0 0 0 / 55%),
-    0 2px 6px rgb(0 0 0 / 40%);
+    0 12px 32px var(--cm-shadow),
+    0 2px 6px var(--cm-shadow);
 }
 
 .cm-pane--floating .cm-pane__header {
@@ -305,7 +314,7 @@ body {
 
 .cm-pane__close:hover {
   background: var(--cm-error);
-  color: #fff;
+  color: var(--cm-on-danger);
 }
 
 /* --- Canali di ridimensionamento ------------------------------------------ */
@@ -469,7 +478,7 @@ body.cm-dragging .cm-pane__header {
   justify-content: center;
   align-items: flex-start;
   padding: 8vh 24px 24px;
-  background: rgb(15 14 13 / 62%);
+  background: var(--cm-overlay-veil);
   backdrop-filter: blur(2px);
   animation: cm-overlay-in var(--cm-fast) var(--cm-ease);
 }
@@ -508,7 +517,7 @@ body.cm-dragging .cm-pane__header {
   background: var(--cm-panel);
   border: 1px solid var(--cm-border-idle);
   border-radius: 10px;
-  box-shadow: 0 24px 64px rgb(0 0 0 / 60%);
+  box-shadow: 0 24px 64px var(--cm-shadow-strong);
   overflow: hidden;
 }
 
@@ -702,7 +711,7 @@ body.cm-dragging .cm-pane__header {
   background: var(--cm-panel);
   border: 1px solid var(--cm-border-idle);
   border-radius: 10px;
-  box-shadow: 0 24px 64px rgb(0 0 0 / 60%);
+  box-shadow: 0 24px 64px var(--cm-shadow-strong);
   overflow: hidden;
 }
 
@@ -907,6 +916,91 @@ body.cm-dragging .cm-pane__header {
   line-height: 1.45;
 }
 
+/* --- Selettore dei temi --------------------------------------------------- */
+
+.cm-settings__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.cm-themes {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+  gap: 8px;
+}
+
+.cm-theme {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 9px 10px;
+  border: 1px solid var(--cm-border-idle);
+  border-radius: 7px;
+  background: var(--cm-desktop);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color var(--cm-fast) var(--cm-ease),
+    background var(--cm-fast) var(--cm-ease);
+}
+
+.cm-theme:hover {
+  border-color: var(--cm-text-dim);
+}
+
+.cm-theme--on {
+  border-color: var(--cm-accent);
+  background: color-mix(in srgb, var(--cm-accent) 12%, var(--cm-desktop));
+}
+
+/* L'anteprima mostra i colori del tema, non quelli attuali: è l'unico modo
+   per scegliere senza doverli applicare uno per uno. */
+.cm-theme__swatches {
+  display: flex;
+  height: 20px;
+  border-radius: 4px;
+  overflow: hidden;
+  border: 1px solid var(--cm-border-idle);
+}
+
+.cm-theme__swatch {
+  flex: 1 1 auto;
+}
+
+.cm-theme__name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--cm-text);
+  font-size: 12px;
+}
+
+.cm-theme__tag {
+  padding: 0 5px;
+  border-radius: 3px;
+  background: var(--cm-panel-raised);
+  color: var(--cm-text-dim);
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.cm-theme__desc {
+  color: var(--cm-text-dim);
+  font-size: 10px;
+}
+
+.cm-theme__errors {
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--cm-waiting) 45%, transparent);
+  border-radius: 6px;
+  color: var(--cm-waiting);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
 /* --- Impostazioni --------------------------------------------------------- */
 
 .cm-settings {
@@ -917,7 +1011,7 @@ body.cm-dragging .cm-pane__header {
   background: var(--cm-panel);
   border: 1px solid var(--cm-border-idle);
   border-radius: 10px;
-  box-shadow: 0 24px 64px rgb(0 0 0 / 60%);
+  box-shadow: 0 24px 64px var(--cm-shadow-strong);
   overflow: hidden;
 }
 
@@ -1126,7 +1220,7 @@ body.cm-dragging .cm-pane__header {
   border: 1px solid var(--cm-accent);
   border-radius: 5px;
   background: var(--cm-accent);
-  color: #1f1e1d;
+  color: var(--cm-on-accent);
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;

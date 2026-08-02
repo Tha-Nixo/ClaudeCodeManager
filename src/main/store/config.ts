@@ -76,7 +76,8 @@ export function getConfig(): AppConfig {
     indexSources: { ...DEFAULT_CONFIG.indexSources, ...stored?.indexSources },
     // Senza radici configurate si usano quelle in cui si tengono di solito i
     // progetti, così l'indice è utile al primo avvio senza chiedere nulla.
-    scanRoots: stored?.scanRoots?.length ? stored.scanRoots : defaultRoots()
+    scanRoots: stored?.scanRoots?.length ? stored.scanRoots : defaultRoots(),
+    themeId: stored?.themeId ?? DEFAULT_CONFIG.themeId
   }
   return cached
 }

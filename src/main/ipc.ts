@@ -1,4 +1,4 @@
-import { BrowserWindow, ipcMain } from 'electron'
+import { BrowserWindow, ipcMain, shell } from 'electron'
 import type { AppConfig, IndexKind, LaunchOptions, PersistedLayout } from '@shared/types'
 import type { LiveSessions } from './claude/live'
 import { isResumable, sessionsForFolder } from './claude/transcripts'
@@ -9,6 +9,7 @@ import type { PtyManager } from './pty/manager'
 import { getConfig, setConfig } from './store/config'
 import { getFavorites, toggleFavorite, touchRecent } from './store/folders'
 import { loadLayout, saveLayout } from './store/layout'
+import { ensureThemesDir, loadThemes } from './theme/store'
 import { summarize } from './usage/scanner'
 
 /**
@@ -47,6 +48,15 @@ export function registerIpc(
   })
   ptys.on('exit', (id, exitCode, signal) => {
     getWindow()?.webContents.send('pty:exit', { id, exitCode, signal })
+  })
+
+  // --- Temi -----------------------------------------------------------------
+
+  ipcMain.handle('theme:catalog', () => loadThemes())
+  ipcMain.handle('theme:openDir', async () => {
+    // Aprire la cartella e' il modo piu' diretto per far capire dove vanno i
+    // file dei temi, molto piu' che scriverne il percorso.
+    await shell.openPath(ensureThemesDir())
   })
 
   // --- Indici su disco ------------------------------------------------------

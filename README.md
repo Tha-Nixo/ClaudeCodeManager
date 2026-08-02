@@ -28,6 +28,10 @@ proprio terminale e il proprio processo `claude`.
   cartella, ricavati dai transcript.
 - **Ripristino del layout.** Alla riapertura torna lo stesso mosaico, con le
   conversazioni riprese dove erano rimaste.
+- **Temi.** Sei temi integrati (Claude Dark e Light, Mezzanotte, Gruvbox, Nord,
+  Alto contrasto) piu' i tuoi: basta lasciare un file JSON in
+  `%APPDATA%\claudemanager\themes\`. Ogni tema definisce sia l'interfaccia sia
+  i 16 colori ANSI del terminale, e si applica subito ai riquadri gia' aperti.
 
 ## Scorciatoie
 
@@ -132,6 +136,15 @@ Alcune scelte che non si deducono dal codice:
   inseguirlo con un ritardo.
 - **`prefers-reduced-motion` è rispettato:** chi ha chiesto meno movimento al
   sistema operativo ottiene solo i cambi di colore.
+- **Un tema descrive interfaccia e terminale insieme.** Tenerli in due posti
+  produrrebbe il caso, molto visibile, di una cornice chiara attorno a un
+  terminale scuro. Un tema incompleto viene rifiutato con la ragione precisa
+  invece di essere completato con valori di ripiego: mezzo tema applicato
+  produce combinazioni illeggibili senza dire perche'.
+- **Il tema si applica anche ai terminali gia' aperti.** xterm tiene una
+  propria copia della tavolozza e non legge il CSS, quindi va aggiornata
+  esplicitamente su ogni istanza viva; quelle nuove nascono gia' col tema
+  corrente.
 
 ## Limiti noti
 

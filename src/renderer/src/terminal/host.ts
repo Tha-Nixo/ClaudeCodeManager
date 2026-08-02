@@ -1,4 +1,4 @@
-import { Terminal } from '@xterm/xterm'
+import { Terminal, type ITheme } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { WebglAddon } from '@xterm/addon-webgl'
@@ -40,7 +40,7 @@ export class TerminalHost {
   /** Nuove dimensioni in celle dopo un fit. */
   onResize: ((dims: { cols: number; rows: number }) => void) | null = null
 
-  constructor() {
+  constructor(theme?: ITheme) {
     this.element = document.createElement('div')
     this.element.className = 'cm-term'
 
@@ -53,7 +53,7 @@ export class TerminalHost {
       lineHeight: 1.15,
       letterSpacing: 0,
       scrollback: 10000,
-      theme: claudeDarkXterm,
+      theme: theme ?? claudeDarkXterm,
       // Dice a xterm che dall'altra parte c'è ConPTY: cambia le euristiche di
       // riavvolgimento riga, altrimenti il riflow dopo un resize è sbagliato.
       windowsPty: { backend: 'conpty' }
@@ -148,6 +148,12 @@ export class TerminalHost {
   private sendInput(data: string): void {
     if (this.sessionId) window.cm.pty.write(this.sessionId, data)
     else this.pendingInput.push(data)
+  }
+
+  /** Cambia la tavolozza del terminale senza toccarne il contenuto. */
+  setTheme(theme: ITheme): void {
+    if (this.disposed) return
+    this.term.options.theme = theme
   }
 
   /** Congela o riprende la misurazione; alla ripresa rimisura subito. */

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { AppConfig, IndexKind, IndexStatus } from '@shared/types'
+import type { Theme, ThemeLoadError } from '@shared/theme'
 
 interface SettingsPanelProps {
   config: AppConfig
@@ -50,6 +51,17 @@ export function SettingsPanel({
 }: SettingsPanelProps): React.JSX.Element {
   const [statuses, setStatuses] = useState<Record<string, IndexStatus>>({})
   const [rootsText, setRootsText] = useState(config.scanRoots.join('\n'))
+  const [catalog, setCatalog] = useState<Theme[]>([])
+  const [themeErrors, setThemeErrors] = useState<ThemeLoadError[]>([])
+
+  useEffect(() => {
+    // Il catalogo si rilegge ad ogni apertura: cosi' un file appena messo
+    // nella cartella compare senza dover riavviare l'app.
+    void window.cm.theme.catalog().then((c) => {
+      setCatalog(c.themes)
+      setThemeErrors(c.errors)
+    })
+  }, [])
 
   useEffect(() => {
     void window.cm.index.status().then((list) => {
@@ -94,6 +106,58 @@ export function SettingsPanel({
         </header>
 
         <div className="cm-settings__body">
+          <section className="cm-settings__section">
+            <div className="cm-settings__row">
+              <span className="cm-field__label">Tema</span>
+              <button className="cm-chip" onClick={() => void window.cm.theme.openDir()}>
+                Apri la cartella dei temi
+              </button>
+            </div>
+
+            <div className="cm-themes">
+              {catalog.map((theme) => (
+                <button
+                  key={theme.id}
+                  className={`cm-theme ${theme.id === config.themeId ? 'cm-theme--on' : ''}`}
+                  onClick={() => patch({ themeId: theme.id })}
+                  title={theme.source ?? 'tema integrato'}
+                >
+                  <span className="cm-theme__swatches">
+                    {[
+                      theme.ui.desktop,
+                      theme.ui.panel,
+                      theme.terminal.background,
+                      theme.ui.accent,
+                      theme.ui.text,
+                      theme.terminal.ansi[2],
+                      theme.terminal.ansi[4],
+                      theme.terminal.ansi[5]
+                    ].map((c, i) => (
+                      <span key={i} className="cm-theme__swatch" style={{ background: c }} />
+                    ))}
+                  </span>
+                  <span className="cm-theme__name">
+                    {theme.name}
+                    {theme.custom && <span className="cm-theme__tag">tuo</span>}
+                  </span>
+                  {theme.description && (
+                    <span className="cm-theme__desc">{theme.description}</span>
+                  )}
+                </button>
+              ))}
+            </div>
+
+            {themeErrors.length > 0 && (
+              <div className="cm-theme__errors">
+                {themeErrors.map((e) => (
+                  <div key={e.file}>
+                    <strong>{e.file}</strong> — {e.error}
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+
           <section className="cm-settings__section">
             <div className="cm-field__label">Cartella di partenza</div>
             <input
