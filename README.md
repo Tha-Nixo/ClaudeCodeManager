@@ -137,6 +137,15 @@ npm run release -- minor         # alza la versione, scrive il changelog, compil
 git push; git push origin v1.1.0
 ```
 
+Gli artefatti finiscono in **`release/v<versione>/`**, una cartella per
+versione. Dentro restano solo i file da pubblicare; `intermedi/` raccoglie
+`win-unpacked` e il resto della lavorazione. Accanto c'è `DA-CARICARE.md`, che
+elenca esattamente cosa trascinare su GitHub e riporta già il testo della
+release preso dal changelog.
+
+`npm run release -- --tidy` riordina la cartella della versione corrente senza
+toccare versione né tag: serve dopo un `npm run dist` fatto a mano.
+
 Con `GH_TOKEN` nell'ambiente lo script carica anche i pacchetti su GitHub, come
 **bozza**: va riletta e pubblicata a mano. Finché è bozza nessuno la riceve, ed
 è voluto — un aggiornamento automatico raggiunge tutte le installazioni, quindi
@@ -241,6 +250,15 @@ Alcune scelte che non si deducono dal codice:
   chiedere una password che nessuno vedrebbe, e l'interfaccia resterebbe
   appesa; con, fallisce subito e l'errore viene tradotto in una frase che dice
   cosa fare.
+- **Una cartella di release per versione, e gli intermedi da parte.**
+  electron-builder mette nella stessa cartella i file da pubblicare e quelli di
+  lavorazione — `win-unpacked` da trecento megabyte, il registro di
+  diagnostica. Al momento di trascinare gli allegati su GitHub bisogna
+  distinguerli leggendo i nomi, ed è esattamente lì che si carica il file
+  sbagliato. Lo script separa le due cose e scrive l'elenco di cosa fare,
+  verificando anche che lo `sha512` dentro `latest.yml` sia quello
+  dell'installer: se non lo è, l'aggiornamento automatico scarica e scarta
+  senza dire perché.
 - **Gli aggiornamenti si scaricano da soli ma non si installano da soli.**
   Installare vuol dire riavviare, e un riavvio a sorpresa ucciderebbe tutte le
   sessioni Claude aperte. L'installazione avviene alla chiusura dell'app,

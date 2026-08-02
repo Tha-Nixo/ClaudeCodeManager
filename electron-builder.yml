@@ -3,7 +3,10 @@ productName: ClaudeManager
 copyright: MIT
 
 directories:
-  output: release
+  # Una cartella per versione: gli artefatti di release diverse non si mescolano,
+  # e al momento di pubblicare si sa esattamente cosa caricare senza leggere i
+  # nomi dei file uno per uno.
+  output: release/v${version}
   buildResources: build
 
 # Solo l'output compilato e i moduli nativi. Il resto (sorgenti, config di
