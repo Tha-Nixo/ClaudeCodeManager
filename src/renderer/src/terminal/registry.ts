@@ -146,6 +146,14 @@ export function refit(paneId: string): void {
   hosts.get(paneId)?.fitNow()
 }
 
+/**
+ * Congela la misurazione di tutti i terminali per la durata di
+ * un'animazione di layout, e la riprende alla fine con una sola rimisurazione.
+ */
+export function setFitSuspendedAll(suspended: boolean): void {
+  for (const host of hosts.values()) host.setFitSuspended(suspended)
+}
+
 export async function destroySession(paneId: string): Promise<void> {
   // Creazione ancora in volo: qui non c'è niente da chiudere, si annota
   // l'annullamento e ci pensa ensureSession quando il PTY sarà nato.

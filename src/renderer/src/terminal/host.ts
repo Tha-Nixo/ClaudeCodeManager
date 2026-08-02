@@ -21,6 +21,14 @@ export class TerminalHost {
   private observer: ResizeObserver | null = null
   private fitFrame = 0
 
+  /**
+   * Durante un'animazione di layout il contenitore cambia dimensione a ogni
+   * frame. Rimisurare significherebbe una dozzina di pty.resize per
+   * transizione, con Claude Code che ridisegna ogni volta: si congela la
+   * misura e si rimisura una sola volta alla fine.
+   */
+  private fitSuspended = false
+
   private sessionId: string | null = null
   /** Tasti premuti prima che il PTY esista: vanno consegnati, non persi. */
   private pendingInput: string[] = []
@@ -142,10 +150,18 @@ export class TerminalHost {
     else this.pendingInput.push(data)
   }
 
+  /** Congela o riprende la misurazione; alla ripresa rimisura subito. */
+  setFitSuspended(suspended: boolean): void {
+    if (this.fitSuspended === suspended) return
+    this.fitSuspended = suspended
+    if (!suspended) this.scheduleFit()
+  }
+
   private scheduleFit(): void {
-    if (this.fitFrame || this.disposed) return
+    if (this.fitFrame || this.disposed || this.fitSuspended) return
     this.fitFrame = requestAnimationFrame(() => {
       this.fitFrame = 0
+      if (this.fitSuspended) return
       this.fitNow()
     })
   }

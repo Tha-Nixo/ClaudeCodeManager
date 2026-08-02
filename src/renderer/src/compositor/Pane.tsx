@@ -8,11 +8,14 @@ interface PaneProps {
   meta: SessionMeta
   rect: PaneLayout
   focused: boolean
+  /** Questo riquadro è quello che si sta trascinando. */
+  dragging: boolean
   index: number
   onFocus: () => void
   onClose: () => void
   onSlotReady: (slot: HTMLDivElement) => void
-  onFloatDragStart: (e: React.PointerEvent) => void
+  /** Trascinamento dall'intestazione: sposta i flottanti, riordina i tiled. */
+  onHeaderDragStart: (e: React.PointerEvent) => void
   onFloatResizeStart: (e: React.PointerEvent) => void
 }
 
@@ -20,11 +23,12 @@ export function Pane({
   meta,
   rect,
   focused,
+  dragging,
   index,
   onFocus,
   onClose,
   onSlotReady,
-  onFloatDragStart,
+  onHeaderDragStart,
   onFloatResizeStart
 }: PaneProps): React.JSX.Element {
   const notified = useRef(false)
@@ -45,11 +49,16 @@ export function Pane({
 
   return (
     <section
+      // Identifica il riquadro nel DOM: serve ai test end-to-end per seguire
+      // un riquadro mentre si sposta, cosa che la posizione non permette
+      // perché due disposizioni diverse possono avere la stessa geometria.
+      data-pane-id={meta.paneId}
       className={[
         'cm-pane',
         focused ? 'cm-pane--focused' : '',
         rect.floating ? 'cm-pane--floating' : '',
-        rect.hidden ? 'cm-pane--hidden' : ''
+        rect.hidden ? 'cm-pane--hidden' : '',
+        dragging ? 'cm-pane--dragging' : ''
       ]
         .filter(Boolean)
         .join(' ')}
@@ -65,8 +74,9 @@ export function Pane({
     >
       <header
         className="cm-pane__header"
-        onPointerDown={rect.floating ? onFloatDragStart : undefined}
+        onPointerDown={onHeaderDragStart}
         onDoubleClick={onClose}
+        title="Trascina per spostare il riquadro · doppio clic per chiuderlo"
       >
         <span className="cm-pane__index">{index}</span>
         <span className={dotClass} title={STATUS_LABEL[meta.status]} />

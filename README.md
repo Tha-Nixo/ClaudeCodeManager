@@ -11,6 +11,11 @@ proprio terminale e il proprio processo `claude`.
 
 - **Mosaico e flottanti.** I riquadri si dividono lo spazio automaticamente;
   quello attivo può essere staccato, spostato e ridimensionato col mouse.
+- **Riordino col mouse.** L'intestazione di ogni riquadro è una maniglia:
+  trascinala su un altro riquadro e rilascia vicino a un bordo per affiancarti,
+  al centro per scambiare i due. Un'anteprima mostra dove finirà prima che tu
+  molli, ed `Esc` annulla a metà gesto. Trascinando un riquadro flottante su un
+  bordo lo si riaggancia al mosaico.
 - **Selettore di cartella.** `Alt+N` apre una ricerca fuzzy sui progetti, un
   esplora-cartelle e un campo per incollare un percorso, con badge per ramo
   git, presenza di `CLAUDE.md`, sessioni già esistenti e stato di fiducia.
@@ -117,6 +122,16 @@ Alcune scelte che non si deducono dal codice:
   riga di comando: elimina i bug di quoting sui percorsi Windows.
 - **Il menu predefinito di Electron è rimosso.** Portava `Ctrl+R`, che
   ricaricando il renderer avrebbe azzerato tutti i buffer dei terminali.
+- **Durante le animazioni di layout la misurazione dei terminali è congelata.**
+  Animare larghezza e altezza fa scattare il `ResizeObserver` di xterm a ogni
+  frame: sarebbe una dozzina di `pty.resize` per transizione, con Claude Code
+  che ridisegna ogni volta. Il contenuto resta fermo mentre la cornice si
+  muove, e si rimisura una sola volta alla fine.
+- **Le transizioni si accendono solo per i cambi di layout.** Ridimensionando
+  la finestra o trascinando, i riquadri devono stare sotto il puntatore, non
+  inseguirlo con un ritardo.
+- **`prefers-reduced-motion` è rispettato:** chi ha chiesto meno movimento al
+  sistema operativo ottiene solo i cambi di colore.
 
 ## Limiti noti
 

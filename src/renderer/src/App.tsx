@@ -9,6 +9,7 @@ import {
   allPanes,
   collectLeaves,
   isFloating,
+  movePaneTo,
   removePane,
   setFocus,
   setRatio,
@@ -505,6 +506,9 @@ export default function App(): React.JSX.Element {
         onSetRatio={(path, ratio) => setLayout((prev) => setRatio(prev, path, ratio))}
         onMoveFloating={(id, x, y) => setLayout((prev) => updateFloating(prev, id, { x, y }))}
         onResizeFloating={(id, w, h) => setLayout((prev) => updateFloating(prev, id, { w, h }))}
+        onDropPane={(movingId, targetId, side) =>
+          setLayout((prev) => movePaneTo(prev, movingId, targetId, side))
+        }
         onRectsChange={(rects) => {
           rectsRef.current = rects
         }}

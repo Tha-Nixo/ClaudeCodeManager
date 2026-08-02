@@ -1,4 +1,4 @@
-import type { Direction, Layout, LayoutNode, SplitDir } from './layout'
+import type { Direction, DropSide, Layout, LayoutNode, SplitDir } from './layout'
 
 export interface Rect {
   x: number
@@ -163,6 +163,64 @@ export function paneInDirection(
 
 function center(r: Rect): { x: number; y: number } {
   return { x: r.x + r.w / 2, y: r.y + r.h / 2 }
+}
+
+/** Frazione del riquadro, dal centro, che vale come "scambia" invece di "affianca". */
+const CENTER_ZONE = 0.22
+
+/**
+ * Zona di rilascio corrispondente a un punto dentro un riquadro.
+ *
+ * Si confrontano gli scostamenti dal centro normalizzati sulle due dimensioni,
+ * non in pixel: su un riquadro molto largo e basso, altrimenti, i bordi
+ * superiore e inferiore sarebbero irraggiungibili.
+ */
+export function dropSideAt(rect: Rect, point: { x: number; y: number }): DropSide {
+  const w = Math.max(1, rect.w)
+  const h = Math.max(1, rect.h)
+  const dx = (point.x - (rect.x + w / 2)) / w
+  const dy = (point.y - (rect.y + h / 2)) / h
+
+  if (Math.abs(dx) < CENTER_ZONE && Math.abs(dy) < CENTER_ZONE) return 'center'
+  if (Math.abs(dx) >= Math.abs(dy)) return dx < 0 ? 'left' : 'right'
+  return dy < 0 ? 'top' : 'bottom'
+}
+
+/** Area che verrà occupata dal riquadro trascinato, per l'anteprima. */
+export function dropPreviewRect(rect: Rect, side: DropSide): Rect {
+  switch (side) {
+    case 'left':
+      return { ...rect, w: rect.w / 2 }
+    case 'right':
+      return { ...rect, x: rect.x + rect.w / 2, w: rect.w / 2 }
+    case 'top':
+      return { ...rect, h: rect.h / 2 }
+    case 'bottom':
+      return { ...rect, y: rect.y + rect.h / 2, h: rect.h / 2 }
+    default:
+      return rect
+  }
+}
+
+/** Riquadro visibile sotto un punto, escluso quello trascinato. */
+export function paneAt(
+  panes: PaneLayout[],
+  point: { x: number; y: number },
+  exclude: string
+): PaneLayout | null {
+  // Dal più in alto verso il basso: i flottanti coprono il mosaico.
+  const ordered = [...panes].sort((a, b) => b.z - a.z)
+  return (
+    ordered.find(
+      (p) =>
+        p.id !== exclude &&
+        !p.hidden &&
+        point.x >= p.x &&
+        point.x <= p.x + p.w &&
+        point.y >= p.y &&
+        point.y <= p.y + p.h
+    ) ?? null
+  )
 }
 
 /** Nuovo rapporto di uno split dato il punto in cui è stato trascinato il canale. */

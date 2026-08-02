@@ -2,6 +2,14 @@
    selettore e tema ANSI di xterm leggono queste stesse variabili. */
 
 :root {
+  /* Durata e curva condivise da tutto il programma. La curva parte decisa e
+     si posa piano: fa sembrare gli elementi mossi da un'intenzione, non da un
+     timer. ANIMATION_MS in Desktop.tsx deve restare allineata a --cm-move. */
+  --cm-fast: 110ms;
+  --cm-move: 190ms;
+  --cm-slow: 260ms;
+  --cm-ease: cubic-bezier(0.22, 0.61, 0.36, 1);
+
   --cm-desktop: #1f1e1d;
   --cm-panel: #262625;
   --cm-panel-raised: #2e2d2b;
@@ -115,6 +123,14 @@ body {
   font-family: var(--cm-font-mono);
   font-size: 12px;
   cursor: pointer;
+  transition:
+    background var(--cm-fast) var(--cm-ease),
+    border-color var(--cm-fast) var(--cm-ease),
+    color var(--cm-fast) var(--cm-ease);
+}
+
+.cm-iconbtn:active {
+  transform: scale(0.92);
 }
 
 .cm-iconbtn:hover {
@@ -146,10 +162,95 @@ body {
   border: 1px solid var(--cm-border-idle);
   border-radius: var(--cm-radius);
   overflow: hidden;
+  /* Il colore del bordo segue sempre il fuoco; la geometria si anima solo
+     quando lo stage lo consente (vedi .cm-stage--animate). */
+  transition:
+    border-color var(--cm-fast) var(--cm-ease),
+    box-shadow var(--cm-move) var(--cm-ease),
+    opacity var(--cm-fast) var(--cm-ease);
+  animation: cm-pane-in var(--cm-slow) var(--cm-ease);
+}
+
+/* Le transizioni di geometria si accendono solo per i cambi di layout: durante
+   il ridimensionamento della finestra o un trascinamento i riquadri devono
+   seguire il puntatore senza inseguirlo. */
+.cm-stage--animate .cm-pane {
+  transition:
+    left var(--cm-move) var(--cm-ease),
+    top var(--cm-move) var(--cm-ease),
+    width var(--cm-move) var(--cm-ease),
+    height var(--cm-move) var(--cm-ease),
+    border-color var(--cm-fast) var(--cm-ease),
+    box-shadow var(--cm-move) var(--cm-ease),
+    opacity var(--cm-fast) var(--cm-ease);
+}
+
+@keyframes cm-pane-in {
+  from {
+    opacity: 0;
+    transform: scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
 
 .cm-pane--focused {
   border-color: var(--cm-border-focus);
+}
+
+/* Il riquadro trascinato resta al suo posto ma si smaterializza, così
+   l'attenzione va all'anteprima di dove finirà. */
+.cm-pane--dragging {
+  opacity: 0.4;
+  border-color: var(--cm-border-focus);
+}
+
+.cm-pane--dragging .cm-pane__body {
+  pointer-events: none;
+}
+
+/* --- Anteprima di rilascio ------------------------------------------------ */
+
+.cm-drop {
+  position: absolute;
+  z-index: 900;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+  border: 2px solid var(--cm-accent);
+  border-radius: var(--cm-radius);
+  background: color-mix(in srgb, var(--cm-accent) 16%, transparent);
+  animation: cm-drop-in var(--cm-fast) var(--cm-ease);
+  transition:
+    left var(--cm-fast) var(--cm-ease),
+    top var(--cm-fast) var(--cm-ease),
+    width var(--cm-fast) var(--cm-ease),
+    height var(--cm-fast) var(--cm-ease);
+}
+
+.cm-drop--center {
+  border-style: dashed;
+}
+
+.cm-drop__label {
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--cm-accent);
+  color: #1f1e1d;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+@keyframes cm-drop-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 .cm-pane--floating {
@@ -265,6 +366,18 @@ body.cm-dragging * {
   background: var(--cm-panel);
   border-bottom: 1px solid var(--cm-border-idle);
   font-size: 12px;
+  /* L'intestazione è la maniglia: il cursore lo deve dire. */
+  cursor: grab;
+  transition: background var(--cm-fast) var(--cm-ease);
+}
+
+.cm-pane__header:hover {
+  background: var(--cm-panel-raised);
+}
+
+.cm-pane--dragging .cm-pane__header,
+body.cm-dragging .cm-pane__header {
+  cursor: grabbing;
 }
 
 .cm-pane__dot {
@@ -358,6 +471,33 @@ body.cm-dragging * {
   padding: 8vh 24px 24px;
   background: rgb(15 14 13 / 62%);
   backdrop-filter: blur(2px);
+  animation: cm-overlay-in var(--cm-fast) var(--cm-ease);
+}
+
+/* Il pannello entra dall'alto di pochi pixel: abbastanza per dire "sono
+   arrivato adesso", non tanto da far aspettare chi sa già cosa cercare. */
+.cm-overlay > * {
+  animation: cm-panel-in var(--cm-move) var(--cm-ease);
+}
+
+@keyframes cm-overlay-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes cm-panel-in {
+  from {
+    opacity: 0;
+    transform: translateY(-10px) scale(0.99);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 
 .cm-selector {
@@ -411,6 +551,19 @@ body.cm-dragging * {
   color: var(--cm-text-dim);
   font-size: 12px;
   cursor: pointer;
+  transition:
+    background var(--cm-fast) var(--cm-ease),
+    border-color var(--cm-fast) var(--cm-ease),
+    color var(--cm-fast) var(--cm-ease);
+}
+
+.cm-chip:hover {
+  border-color: var(--cm-text-dim);
+  color: var(--cm-text);
+}
+
+.cm-chip:active {
+  transform: scale(0.96);
 }
 
 .cm-chip--on {
@@ -440,6 +593,9 @@ body.cm-dragging * {
   border: 1px solid transparent;
   border-radius: 6px;
   cursor: pointer;
+  transition:
+    background var(--cm-fast) var(--cm-ease),
+    border-color var(--cm-fast) var(--cm-ease);
 }
 
 .cm-row--active {
@@ -660,6 +816,86 @@ body.cm-dragging * {
   height: 100%;
   border-radius: 2px;
   background: var(--cm-accent);
+  /* Le barre crescono da zero all'apertura del pannello: si legge subito
+     quale voce pesa di più, invece di trovarle già disegnate. */
+  animation: cm-bar-grow var(--cm-slow) var(--cm-ease);
+  transform-origin: left center;
+}
+
+@keyframes cm-bar-grow {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
+.cm-selector__go {
+  transition:
+    filter var(--cm-fast) var(--cm-ease),
+    opacity var(--cm-fast) var(--cm-ease);
+}
+
+.cm-selector__go:hover:not(:disabled) {
+  filter: brightness(1.12);
+}
+
+.cm-selector__go:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+.cm-pane__close,
+.cm-row__star {
+  transition:
+    background var(--cm-fast) var(--cm-ease),
+    color var(--cm-fast) var(--cm-ease);
+}
+
+.cm-row__star:active {
+  transform: scale(0.85);
+}
+
+.cm-resume__item {
+  transition:
+    background var(--cm-fast) var(--cm-ease),
+    border-color var(--cm-fast) var(--cm-ease),
+    color var(--cm-fast) var(--cm-ease);
+}
+
+.cm-resume__item:hover {
+  border-color: var(--cm-text-dim);
+}
+
+.cm-source {
+  transition: border-color var(--cm-fast) var(--cm-ease);
+}
+
+.cm-source:hover {
+  border-color: var(--cm-text-dim);
+}
+
+.cm-pane__dot {
+  transition: background var(--cm-move) var(--cm-ease);
+}
+
+/* Chi ha chiesto meno movimento al sistema operativo lo ottiene ovunque:
+   restano solo i cambi di colore, che comunicano senza spostare nulla. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .cm-pane__dot--starting,
+  .cm-pane__dot--busy {
+    animation: none !important;
+    opacity: 1;
+  }
 }
 
 .cm-usage__foot {

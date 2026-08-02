@@ -217,6 +217,56 @@ function defaultSplitDir(rect: { w: number; h: number }): SplitDir {
   return rect.w >= rect.h ? 'h' : 'v'
 }
 
+/** Dove rilasciare un riquadro rispetto a quello sotto il puntatore. */
+export type DropSide = 'left' | 'right' | 'top' | 'bottom' | 'center'
+
+/**
+ * Sposta un riquadro accanto a un altro, trascinandolo.
+ *
+ * 'center' scambia i due; i lati inseriscono il riquadro trascinato dividendo
+ * quello di destinazione. Il riquadro viene prima tolto da dov'era: senza
+ * questo passaggio comparirebbe due volte nell'albero.
+ */
+export function movePaneTo(
+  layout: Layout,
+  movingId: string,
+  targetId: string,
+  side: DropSide
+): Layout {
+  if (movingId === targetId) return layout
+  if (!hasPane(layout, movingId) || !hasPane(layout, targetId)) return layout
+
+  if (side === 'center') {
+    // Lo scambio ha senso solo fra riquadri del mosaico: un flottante non
+    // occupa una posizione nell'albero con cui scambiarsi.
+    if (isFloating(layout, movingId) || isFloating(layout, targetId)) return layout
+    return setFocus(swapPanes(layout, movingId, targetId), movingId)
+  }
+
+  const detached = removePane({ ...layout, focused: null, zoomed: null }, movingId)
+  if (!detached.root) return layout
+
+  const path = findPath(detached.root, targetId)
+  if (path === null) return layout
+
+  const dir: SplitDir = side === 'left' || side === 'right' ? 'h' : 'v'
+  const movingFirst = side === 'left' || side === 'top'
+  const split: LayoutNode = {
+    kind: 'split',
+    dir,
+    ratio: 0.5,
+    a: movingFirst ? leaf(movingId) : leaf(targetId),
+    b: movingFirst ? leaf(targetId) : leaf(movingId)
+  }
+
+  return {
+    ...detached,
+    root: replaceAt(detached.root, path, split),
+    focused: movingId,
+    zoomed: null
+  }
+}
+
 export function toggleZoom(layout: Layout, id: string): Layout {
   if (!hasPane(layout, id)) return layout
   return { ...layout, zoomed: layout.zoomed === id ? null : id }

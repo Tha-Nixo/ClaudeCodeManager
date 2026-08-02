@@ -24,6 +24,7 @@ type Command =
   | { type: 'key'; key: string; modifiers?: InputModifier[]; repeat?: number }
   | { type: 'text'; text: string }
   | { type: 'click'; x: number; y: number }
+  | { type: 'drag'; from: { x: number; y: number }; to: { x: number; y: number }; steps?: number }
   | { type: 'shot'; path: string }
   | { type: 'eval'; js: string; path: string }
 
@@ -97,6 +98,27 @@ async function run(lines: string[], getWindow: () => BrowserWindow | null): Prom
       case 'click': {
         wc.sendInputEvent({ type: 'mouseDown', x: cmd.x, y: cmd.y, button: 'left', clickCount: 1 })
         wc.sendInputEvent({ type: 'mouseUp', x: cmd.x, y: cmd.y, button: 'left', clickCount: 1 })
+        await delay(120)
+        break
+      }
+      case 'drag': {
+        // Il trascinamento va simulato a passi: il gestore reagisce ai
+        // pointermove, e un salto diretto dall'origine alla destinazione non
+        // passerebbe mai per la soglia che distingue un clic da un gesto.
+        const steps = Math.max(2, cmd.steps ?? 12)
+        wc.sendInputEvent({ type: 'mouseDown', x: cmd.from.x, y: cmd.from.y, button: 'left', clickCount: 1 })
+        await delay(40)
+        for (let i = 1; i <= steps; i++) {
+          const t = i / steps
+          wc.sendInputEvent({
+            type: 'mouseMove',
+            x: Math.round(cmd.from.x + (cmd.to.x - cmd.from.x) * t),
+            y: Math.round(cmd.from.y + (cmd.to.y - cmd.from.y) * t)
+          })
+          await delay(25)
+        }
+        await delay(80)
+        wc.sendInputEvent({ type: 'mouseUp', x: cmd.to.x, y: cmd.to.y, button: 'left', clickCount: 1 })
         await delay(120)
         break
       }
