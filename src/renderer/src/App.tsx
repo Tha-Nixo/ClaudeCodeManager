@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { AppConfig, LaunchOptions, LiveSession } from '@shared/types'
+import type { AppConfig, LaunchOptions, LiveSession, UpdateState } from '@shared/types'
 import { Desktop } from './compositor/Desktop'
 import type { Rect } from './compositor/geometry'
 import { paneInDirection } from './compositor/geometry'
@@ -46,6 +46,7 @@ export default function App(): React.JSX.Element {
   const [usageOpen, setUsageOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [usageBadge, setUsageBadge] = useState<{ cost: number; tokens: number } | null>(null)
+  const [update, setUpdate] = useState<UpdateState | null>(null)
 
   // Un overlay aperto disattiva le scorciatoie del compositor. Il ref serve
   // perché il gestore tastiera è registrato una volta sola e non vedrebbe
@@ -456,6 +457,12 @@ export default function App(): React.JSX.Element {
     return () => clearInterval(id)
   }, [])
 
+  // Lo stato degli aggiornamenti arriva dal main, che possiede il controllo.
+  useEffect(() => {
+    void window.cm.update.state().then(setUpdate)
+    return window.cm.update.onChange(setUpdate)
+  }, [])
+
   const paneCount = allPanes(layout).length
 
   return (
@@ -472,6 +479,24 @@ export default function App(): React.JSX.Element {
             onClick={() => setUsageOpen(true)}
           >
             {formatCost(usageBadge.cost)} oggi · {formatTokens(usageBadge.tokens)} tok
+          </button>
+        )}
+        {update && (update.status === 'ready' || update.status === 'downloading') && (
+          <button
+            className={`cm-topbar__update ${update.status === 'ready' ? 'cm-topbar__update--ready' : ''}`}
+            title={
+              update.status === 'ready'
+                ? `La versione ${update.version} è pronta. Verrà installata alla chiusura, oppure premi qui per riavviare adesso.`
+                : 'Scaricamento del nuovo aggiornamento in corso'
+            }
+            onClick={() => {
+              // Riavviare chiude tutte le sessioni: va chiesto, non fatto e basta.
+              if (update.status === 'ready') setSettingsOpen(true)
+            }}
+          >
+            {update.status === 'ready'
+              ? `↑ ${update.version} pronta`
+              : `↓ ${update.percent ?? 0}%`}
           </button>
         )}
         <span className="cm-topbar__hint">

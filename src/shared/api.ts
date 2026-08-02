@@ -18,6 +18,7 @@ import type {
   SshConnection,
   SshTarget,
   TranscriptSession,
+  UpdateState,
   UsageSummary
 } from './types'
 
@@ -94,6 +95,17 @@ export interface CmApi {
   }
   usage: {
     summary(): Promise<UsageSummary>
+  }
+  update: {
+    /** Versione dell'app in esecuzione. */
+    version(): Promise<string>
+    state(): Promise<UpdateState>
+    /** Forza un controllo; risolve con lo stato risultante. */
+    check(): Promise<UpdateState>
+    /** Riavvia e installa l'aggiornamento già scaricato. */
+    install(): Promise<void>
+    /** Ritorna la funzione per disiscriversi. */
+    onChange(cb: (state: UpdateState) => void): () => void
   }
   layout: {
     load(): Promise<PersistedLayout | null>

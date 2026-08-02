@@ -1339,6 +1339,34 @@ body.cm-dragging .cm-pane__header {
   color: var(--cm-error);
 }
 
+/* --- Aggiornamenti -------------------------------------------------------- */
+
+.cm-topbar__update {
+  flex: 0 0 auto;
+  padding: 2px 9px;
+  border: 1px solid var(--cm-border-idle);
+  border-radius: 999px;
+  background: var(--cm-panel-raised);
+  color: var(--cm-text-dim);
+  font-size: 11px;
+  cursor: default;
+  transition: border-color var(--cm-fast) var(--cm-ease),
+    color var(--cm-fast) var(--cm-ease);
+}
+
+/* Pronta da installare: e' l'unico stato che chiede una decisione. */
+.cm-topbar__update--ready {
+  border-color: var(--cm-accent);
+  color: var(--cm-accent);
+  cursor: pointer;
+}
+
+.cm-update__version {
+  color: var(--cm-text);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
 .cm-pane__remote {
   flex: 0 0 auto;
   padding: 1px 6px;

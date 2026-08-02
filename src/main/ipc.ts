@@ -1,4 +1,4 @@
-import { BrowserWindow, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, ipcMain, shell } from 'electron'
 import type {
   AppConfig,
   IndexKind,
@@ -29,6 +29,7 @@ import {
 import { getFavorites, toggleFavorite, touchRecent } from './store/folders'
 import { loadLayout, saveLayout } from './store/layout'
 import { ensureThemesDir, loadThemes } from './theme/store'
+import { check, currentState, installNow } from './update/updater'
 import { summarize } from './usage/scanner'
 
 /**
@@ -149,6 +150,15 @@ export function registerIpc(
   live.on('change', (sessions) => {
     getWindow()?.webContents.send('claude:live-change', sessions)
   })
+
+  // --- Aggiornamenti --------------------------------------------------------
+
+  ipcMain.handle('update:state', () => currentState())
+  ipcMain.handle('update:check', () => check())
+  ipcMain.handle('update:install', () => {
+    installNow()
+  })
+  ipcMain.handle('update:version', () => app.getVersion())
 
   // --- Connessioni remote ---------------------------------------------------
 

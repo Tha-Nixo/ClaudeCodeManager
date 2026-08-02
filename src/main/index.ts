@@ -5,6 +5,7 @@ import { installDevBridge } from './dev/bridge'
 import { registerIpc } from './ipc'
 import { PtyManager } from './pty/manager'
 import { flushLayout } from './store/layout'
+import { initUpdater, stopUpdater } from './update/updater'
 
 const isDev = !app.isPackaged
 /** In sviluppo si può partire in finestra: CM_WINDOWED=1 npm run dev */
@@ -118,6 +119,7 @@ if (!app.requestSingleInstanceLock()) {
     registerIpc(ptys, live, () => mainWindow)
     installDevBridge(() => mainWindow)
     live.start()
+    initUpdater((state) => mainWindow?.webContents.send('update:change', state))
     createWindow()
 
     app.on('activate', () => {
@@ -134,6 +136,7 @@ if (!app.requestSingleInstanceLock()) {
     // scrittura ancora in attesa, e va forzata prima di uscire.
     flushLayout()
     live.stop()
+    stopUpdater()
     ptys.killAll()
   })
 }

@@ -175,6 +175,35 @@ export interface TranscriptSession {
   sizeBytes: number
 }
 
+// --- Aggiornamenti ----------------------------------------------------------
+
+/**
+ * Stato del controllo aggiornamenti.
+ * 'unsupported' non è un errore: è il caso normale in sviluppo e con
+ * l'eseguibile portabile, che non può sostituirsi da solo.
+ */
+export type UpdateStatus =
+  | 'idle'
+  | 'checking'
+  | 'downloading'
+  | 'ready'
+  | 'error'
+  | 'unsupported'
+
+export interface UpdateState {
+  status: UpdateStatus
+  /** Versione disponibile, quando ce n'è una. */
+  version?: string
+  /** Avanzamento dello scaricamento, 0-100. */
+  percent?: number
+  /** Note della release, se il formato le rende leggibili come testo. */
+  notes?: string
+  /** Spiegazione per 'error' e 'unsupported'. */
+  message?: string
+  /** Epoch ms dell'ultimo controllo andato a buon fine. */
+  checkedAt?: number
+}
+
 // --- Layout persistente -----------------------------------------------------
 
 /**

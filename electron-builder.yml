@@ -41,5 +41,16 @@ nsis:
 portable:
   artifactName: ${productName}-${version}-portable.${ext}
 
+# Le release vanno su GitHub. electron-updater legge lo stesso blocco a runtime
+# per sapere dove cercare gli aggiornamenti, quindi va tenuto qui e non solo
+# nel comando di pubblicazione.
+publish:
+  provider: github
+  owner: Tha-Nixo
+  repo: ClaudeCodeManager
+  # Le bozze non sono visibili all'updater: la release va pubblicata per essere
+  # vista. La si crea come bozza e la si pubblica quando e' pronta.
+  releaseType: draft
+
 extraMetadata:
   main: out/main/index.js

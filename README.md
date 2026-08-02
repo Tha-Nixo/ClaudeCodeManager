@@ -109,6 +109,20 @@ npm run build        # compila in out/
 npm run dist         # genera installer NSIS ed eseguibile portabile in release/
 ```
 
+### Rilasciare una versione
+
+```powershell
+npm run release -- minor --dry   # mostra cosa farebbe, senza toccare niente
+npm run release -- minor         # alza la versione, scrive il changelog, compila, crea il tag
+git push; git push origin v1.1.0
+```
+
+Con `GH_TOKEN` nell'ambiente lo script carica anche i pacchetti su GitHub, come
+**bozza**: va riletta e pubblicata a mano. Finché è bozza nessuno la riceve, ed
+è voluto — un aggiornamento automatico raggiunge tutte le installazioni, quindi
+il momento in cui diventa visibile dev'essere una decisione e non l'effetto
+collaterale di aver lanciato uno script.
+
 Variabili d'ambiente utili durante lo sviluppo:
 
 | Variabile | Effetto |
@@ -201,6 +215,15 @@ Alcune scelte che non si deducono dal codice:
   chiedere una password che nessuno vedrebbe, e l'interfaccia resterebbe
   appesa; con, fallisce subito e l'errore viene tradotto in una frase che dice
   cosa fare.
+- **Gli aggiornamenti si scaricano da soli ma non si installano da soli.**
+  Installare vuol dire riavviare, e un riavvio a sorpresa ucciderebbe tutte le
+  sessioni Claude aperte. L'installazione avviene alla chiusura dell'app,
+  oppure quando la si chiede esplicitamente dalle impostazioni.
+- **L'eseguibile portabile riconosce di non poter aggiornarsi** e non ci
+  prova: un `.exe` portabile non ha un installer che possa sostituirlo mentre
+  è in esecuzione, quindi scaricherebbe decine di megabyte per poi fallire.
+  Lo si distingue da `PORTABLE_EXECUTABLE_DIR`, che electron-builder valorizza
+  solo in quel target.
 
 ## Limiti noti
 

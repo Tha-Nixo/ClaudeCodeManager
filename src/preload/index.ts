@@ -19,6 +19,7 @@ import type {
   SshConnection,
   SshTarget,
   TranscriptSession,
+  UpdateState,
   UsageSummary
 } from '@shared/types'
 
@@ -108,6 +109,18 @@ const api: CmApi = {
 
   usage: {
     summary: (): Promise<UsageSummary> => ipcRenderer.invoke('usage:summary')
+  },
+
+  update: {
+    version: (): Promise<string> => ipcRenderer.invoke('update:version'),
+    state: (): Promise<UpdateState> => ipcRenderer.invoke('update:state'),
+    check: (): Promise<UpdateState> => ipcRenderer.invoke('update:check'),
+    install: (): Promise<void> => ipcRenderer.invoke('update:install'),
+    onChange: (cb: (state: UpdateState) => void): (() => void) => {
+      const listener = (_e: unknown, state: UpdateState): void => cb(state)
+      ipcRenderer.on('update:change', listener)
+      return () => ipcRenderer.removeListener('update:change', listener)
+    }
   },
 
   layout: {

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import type { AppConfig, IndexKind, IndexStatus } from '@shared/types'
+import type { AppConfig, IndexKind, IndexStatus, UpdateState } from '@shared/types'
 import type { Theme, ThemeLoadError } from '@shared/theme'
 
 interface SettingsPanelProps {
@@ -246,6 +246,8 @@ export function SettingsPanel({
               )
             })}
           </section>
+
+          <UpdateSection />
         </div>
 
         <footer className="cm-usage__foot">
@@ -254,6 +256,88 @@ export function SettingsPanel({
         </footer>
       </div>
     </div>
+  )
+}
+
+/**
+ * Versione in esecuzione e stato degli aggiornamenti.
+ *
+ * Il pulsante che riavvia è volutamente separato e chiede conferma: installare
+ * significa chiudere l'app, e con essa ogni sessione Claude aperta.
+ */
+function UpdateSection(): React.JSX.Element {
+  const [version, setVersion] = useState('')
+  const [state, setState] = useState<UpdateState | null>(null)
+  const [checking, setChecking] = useState(false)
+  const [confirming, setConfirming] = useState(false)
+
+  useEffect(() => {
+    void window.cm.update.version().then(setVersion)
+    void window.cm.update.state().then(setState)
+    return window.cm.update.onChange(setState)
+  }, [])
+
+  const check = async (): Promise<void> => {
+    setChecking(true)
+    setState(await window.cm.update.check())
+    setChecking(false)
+  }
+
+  const status = state?.status ?? 'idle'
+
+  return (
+    <section className="cm-settings__section">
+      <div className="cm-settings__row">
+        <span className="cm-field__label">Versione</span>
+        <span className="cm-update__version">{version || '…'}</span>
+        <span className="cm-usage__spacer" />
+        {status !== 'unsupported' && (
+          <button className="cm-chip" disabled={checking} onClick={() => void check()}>
+            {checking || status === 'checking' ? 'Controllo…' : 'Controlla aggiornamenti'}
+          </button>
+        )}
+      </div>
+
+      <div className="cm-source__detail">
+        {status === 'unsupported' && state?.message}
+        {status === 'idle' &&
+          (state?.checkedAt
+            ? `Nessun aggiornamento disponibile · controllato ${relative(state.checkedAt)}`
+            : 'Il controllo avviene da solo poco dopo l’avvio e poi una volta al giorno.')}
+        {status === 'checking' && 'Controllo in corso…'}
+        {status === 'downloading' &&
+          `Scaricamento della versione ${state?.version} · ${state?.percent ?? 0}%`}
+        {status === 'error' && `Controllo non riuscito: ${state?.message}`}
+        {status === 'ready' && (
+          <>
+            La versione <strong>{state?.version}</strong> è pronta. Verrà installata da sola alla
+            chiusura dell’app.
+          </>
+        )}
+      </div>
+
+      {status === 'ready' && (
+        <div className="cm-source__actions">
+          {confirming ? (
+            <>
+              <span className="cm-source__progress">
+                Il riavvio chiude tutte le sessioni aperte. Procedere?
+              </span>
+              <button className="cm-chip" onClick={() => setConfirming(false)}>
+                No
+              </button>
+              <button className="cm-chip" onClick={() => void window.cm.update.install()}>
+                Riavvia e installa
+              </button>
+            </>
+          ) : (
+            <button className="cm-chip" onClick={() => setConfirming(true)}>
+              Installa adesso
+            </button>
+          )}
+        </div>
+      )}
+    </section>
   )
 }
 
