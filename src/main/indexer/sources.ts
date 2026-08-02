@@ -2,7 +2,9 @@ import { isAbsolute } from 'node:path'
 import type { CandidateSource, FolderCandidate } from '@shared/types'
 import { knownFolders, normalizePath } from '../claude/paths'
 import { folderInfo } from '../fs/browse'
+import { getConfig } from '../store/config'
 import { getFavorites, getRecents } from '../store/folders'
+import { foldersFor } from './diskIndex'
 import { rankBy } from './fuzzy'
 
 /**
@@ -17,12 +19,19 @@ import { rankBy } from './fuzzy'
 const CACHE_TTL_MS = 5_000
 let cache: { at: number; items: FolderCandidate[] } | null = null
 
+/**
+ * Ordine di pertinenza a parità di percorso: un preferito resta un preferito
+ * anche se compare pure fra i recenti o nella scansione del disco.
+ */
 const SOURCE_RANK: Record<CandidateSource, number> = {
   favorite: 0,
   recent: 1,
   claude: 2,
-  typed: 3,
-  browse: 4
+  git: 3,
+  roots: 4,
+  drive: 5,
+  typed: 6,
+  browse: 7
 }
 
 export function invalidateIndex(): void {
@@ -46,9 +55,17 @@ function collect(): FolderCandidate[] {
     }
   }
 
+  const sources = getConfig().indexSources
+
+  // Preferiti e recenti sono sempre attivi: sono scelte esplicite dell'utente,
+  // non il risultato di una scansione.
   for (const path of getFavorites()) add(path, 'favorite', Date.now())
   for (const r of getRecents()) add(r.path, 'recent', r.lastUsed)
-  for (const k of knownFolders()) add(k.path, 'claude', k.lastUsed)
+
+  if (sources.claude) for (const k of knownFolders()) add(k.path, 'claude', k.lastUsed)
+  if (sources.git) for (const p of foldersFor('git')) add(p, 'git', 0)
+  if (sources.roots) for (const p of foldersFor('roots')) add(p, 'roots', 0)
+  if (sources.drive) for (const p of foldersFor('drive')) add(p, 'drive', 0)
 
   const items = [...byPath.values()]
   cache = { at: Date.now(), items }

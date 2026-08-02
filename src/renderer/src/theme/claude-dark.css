@@ -671,6 +671,104 @@ body.cm-dragging * {
   line-height: 1.45;
 }
 
+/* --- Impostazioni --------------------------------------------------------- */
+
+.cm-settings {
+  display: flex;
+  flex-direction: column;
+  width: min(720px, 100%);
+  max-height: 82vh;
+  background: var(--cm-panel);
+  border: 1px solid var(--cm-border-idle);
+  border-radius: 10px;
+  box-shadow: 0 24px 64px rgb(0 0 0 / 60%);
+  overflow: hidden;
+}
+
+.cm-settings__body {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: 16px;
+  overflow-y: auto;
+}
+
+.cm-settings__section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.cm-settings__check {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--cm-text);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.cm-settings__roots {
+  padding: 7px 9px;
+  border: 1px solid var(--cm-border-idle);
+  border-radius: 6px;
+  background: var(--cm-terminal-bg);
+  color: var(--cm-text);
+  font-family: var(--cm-font-mono);
+  font-size: 12px;
+  resize: vertical;
+  outline: none;
+}
+
+.cm-settings__roots:focus {
+  border-color: var(--cm-border-focus);
+}
+
+.cm-source {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 9px 10px;
+  border: 1px solid var(--cm-border-idle);
+  border-radius: 6px;
+  background: var(--cm-desktop);
+}
+
+.cm-source__title--heavy {
+  color: var(--cm-waiting);
+}
+
+.cm-source__detail {
+  padding-left: 21px;
+  color: var(--cm-text-dim);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.cm-source__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-left: 21px;
+  margin-top: 3px;
+}
+
+.cm-source__progress {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--cm-text-dim);
+  font-size: 11px;
+  font-family: var(--cm-font-mono);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cm-usage__foot code {
+  font-family: var(--cm-font-mono);
+  color: var(--cm-text);
+}
+
 /* --- Sessioni riprendibili ------------------------------------------------ */
 
 .cm-resume {

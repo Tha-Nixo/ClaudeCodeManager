@@ -1,8 +1,9 @@
 import { BrowserWindow, ipcMain } from 'electron'
-import type { AppConfig, LaunchOptions, PersistedLayout } from '@shared/types'
+import type { AppConfig, IndexKind, LaunchOptions, PersistedLayout } from '@shared/types'
 import type { LiveSessions } from './claude/live'
 import { isResumable, sessionsForFolder } from './claude/transcripts'
 import { folderInfo, listDir, listDrives } from './fs/browse'
+import { allStatuses, cancel as cancelIndex, rescan } from './indexer/diskIndex'
 import { invalidateIndex, searchFolders } from './indexer/sources'
 import type { PtyManager } from './pty/manager'
 import { getConfig, setConfig } from './store/config'
@@ -47,6 +48,24 @@ export function registerIpc(
   ptys.on('exit', (id, exitCode, signal) => {
     getWindow()?.webContents.send('pty:exit', { id, exitCode, signal })
   })
+
+  // --- Indici su disco ------------------------------------------------------
+
+  ipcMain.handle('index:status', () => allStatuses())
+
+  ipcMain.handle('index:rescan', async (_e, kind: IndexKind) => {
+    const result = await rescan({
+      kind,
+      roots: getConfig().scanRoots,
+      // Lo stato viaggia mentre la scansione procede: una scansione dell'intero
+      // disco dura minuti e senza avanzamento sembrerebbe bloccata.
+      onUpdate: (s) => getWindow()?.webContents.send('index:progress', s)
+    })
+    invalidateIndex()
+    return result
+  })
+
+  ipcMain.on('index:cancel', (_e, kind: IndexKind) => cancelIndex(kind))
 
   // --- Utilizzo -------------------------------------------------------------
 

@@ -1,0 +1,45 @@
+appId: dev.nixo.claudemanager
+productName: ClaudeManager
+copyright: MIT
+
+directories:
+  output: release
+  buildResources: build
+
+# Solo l'output compilato e i moduli nativi. Il resto (sorgenti, config di
+# build, cache) non serve a runtime e gonfierebbe il pacchetto.
+files:
+  - out/**/*
+  - package.json
+
+# @lydell/node-pty distribuisce il binario in un pacchetto per piattaforma:
+# senza questo, electron-builder includerebbe anche quelli di macOS e Linux.
+asarUnpack:
+  - node_modules/@lydell/node-pty/**
+  - node_modules/@lydell/node-pty-win32-x64/**
+
+# Nessun certificato configurato: gli eseguibili non sono firmati e al primo
+# avvio Windows mostrerà l'avviso SmartScreen. È atteso per una build locale.
+win:
+  icon: build/icon.png
+  target:
+    - target: nsis
+      arch: [x64]
+    - target: portable
+      arch: [x64]
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: ClaudeManager
+  artifactName: ${productName}-Setup-${version}.${ext}
+  uninstallDisplayName: ${productName}
+
+portable:
+  artifactName: ${productName}-${version}-portable.${ext}
+
+extraMetadata:
+  main: out/main/index.js

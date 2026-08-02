@@ -22,6 +22,7 @@ import {
 } from './compositor/layout'
 import { installKeyHandler, type Action } from './keys/bindings'
 import { Selector } from './selector/Selector'
+import { SettingsPanel } from './settings/SettingsPanel'
 import { fromPersisted, toPersisted } from './state/persistence'
 import { paneStatusFromLive, type SessionMeta } from './state/types'
 import { UsagePanel, formatCost, formatTokens } from './usage/UsagePanel'
@@ -41,13 +42,14 @@ export default function App(): React.JSX.Element {
   const [sessions, setSessions] = useState<Record<string, SessionMeta>>({})
   const [selectorOpen, setSelectorOpen] = useState(false)
   const [usageOpen, setUsageOpen] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const [usageBadge, setUsageBadge] = useState<{ cost: number; tokens: number } | null>(null)
 
   // Un overlay aperto disattiva le scorciatoie del compositor. Il ref serve
   // perché il gestore tastiera è registrato una volta sola e non vedrebbe
   // i valori aggiornati dello stato.
   const overlayOpenRef = useRef(false)
-  overlayOpenRef.current = selectorOpen || usageOpen
+  overlayOpenRef.current = selectorOpen || usageOpen || settingsOpen
 
   // Geometrie correnti dei riquadri. Sono un ref e non uno stato: servono solo
   // dentro i gestori (focus direzionale, passaggio a flottante) e non devono
@@ -241,6 +243,9 @@ export default function App(): React.JSX.Element {
         case 'toggle-usage':
           setUsageOpen((open) => !open)
           return
+        case 'toggle-settings':
+          setSettingsOpen((open) => !open)
+          return
         default: {
           const match = /^focus-([1-9])$/.exec(action)
           if (match) {
@@ -318,19 +323,19 @@ export default function App(): React.JSX.Element {
     [runAction]
   )
 
-  // Esc chiude gli overlay. Il selettore lo gestisce da sé perché ha il fuoco;
-  // il pannello utilizzo no, quindi serve un ascoltatore qui.
+  // Esc chiude gli overlay. Il selettore lo gestisce da sé perché ha il fuoco
+  // sul proprio campo di ricerca; gli altri pannelli no, quindi serve qui.
   useEffect(() => {
-    if (!usageOpen) return
+    if (!usageOpen && !settingsOpen) return
     const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') {
-        e.preventDefault()
-        setUsageOpen(false)
-      }
+      if (e.key !== 'Escape') return
+      e.preventDefault()
+      setUsageOpen(false)
+      setSettingsOpen(false)
     }
     window.addEventListener('keydown', onKey, { capture: true })
     return () => window.removeEventListener('keydown', onKey, { capture: true })
-  }, [usageOpen])
+  }, [usageOpen, settingsOpen])
 
   // Il fuoco della tastiera segue il riquadro attivo, ma non glielo si ruba
   // mentre il selettore è aperto: scriverebbe nel terminale sottostante.
@@ -420,6 +425,13 @@ export default function App(): React.JSX.Element {
         </span>
         <div className="cm-topbar__spacer" />
         <div className="cm-topbar__buttons">
+          <button
+            className="cm-iconbtn"
+            title="Impostazioni (Alt+,)"
+            onClick={() => setSettingsOpen(true)}
+          >
+            ⚙
+          </button>
           <button className="cm-iconbtn" title="Riduci a icona" onClick={() => window.cm.win.minimize()}>
             ─
           </button>
@@ -469,6 +481,14 @@ export default function App(): React.JSX.Element {
       )}
 
       {usageOpen && <UsagePanel onClose={() => setUsageOpen(false)} />}
+
+      {settingsOpen && config && (
+        <SettingsPanel
+          config={config}
+          onConfigChange={setConfig}
+          onClose={() => setSettingsOpen(false)}
+        />
+      )}
     </div>
   )
 }

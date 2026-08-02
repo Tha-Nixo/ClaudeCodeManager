@@ -36,6 +36,7 @@ export type Action =
   | 'focus-8'
   | 'focus-9'
   | 'toggle-usage'
+  | 'toggle-settings'
   | 'toggle-fullscreen'
   | 'toggle-devtools'
   | 'quit'
@@ -71,6 +72,7 @@ export const DEFAULT_KEYMAP: Readonly<Record<string, Action>> = {
   'alt+9': 'focus-9',
 
   'alt+u': 'toggle-usage',
+  'alt+,': 'toggle-settings',
   f11: 'toggle-fullscreen',
   f12: 'toggle-devtools',
   'ctrl+shift+q': 'quit'

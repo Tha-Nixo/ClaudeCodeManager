@@ -158,7 +158,29 @@ export interface FolderInfo {
 }
 
 /** Da dove arriva una voce del selettore. */
-export type CandidateSource = 'favorite' | 'recent' | 'claude' | 'typed' | 'browse'
+export type CandidateSource =
+  | 'favorite'
+  | 'recent'
+  | 'claude'
+  | 'roots'
+  | 'git'
+  | 'drive'
+  | 'typed'
+  | 'browse'
+
+/** Indici che richiedono una scansione del disco. */
+export type IndexKind = 'roots' | 'git' | 'drive'
+
+export interface IndexStatus {
+  kind: IndexKind
+  running: boolean
+  visited: number
+  found: number
+  /** Cartella in esame, per dare un segno di vita durante la scansione. */
+  current: string
+  /** Epoch ms dell'ultima scansione completata, 0 se mai eseguita. */
+  scannedAt: number
+}
 
 export interface FolderCandidate {
   path: string
@@ -186,6 +208,19 @@ export interface AppConfig {
    * con --resume, invece di aprire sessioni vuote sulle stesse cartelle.
    */
   restoreResumesSessions: boolean
+  /** Sorgenti attive dell'indice del selettore. */
+  indexSources: {
+    /** Cartelle già usate con Claude Code, più recenti e preferiti. */
+    claude: boolean
+    /** Radici configurate, scansionate fino a 3 livelli. */
+    roots: boolean
+    /** Solo cartelle che contengono un repository git. */
+    git: boolean
+    /** Scansione completa delle unità. Pesante: si attiva a mano. */
+    drive: boolean
+  }
+  /** Radici usate dagli indici 'roots' e 'git'. */
+  scanRoots: string[]
 }
 
 export const DEFAULT_CONFIG: Omit<AppConfig, 'defaultCwd'> = {
@@ -196,5 +231,9 @@ export const DEFAULT_CONFIG: Omit<AppConfig, 'defaultCwd'> = {
   },
   initialCols: 120,
   initialRows: 30,
-  restoreResumesSessions: true
+  restoreResumesSessions: true,
+  // La scansione completa delle unità è l'unica disattivata di default: la
+  // prima esecuzione richiede minuti e va decisa dall'utente.
+  indexSources: { claude: true, roots: true, git: true, drive: false },
+  scanRoots: []
 }

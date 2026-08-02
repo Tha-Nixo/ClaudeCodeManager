@@ -5,6 +5,8 @@ import type {
   CreateSessionResult,
   FolderCandidate,
   FolderInfo,
+  IndexKind,
+  IndexStatus,
   LaunchOptions,
   LiveSession,
   PersistedLayout,
@@ -65,6 +67,17 @@ const api: CmApi = {
     favorites: (): Promise<string[]> => ipcRenderer.invoke('folders:favorites'),
     toggleFavorite: (path: string): Promise<string[]> =>
       ipcRenderer.invoke('folders:toggleFavorite', path)
+  },
+
+  index: {
+    status: (): Promise<IndexStatus[]> => ipcRenderer.invoke('index:status'),
+    rescan: (kind: IndexKind): Promise<IndexStatus> => ipcRenderer.invoke('index:rescan', kind),
+    cancel: (kind: IndexKind): void => ipcRenderer.send('index:cancel', kind),
+    onProgress: (cb: (status: IndexStatus) => void): (() => void) => {
+      const listener = (_e: unknown, status: IndexStatus): void => cb(status)
+      ipcRenderer.on('index:progress', listener)
+      return () => ipcRenderer.removeListener('index:progress', listener)
+    }
   },
 
   usage: {

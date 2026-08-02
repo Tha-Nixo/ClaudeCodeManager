@@ -4,6 +4,8 @@ import type {
   DirEntry,
   FolderCandidate,
   FolderInfo,
+  IndexKind,
+  IndexStatus,
   LaunchOptions,
   LiveSession,
   PersistedLayout,
@@ -55,6 +57,14 @@ export interface CmApi {
     info(path: string): Promise<FolderInfo>
     favorites(): Promise<string[]>
     toggleFavorite(path: string): Promise<string[]>
+  }
+  index: {
+    status(): Promise<IndexStatus[]>
+    /** Risolve a scansione conclusa; l'avanzamento arriva da onProgress. */
+    rescan(kind: IndexKind): Promise<IndexStatus>
+    cancel(kind: IndexKind): void
+    /** Ritorna la funzione per disiscriversi. */
+    onProgress(cb: (status: IndexStatus) => void): () => void
   }
   usage: {
     summary(): Promise<UsageSummary>

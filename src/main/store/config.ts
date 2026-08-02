@@ -1,8 +1,24 @@
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { app } from 'electron'
 import { DEFAULT_CONFIG, type AppConfig } from '@shared/types'
+
+/**
+ * Radici predefinite per l'indice: le cartelle dove di solito si tengono i
+ * progetti. Sta qui e non nell'indicizzatore per non creare un ciclo di
+ * import, dato che l'indicizzatore usa le funzioni di scrittura di questo file.
+ */
+export function defaultRoots(): string[] {
+  const home = homedir()
+  return [
+    join(home, 'Desktop'),
+    join(home, 'Documents'),
+    join(home, 'source'),
+    join(home, 'dev'),
+    join(home, 'projects')
+  ].filter((p) => existsSync(p))
+}
 
 /**
  * Scrittura atomica: si scrive su un file temporaneo e si rinomina.
@@ -41,7 +57,11 @@ export function getConfig(): AppConfig {
     launchDefaults: { ...DEFAULT_CONFIG.launchDefaults, ...stored?.launchDefaults },
     initialCols: stored?.initialCols ?? DEFAULT_CONFIG.initialCols,
     initialRows: stored?.initialRows ?? DEFAULT_CONFIG.initialRows,
-    restoreResumesSessions: stored?.restoreResumesSessions ?? DEFAULT_CONFIG.restoreResumesSessions
+    restoreResumesSessions: stored?.restoreResumesSessions ?? DEFAULT_CONFIG.restoreResumesSessions,
+    indexSources: { ...DEFAULT_CONFIG.indexSources, ...stored?.indexSources },
+    // Senza radici configurate si usano quelle in cui si tengono di solito i
+    // progetti, così l'indice è utile al primo avvio senza chiedere nulla.
+    scanRoots: stored?.scanRoots?.length ? stored.scanRoots : defaultRoots()
   }
   return cached
 }

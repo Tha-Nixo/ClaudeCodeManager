@@ -2,6 +2,8 @@ node_modules/
 out/
 dist/
 release/
+# build/ contiene l'icona, che va versionata: si ignorano solo gli artefatti
+build/*.ico
 .vite/
 *.log
 .DS_Store
