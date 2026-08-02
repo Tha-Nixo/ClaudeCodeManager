@@ -79,9 +79,117 @@ export const DEFAULT_KEYMAP: Readonly<Record<string, Action>> = {
 }
 
 /**
- * Nome del tasto indipendente dal layout: per lettere e cifre si usa `code`,
- * così Alt+B resta Alt+B anche su tastiere non QWERTY.
+ * Azioni in ordine di presentazione, con la loro etichetta.
+ *
+ * L'ordine è quello dell'elenco nelle impostazioni: raggruppato per
+ * argomento, non alfabetico, perché chi cerca "sposta il fuoco" si aspetta di
+ * trovarlo accanto agli altri movimenti.
  */
+export const ACTION_LABELS: { action: Action; label: string }[] = [
+  { action: 'new-session', label: 'Nuova sessione (selettore)' },
+  { action: 'new-session-here', label: 'Nuova sessione nella stessa cartella' },
+  { action: 'split-h', label: 'Nuova sessione affiancata' },
+  { action: 'split-v', label: 'Nuova sessione impilata' },
+  { action: 'close-pane', label: 'Chiudi il riquadro' },
+  { action: 'toggle-float', label: 'Stacca o riaggancia il riquadro' },
+  { action: 'toggle-zoom', label: 'Ingrandisci il riquadro' },
+  { action: 'focus-left', label: 'Fuoco a sinistra' },
+  { action: 'focus-right', label: 'Fuoco a destra' },
+  { action: 'focus-up', label: 'Fuoco in alto' },
+  { action: 'focus-down', label: 'Fuoco in basso' },
+  { action: 'move-left', label: 'Sposta il riquadro a sinistra' },
+  { action: 'move-right', label: 'Sposta il riquadro a destra' },
+  { action: 'move-up', label: 'Sposta il riquadro in alto' },
+  { action: 'move-down', label: 'Sposta il riquadro in basso' },
+  { action: 'toggle-usage', label: 'Statistiche di utilizzo' },
+  { action: 'toggle-settings', label: 'Impostazioni' },
+  { action: 'toggle-fullscreen', label: 'Schermo intero' },
+  { action: 'toggle-devtools', label: 'Strumenti di sviluppo' },
+  { action: 'quit', label: 'Esci' }
+]
+
+/** Tutte le azioni note, per validare una mappa scritta a mano. */
+const ACTIONS = new Set<string>(Object.values(DEFAULT_KEYMAP))
+
+export interface KeymapProblem {
+  combo: string
+  reason: string
+}
+
+export interface ResolvedKeymap {
+  keymap: Record<string, Action>
+  /** Voci scartate, da mostrare in chiaro invece di ignorarle in silenzio. */
+  problems: KeymapProblem[]
+}
+
+/**
+ * Unisce le scorciatoie personalizzate a quelle predefinite.
+ *
+ * Si SOVRAPPONE invece di sostituire: chi vuole spostare una sola
+ * combinazione non deve ridichiarare le altre venti. Una voce con azione
+ * vuota TOGLIE la scorciatoia, che è l'unico modo di liberare una
+ * combinazione senza rimpiazzarla — serve a chi vuole restituire `Alt+B` a
+ * readline.
+ *
+ * Le voci non valide vengono scartate con la ragione, non completate con un
+ * valore di ripiego: una scorciatoia che fa una cosa diversa da quella
+ * scritta è peggio di una che non funziona.
+ */
+export function resolveKeymap(custom: Record<string, string> | undefined): ResolvedKeymap {
+  const keymap: Record<string, Action> = { ...DEFAULT_KEYMAP }
+  const problems: KeymapProblem[] = []
+
+  for (const [rawCombo, action] of Object.entries(custom ?? {})) {
+    const combo = normalizeCombo(rawCombo)
+    if (!combo) {
+      problems.push({ combo: rawCombo, reason: 'combinazione vuota' })
+      continue
+    }
+
+    // Azione vuota = rimozione. Va gestita prima della validazione, perché
+    // la stringa vuota non è un'azione valida.
+    if (action === '') {
+      delete keymap[combo]
+      continue
+    }
+
+    if (!ACTIONS.has(action)) {
+      problems.push({ combo, reason: `azione sconosciuta: ${action}` })
+      continue
+    }
+
+    keymap[combo] = action as Action
+  }
+
+  return { keymap, problems }
+}
+
+/**
+ * Riordina i modificatori nell'ordine canonico e normalizza il tasto.
+ *
+ * Senza questo `shift+alt+b` non corrisponderebbe mai a niente, perché la
+ * firma prodotta dall'evento è sempre `alt+shift+b`: il file si scrive a
+ * mano, e nessuno indovina l'ordine giusto al primo colpo.
+ */
+export function normalizeCombo(raw: string): string | null {
+  const parts = raw
+    .toLowerCase()
+    .split('+')
+    .map((p) => p.trim())
+    .filter(Boolean)
+  if (parts.length === 0) return null
+
+  const key = parts[parts.length - 1]
+  const mods = new Set(parts.slice(0, -1))
+  const order = ['ctrl', 'alt', 'shift', 'meta'].filter((m) => mods.has(m))
+
+  // Un modificatore sconosciuto in mezzo verrebbe scambiato per il tasto:
+  // meglio rifiutare che produrre una combinazione plausibile e sbagliata.
+  if (order.length !== mods.size) return null
+
+  return [...order, key].join('+')
+}
+/** Come `signature`, ma per il solo tasto: `code` per lettere e cifre. */
 function normalizeKey(e: KeyboardEvent): string {
   if (/^Key[A-Z]$/.test(e.code)) return e.code.slice(3).toLowerCase()
   if (/^Digit[0-9]$/.test(e.code)) return e.code.slice(5)
@@ -104,6 +212,10 @@ function normalizeKey(e: KeyboardEvent): string {
   }
 }
 
+/**
+ * Nome del tasto indipendente dal layout: per lettere e cifre si usa `code`,
+ * così Alt+B resta Alt+B anche su tastiere non QWERTY.
+ */
 export function signature(e: KeyboardEvent): string {
   const parts: string[] = []
   if (e.ctrlKey) parts.push('ctrl')

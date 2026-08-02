@@ -21,7 +21,7 @@ import {
   type Layout,
   type SplitDir
 } from './compositor/layout'
-import { installKeyHandler, type Action } from './keys/bindings'
+import { installKeyHandler, resolveKeymap, type Action } from './keys/bindings'
 import { Selector } from './selector/Selector'
 import { SettingsPanel } from './settings/SettingsPanel'
 import { fromPersisted, toPersisted } from './state/persistence'
@@ -372,11 +372,24 @@ export default function App(): React.JSX.Element {
     return window.cm.claude.onLiveChange(applyLive)
   }, [applyLive])
 
+  // Le personalizzazioni si sovrappongono alla mappa predefinita. Ricalcolata
+  // solo quando cambiano davvero: reinstallare l'ascoltatore ad ogni render
+  // non serve a niente.
+  const { keymap, problems: keymapProblems } = useMemo(
+    () => resolveKeymap(config?.keymap),
+    [config?.keymap]
+  )
+
   // Con un overlay aperto il compositor non intercetta nulla: le frecce e
   // l'Invio devono restare all'overlay.
   useEffect(
-    () => installKeyHandler({ isEnabled: () => !overlayOpenRef.current, onAction: runAction }),
-    [runAction]
+    () =>
+      installKeyHandler({
+        keymap,
+        isEnabled: () => !overlayOpenRef.current,
+        onAction: runAction
+      }),
+    [runAction, keymap]
   )
 
   // Esc chiude gli overlay. Il selettore lo gestisce da sé perché ha il fuoco
@@ -654,6 +667,7 @@ export default function App(): React.JSX.Element {
           config={config}
           onConfigChange={setConfig}
           onClose={() => setSettingsOpen(false)}
+          keymapProblems={keymapProblems}
         />
       )}
     </div>

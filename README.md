@@ -72,6 +72,13 @@ quindi `@`, `#`, `[`, `]`, `{`, `}` continuano a funzionare normalmente.
 | `F11` | Schermo intero |
 | `Ctrl+Shift+Q` | Esce |
 
+Ogni combinazione è rimappabile dalle impostazioni: si preme la riga e poi la
+combinazione voluta. Serve almeno un modificatore, altrimenti quel tasto
+smetterebbe di arrivare a Claude. Le personalizzazioni finiscono in
+`config.json` sotto `keymap` e si **sovrappongono** alle predefinite: per
+liberare una combinazione senza rimpiazzarla — per restituire `Alt+B` a
+readline, ad esempio — le si assegna la stringa vuota.
+
 Dentro il selettore: `↑↓` scorre, `Invio` apre, `Ctrl+Invio` entra nella
 cartella, `Tab` gira fra i tre modi (Ricerca, Esplora, Remoto), `Ctrl+D`
 aggiunge ai preferiti, `Esc` annulla.

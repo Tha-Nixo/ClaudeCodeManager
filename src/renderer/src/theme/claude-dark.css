@@ -1353,6 +1353,75 @@ body.cm-dragging .cm-pane__header {
   color: var(--cm-error);
 }
 
+/* --- Editor delle scorciatoie --------------------------------------------- */
+
+.cm-keymap {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 3px;
+  margin-top: 8px;
+}
+
+.cm-keymap__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--cm-text);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background var(--cm-fast) var(--cm-ease),
+    border-color var(--cm-fast) var(--cm-ease);
+}
+
+.cm-keymap__row:hover {
+  background: var(--cm-panel-raised);
+}
+
+.cm-keymap__row--rec {
+  border-color: var(--cm-accent);
+  background: var(--cm-panel-raised);
+}
+
+.cm-keymap__label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cm-keymap__combo {
+  flex: 0 0 auto;
+  padding: 1px 6px;
+  border: 1px solid var(--cm-border-idle);
+  border-radius: 4px;
+  background: var(--cm-panel);
+  color: var(--cm-text-dim);
+  font-family: var(--cm-font-mono);
+  font-size: 10px;
+}
+
+/* Una combinazione cambiata dall'utente si distingue da quella di serie. */
+.cm-keymap__combo--custom {
+  border-color: var(--cm-accent);
+  color: var(--cm-accent);
+}
+
+.cm-keymap__error {
+  margin-top: 6px;
+  padding: 6px 9px;
+  border-left: 2px solid var(--cm-error);
+  color: var(--cm-text);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
 /* --- Cassetto di monitoraggio --------------------------------------------- */
 
 .cm-drawer {

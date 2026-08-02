@@ -78,7 +78,13 @@ export function getConfig(): AppConfig {
     // progetti, così l'indice è utile al primo avvio senza chiedere nulla.
     scanRoots: stored?.scanRoots?.length ? stored.scanRoots : defaultRoots(),
     themeId: stored?.themeId ?? DEFAULT_CONFIG.themeId,
-    notifyOnWaiting: stored?.notifyOnWaiting ?? DEFAULT_CONFIG.notifyOnWaiting
+    notifyOnWaiting: stored?.notifyOnWaiting ?? DEFAULT_CONFIG.notifyOnWaiting,
+    // Il file è modificabile a mano: una chiave non-oggetto lo renderebbe
+    // illeggibile al renderer invece di essere semplicemente ignorata.
+    keymap:
+      stored?.keymap && typeof stored.keymap === 'object' && !Array.isArray(stored.keymap)
+        ? stored.keymap
+        : {}
   }
   return cached
 }

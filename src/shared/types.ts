@@ -387,6 +387,15 @@ export interface AppConfig {
    * di riserva quando le notifiche sono spente o soppresse da Windows.
    */
   notifyOnWaiting: boolean
+  /**
+   * Scorciatoie personalizzate: combinazione → azione.
+   *
+   * Si SOVRAPPONE alla mappa predefinita invece di sostituirla, così un
+   * utente che vuole spostare una sola combinazione non deve ridichiarare
+   * tutte le altre. Per togliere una scorciatoia senza rimpiazzarla si
+   * assegna la stringa vuota.
+   */
+  keymap: Record<string, string>
 }
 
 export const DEFAULT_CONFIG: Omit<AppConfig, 'defaultCwd'> = {
@@ -403,5 +412,6 @@ export const DEFAULT_CONFIG: Omit<AppConfig, 'defaultCwd'> = {
   indexSources: { claude: true, roots: true, git: true, drive: false },
   scanRoots: [],
   themeId: DEFAULT_THEME_ID,
-  notifyOnWaiting: true
+  notifyOnWaiting: true,
+  keymap: {}
 }

@@ -1,11 +1,15 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { AppConfig, IndexKind, IndexStatus, UpdateState } from '@shared/types'
 import type { Theme, ThemeLoadError } from '@shared/theme'
+import type { KeymapProblem } from '../keys/bindings'
+import { KeymapEditor } from './KeymapEditor'
 
 interface SettingsPanelProps {
   config: AppConfig
   onConfigChange: (config: AppConfig) => void
   onClose: () => void
+  /** Scorciatoie scartate dalla configurazione, da mostrare in chiaro. */
+  keymapProblems: KeymapProblem[]
 }
 
 const SOURCES: {
@@ -47,7 +51,8 @@ const SOURCES: {
 export function SettingsPanel({
   config,
   onConfigChange,
-  onClose
+  onClose,
+  keymapProblems
 }: SettingsPanelProps): React.JSX.Element {
   const [statuses, setStatuses] = useState<Record<string, IndexStatus>>({})
   const [rootsText, setRootsText] = useState(config.scanRoots.join('\n'))
@@ -193,6 +198,8 @@ export function SettingsPanel({
               applicazioni lampeggia comunque, anche a notifiche spente.
             </div>
           </section>
+
+          <KeymapEditor config={config} onPatch={patch} problems={keymapProblems} />
 
           <section className="cm-settings__section">
             <div className="cm-field__label">Radici da indicizzare</div>
