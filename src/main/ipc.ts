@@ -15,6 +15,7 @@ import { allStatuses, cancel as cancelIndex, rescan } from './indexer/diskIndex'
 import { invalidateIndex, searchFolders } from './indexer/sources'
 import { publishPanes, subscribe, unsubscribe } from './monitor/state'
 import { closeMonitorWindow, isMonitorOpen, openMonitorWindow } from './monitor/window'
+import { onLiveChange, setKnownPanes, setNotificationsEnabled } from './notify/notifier'
 import type { PtyManager } from './pty/manager'
 import {
   isRemoteResumable,
@@ -152,11 +153,17 @@ export function registerIpc(
 
   live.on('change', (sessions) => {
     getWindow()?.webContents.send('claude:live-change', sessions)
+    onLiveChange(sessions, getWindow)
   })
 
   // --- Pannello di monitoraggio ---------------------------------------------
 
-  ipcMain.on('monitor:panes', (_e, panes: MonitorPane[]) => publishPanes(panes))
+  ipcMain.on('monitor:panes', (_e, panes: MonitorPane[]) => {
+    publishPanes(panes)
+    // Le notifiche nominano il riquadro e vi portano al clic: hanno bisogno
+    // dello stesso elenco.
+    setKnownPanes(panes)
+  })
   ipcMain.handle('monitor:subscribe', (e) => subscribe(e.sender))
   ipcMain.on('monitor:unsubscribe', (e) => unsubscribe(e.sender))
   ipcMain.handle('monitor:detached', () => isMonitorOpen())
@@ -214,7 +221,14 @@ export function registerIpc(
   // --- Config ---------------------------------------------------------------
 
   ipcMain.handle('config:get', () => getConfig())
-  ipcMain.handle('config:set', (_e, patch: Partial<AppConfig>) => setConfig(patch))
+  ipcMain.handle('config:set', (_e, patch: Partial<AppConfig>) => {
+    const next = setConfig(patch)
+    setNotificationsEnabled(next.notifyOnWaiting)
+    return next
+  })
+
+  // Lo stato iniziale va allineato subito: la preferenza è già su disco.
+  setNotificationsEnabled(getConfig().notifyOnWaiting)
 
   // --- Finestra -------------------------------------------------------------
 

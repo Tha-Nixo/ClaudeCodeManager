@@ -135,6 +135,13 @@ export interface CmApi {
     get(): Promise<AppConfig>
     set(patch: Partial<AppConfig>): Promise<AppConfig>
   }
+  notify: {
+    /**
+     * Il clic su una notifica chiede di portare il fuoco a quel riquadro.
+     * Ritorna la funzione per disiscriversi.
+     */
+    onFocusPane(cb: (paneId: string) => void): () => void
+  }
   win: {
     toggleFullscreen(): void
     minimize(): void

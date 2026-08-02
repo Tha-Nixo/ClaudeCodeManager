@@ -36,6 +36,10 @@ proprio terminale e il proprio processo `claude`.
   server*: si salvano le connessioni, si sfogliano le cartelle remote con gli
   stessi badge di quelle locali, e si riprendono le conversazioni gia' presenti
   la'. La cartella remota resta ricordata per la volta dopo.
+- **Avvisi quando una sessione ti aspetta.** Con piu' riquadri aperti non si
+  possono guardare tutti: quando uno passa ad attendere una risposta arriva una
+  notifica di sistema e l'icona nella barra delle applicazioni lampeggia. Il
+  clic porta direttamente a quel riquadro, col fuoco gia' nel terminale.
 - **Cassetto di monitoraggio.** Una linguetta sul bordo destro apre un
   pannello con costo e token del giorno e, per ogni sessione, quanto e' pieno
   il contesto. Si puo' staccare in una finestra a se', sempre in primo piano e
@@ -263,6 +267,18 @@ Alcune scelte che non si deducono dal codice:
   funziona identica col server di sviluppo e con `file://`. La finestra
   applica il tema da sola: vive in un processo di rendering suo e non eredita
   niente dalla principale.
+- **Si avvisa sul PASSAGGIO ad "attende input", non finché ci resta.** Il
+  registro delle sessioni viene riscritto spesso, e notificare ad ogni
+  riscrittura produrrebbe una raffica per una sola attesa. Il primo
+  avvistamento non conta come passaggio: altrimenti all'avvio dell'app tutte
+  le sessioni sarebbero "nuove" e arriverebbe una salva di avvisi per stati
+  già noti.
+- **Solo le sessioni che appartengono a un riquadro.** Il registro contiene
+  ogni Claude Code vivo sulla macchina, comprese quelle aperte in un altro
+  terminale: avvisare per quelle sarebbe intromettersi.
+- **Una finestra ridotta a icona conta come non guardata**, anche se il
+  sistema la considera ancora attiva: non mostra niente, quindi il pallino che
+  cambia colore non lo vede nessuno.
 - **Gli osservatori del pannello sono tenuti per identità, non contati.** Un
   contatore si sbilancia al primo caso storto — finestra chiusa senza
   disiscriversi, renderer ricaricato, crash — e lascia acceso per sempre un

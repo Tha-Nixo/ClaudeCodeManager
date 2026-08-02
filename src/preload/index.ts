@@ -155,6 +155,14 @@ const api: CmApi = {
     set: (patch: Partial<AppConfig>): Promise<AppConfig> => ipcRenderer.invoke('config:set', patch)
   },
 
+  notify: {
+    onFocusPane: (cb: (paneId: string) => void): (() => void) => {
+      const listener = (_e: unknown, paneId: string): void => cb(paneId)
+      ipcRenderer.on('notify:focus-pane', listener)
+      return () => ipcRenderer.removeListener('notify:focus-pane', listener)
+    }
+  },
+
   win: {
     toggleFullscreen: (): void => ipcRenderer.send('win:toggle-fullscreen'),
     minimize: (): void => ipcRenderer.send('win:minimize'),

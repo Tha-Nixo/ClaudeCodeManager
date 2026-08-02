@@ -478,6 +478,18 @@ export default function App(): React.JSX.Element {
     return window.cm.monitor.onDetachedChange(setDetached)
   }, [])
 
+  // Il clic su una notifica deve atterrare sulla sessione che ha chiesto
+  // qualcosa, non genericamente sull'app: il fuoco va anche al terminale, così
+  // si può rispondere subito senza un clic in più.
+  useEffect(
+    () =>
+      window.cm.notify.onFocusPane((paneId) => {
+        setLayout((prev) => setFocus(prev, paneId))
+        focusPane(paneId)
+      }),
+    []
+  )
+
   // Memorizzato: `allPanes` crea un array nuovo ad ogni chiamata, e usato
   // come dipendenza di un effetto lo farebbe scattare ad ogni render.
   const paneOrder = useMemo(() => allPanes(layout), [layout])

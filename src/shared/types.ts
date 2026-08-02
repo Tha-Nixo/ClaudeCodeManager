@@ -381,6 +381,12 @@ export interface AppConfig {
   scanRoots: string[]
   /** Id del tema attivo, integrato o caricato da file. */
   themeId: string
+  /**
+   * Notifica di sistema quando una sessione passa ad attendere input.
+   * Il lampeggio nella barra delle applicazioni resta comunque: è il segnale
+   * di riserva quando le notifiche sono spente o soppresse da Windows.
+   */
+  notifyOnWaiting: boolean
 }
 
 export const DEFAULT_CONFIG: Omit<AppConfig, 'defaultCwd'> = {
@@ -396,5 +402,6 @@ export const DEFAULT_CONFIG: Omit<AppConfig, 'defaultCwd'> = {
   // prima esecuzione richiede minuti e va decisa dall'utente.
   indexSources: { claude: true, roots: true, git: true, drive: false },
   scanRoots: [],
-  themeId: DEFAULT_THEME_ID
+  themeId: DEFAULT_THEME_ID,
+  notifyOnWaiting: true
 }

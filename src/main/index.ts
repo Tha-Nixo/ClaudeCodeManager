@@ -3,6 +3,7 @@ import { app, BrowserWindow, Menu, session, shell } from 'electron'
 import { LiveSessions } from './claude/live'
 import { installDevBridge } from './dev/bridge'
 import { registerIpc } from './ipc'
+import { clearAttention, initNotifier } from './notify/notifier'
 import { PtyManager } from './pty/manager'
 import { flushLayout } from './store/layout'
 import { initUpdater, stopUpdater } from './update/updater'
@@ -39,6 +40,10 @@ function createWindow(): void {
   mainWindow.on('closed', () => {
     mainWindow = null
   })
+
+  // Tornare sull'app è la risposta all'avviso: il lampeggio ha esaurito il
+  // suo compito e continuare sarebbe solo fastidio.
+  mainWindow.on('focus', () => mainWindow && clearAttention(mainWindow))
 
   // I link esterni non devono mai navigare dentro la finestra dell'app, e
   // vanno consegnati al sistema solo se sono http/https: shell.openExternal
@@ -114,6 +119,11 @@ if (!app.requestSingleInstanceLock()) {
     // Ctrl+W e Ctrl+Q, e fa sì che il solo Alt attivi la barra dei menu —
     // cioè proprio il tasto che il compositor usa come modificatore.
     Menu.setApplicationMenu(null)
+
+    // Prima di costruire qualunque notifica: su Windows senza identificativo
+    // del modello applicativo gli avvisi risultano di "electron.app.Electron",
+    // o non compaiono affatto.
+    initNotifier()
 
     applyProductionCsp()
     registerIpc(ptys, live, () => mainWindow)

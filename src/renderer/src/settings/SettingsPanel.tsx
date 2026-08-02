@@ -180,6 +180,18 @@ export function SettingsPanel({
               />
               Al ripristino riprendi anche le conversazioni, non solo le cartelle
             </label>
+            <label className="cm-settings__check">
+              <input
+                type="checkbox"
+                checked={config.notifyOnWaiting}
+                onChange={(e) => patch({ notifyOnWaiting: e.target.checked })}
+              />
+              Avvisa quando una sessione attende una risposta
+            </label>
+            <div className="cm-source__detail">
+              Solo quando la finestra non ha il fuoco. L&apos;icona nella barra delle
+              applicazioni lampeggia comunque, anche a notifiche spente.
+            </div>
           </section>
 
           <section className="cm-settings__section">
