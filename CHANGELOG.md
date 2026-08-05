@@ -6,6 +6,12 @@ arrivano funzioni nuove, il terzo per le correzioni.
 
 <!-- nuove versioni qui sotto -->
 
+## 1.1.1 — 2026-08-05
+
+- Suite di test, CI, e nove difetti trovati scrivendola
+- Correzioni dalla campagna di test: 15 difetti
+- Una cartella per versione negli artefatti di release
+
 ## 1.1.0 — 2026-08-02
 
 - **Avvisi quando una sessione ti aspetta.** Con più riquadri aperti non si
