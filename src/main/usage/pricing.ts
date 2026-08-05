@@ -104,6 +104,15 @@ export function contextWindowFor(model: string | null | undefined): {
   const exact = CONTEXT_WINDOWS[id]
   if (exact) return { window: exact, approximate: false }
 
+  // Gli id scritti nei transcript hanno il suffisso di data
+  // (claude-haiku-4-5-20251001), quindi la corrispondenza per prefisso e' il
+  // caso normale, non l'eccezione: senza, ogni percentuale di riempimento del
+  // contesto veniva marcata «circa» pur essendo esatta, e l'avvertenza perdeva
+  // valore proprio dove servirebbe. `priceFor` fa gia' lo stesso.
+  for (const [key, window] of Object.entries(CONTEXT_WINDOWS)) {
+    if (id.startsWith(key)) return { window, approximate: false }
+  }
+
   for (const { keyword, key } of FAMILY_FALLBACK) {
     if (id.includes(keyword)) return { window: CONTEXT_WINDOWS[key] ?? 0, approximate: true }
   }

@@ -29,6 +29,27 @@ const GUTTER_HIT = 5
 const MIN_VISIBLE = 80
 const HEADER_VISIBLE = 30
 
+/**
+ * Sotto queste misure un terminale non e' piu' utilizzabile.
+ *
+ * Non esisteva alcun limite: dividendo ripetutamente nella stessa direzione le
+ * larghezze andavano 1600, 796, 394, 193, 92, 42, 17, 4, 0. Dall'ottava
+ * divisione il riquadro nasceva largo zero — il processo partiva e consumava
+ * token, ma non era ne' visibile ne' raggiungibile col mouse.
+ *
+ * 140x90 sono all'incirca 16 colonne per 5 righe: stretto, ma ancora un
+ * terminale in cui si legge qualcosa.
+ */
+export const MIN_PANE_W = 140
+export const MIN_PANE_H = 90
+
+/** Vero se il riquadro ha ancora spazio per essere diviso in quella direzione. */
+export function canSplit(rect: { w: number; h: number }, dir: 'h' | 'v'): boolean {
+  return dir === 'h'
+    ? (rect.w - GAP) / 2 >= MIN_PANE_W
+    : (rect.h - GAP) / 2 >= MIN_PANE_H
+}
+
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value))
 }

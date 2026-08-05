@@ -101,7 +101,7 @@ function scanTail(file: string): TailScan {
 
     // Filtro testuale prima di parsare: le righe interessanti sono poche fra
     // migliaia, e JSON.parse su ognuna costerebbe molto di piu'.
-    const maybeTitle = !aiTitle && line.includes('"ai-title"')
+    const maybeTitle = !aiTitle && (line.includes('"ai-title"') || line.includes('"custom-title"'))
     const maybePrompt = !lastPrompt && line.includes('"last-prompt"')
     if (!maybeTitle && !maybePrompt) continue
 
@@ -109,9 +109,15 @@ function scanTail(file: string): TailScan {
       const rec = JSON.parse(line) as {
         type?: string
         aiTitle?: string
+        customTitle?: string
+        title?: string
         lastPrompt?: string
       }
       if (!aiTitle && rec.type === 'ai-title' && rec.aiTitle) aiTitle = rec.aiTitle
+      // Un titolo scelto dall'utente vale quanto quello generato: e' anzi
+      // l'unica etichetta disponibile quando l'ultimo turno e' un comando
+      // slash, caso in cui il record last-prompt non porta il testo.
+      if (!aiTitle && rec.type === 'custom-title') aiTitle = rec.customTitle ?? rec.title ?? null
       if (!lastPrompt && rec.type === 'last-prompt' && rec.lastPrompt) lastPrompt = rec.lastPrompt
     } catch {
       // Riga non valida: si prosegue.
@@ -119,6 +125,21 @@ function scanTail(file: string): TailScan {
   }
 
   return { aiTitle, lastPrompt }
+}
+
+/**
+ * Riconosce i messaggi che avvolgono un comando slash invece di essere testo
+ * scritto da una persona.
+ *
+ * Claude Code li scrive come messaggi utente, ma il contenuto e' markup
+ * interno (`<command-name>`, `<local-command-stdout>`, `<command-message>`).
+ * Preso come etichetta produceva righe illeggibili nell'elenco delle sessioni
+ * da riprendere.
+ */
+function isCommandWrapper(text: string): boolean {
+  return /<\/?(command-(name|message|args|contents)|local-command-(stdout|stderr)|command-stdout)\b/i.test(
+    text
+  )
 }
 
 function scanHeadForFirstUserMessage(file: string): string | null {
@@ -137,6 +158,11 @@ function scanHeadForFirstUserMessage(file: string): string | null {
       // Il contenuto e' una stringa per i prompt digitati e un array di
       // blocchi per i risultati degli strumenti: qui interessa il primo caso.
       if (typeof rec.message?.content === 'string' && rec.message.content.trim()) {
+        // I messaggi che avvolgono un comando slash non sono prompt scritti da
+        // una persona: sono marcatori interni. Usati come etichetta,
+        // nell'elenco «riprendi conversazione» comparivano righe di markup
+        // incomprensibile, e l'utente non poteva capire quale sessione fosse.
+        if (isCommandWrapper(rec.message.content)) continue
         return rec.message.content
       }
     } catch {

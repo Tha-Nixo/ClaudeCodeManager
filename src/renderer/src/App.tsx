@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { AppConfig, LaunchOptions, LiveSession, UpdateState } from '@shared/types'
 import { Desktop } from './compositor/Desktop'
 import type { Rect } from './compositor/geometry'
-import { paneInDirection } from './compositor/geometry'
+import { MIN_PANE_H, MIN_PANE_W, canSplit, paneInDirection } from './compositor/geometry'
 import {
   EMPTY_LAYOUT,
   addPane,
@@ -94,7 +94,25 @@ export default function App(): React.JSX.Element {
       ...prev,
       [paneId]: { paneId, cwd: opts.cwd, title: null, status: 'starting', launch: opts }
     }))
-    setLayout((prev) => addPane(prev, paneId, dir))
+
+    setLayout((prev) => {
+      const next = addPane(prev, paneId, dir)
+
+      // Dividere all'infinito produceva riquadri da 4 px e poi da 0: il
+      // processo partiva e consumava token, ma il terminale non era né
+      // visibile né raggiungibile. Quando lo spazio è finito la sessione nasce
+      // flottante — piccola ma utilizzabile — invece di nascere invisibile.
+      const rect = prev.focused ? rectsRef.current[prev.focused] : null
+      if (!rect || canSplit(rect, dir)) return next
+
+      // Scostata rispetto al riquadro di partenza, così non ci finisce sopra.
+      return toggleFloat(next, paneId, {
+        x: Math.max(0, rect.x + 40),
+        y: Math.max(0, rect.y + 40),
+        w: Math.max(MIN_PANE_W * 3, 520),
+        h: Math.max(MIN_PANE_H * 3, 360)
+      })
+    })
   }, [])
 
   /** Un riquadro largo si divide in verticale, uno alto in orizzontale. */

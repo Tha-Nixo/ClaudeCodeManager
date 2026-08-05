@@ -54,23 +54,17 @@ export function sshDestination(target: SshTarget): string {
 }
 
 /**
- * Verifica che un comando remoto sia attraversabile da PowerShell.
+ * Un tempo qui c'era un divieto assoluto di doppi apici nel comando remoto:
+ * PowerShell 5.1 non sapeva consegnarli a un eseguibile nativo, quindi
+ * l'unico modo di restare corretti era non usarli mai. Il divieto pero'
+ * faceva fallire l'apertura del riquadro con un'eccezione appena l'utente
+ * scriveva un prompt del tutto normale come `sistema il bug del "login"`.
  *
- * PowerShell 5.1 non sa passare un doppio apice a un eseguibile nativo: lo
- * consegna senza protezione e la riga di comando si spezza nel punto
- * sbagliato. Finché il comando remoto usa solo apici singoli il problema non
- * esiste, ma è un invariante che una modifica distratta romperebbe in
- * silenzio — e il sintomo sarebbe un errore della shell remota, lontano dalla
- * causa. Meglio fermarsi qui.
+ * Ora gli argomenti vengono protetti a monte (vedi `pty/winargs.ts`), quindi
+ * i doppi apici attraversano PowerShell intatti e il divieto non serve piu'.
+ * Il comando remoto continua a usare apici singoli per scelta, perche' sono
+ * il modo piu' semplice di rendere letterale un valore per una shell POSIX.
  */
-function assertNoDoubleQuotes(command: string): string {
-  if (command.includes('"')) {
-    throw new Error(
-      'Comando remoto con doppi apici: PowerShell non li trasmette correttamente. Usa apici singoli.'
-    )
-  }
-  return command
-}
 
 /**
  * Entra nella cartella remota e avvia claude.
@@ -87,27 +81,29 @@ export function remoteCommand(opts: LaunchOptions, sessionId: string): string {
   // '~' fra apici non viene espanso dalla shell: resterebbe un nome di
   // cartella letterale. Per i percorsi che iniziano con ~ si quota solo la
   // parte restante.
+  //
+  // Il '--' non è decorativo: gli apici rendono letterale il valore per la
+  // shell, ma non impediscono a `cd` di leggerlo come opzione. Una cartella
+  // chiamata '-' porterebbe a $OLDPWD, cioè altrove, in silenzio.
   const cd =
     path === '~'
-      ? 'cd ~'
+      ? 'cd -- ~'
       : path.startsWith('~/')
-        ? `cd ~/${shellQuote(path.slice(2))}`
-        : `cd ${shellQuote(path)}`
+        ? `cd -- ~/${shellQuote(path.slice(2))}`
+        : `cd -- ${shellQuote(path)}`
 
   const claude = ['claude', ...args].map(shellQuote).join(' ')
 
-  return assertNoDoubleQuotes(
-    [
-      // L'errore di cd viene zittito: la shell ne stampa uno proprio, e due
-      // messaggi per lo stesso problema confondono invece di aiutare.
-      `${cd} 2>/dev/null || { echo ${shellQuote(`ClaudeManager: cartella remota non raggiungibile: ${path}`)} >&2; exit 1; }`,
-      // Senza claude sul server la connessione cadrebbe subito, lasciando solo
-      // un errore lampeggiante. Meglio restare sulla shell remota: da lì lo si
-      // può installare senza riaprire un altro terminale.
-      `command -v claude >/dev/null 2>&1 || { echo ${shellQuote('ClaudeManager: Claude Code non risulta installato su questo server.')} >&2; exec ${'${SHELL:-sh}'} -l; }`,
-      `exec ${claude}`
-    ].join('; ')
-  )
+  return [
+    // L'errore di cd viene zittito: la shell ne stampa uno proprio, e due
+    // messaggi per lo stesso problema confondono invece di aiutare.
+    `${cd} 2>/dev/null || { echo ${shellQuote(`ClaudeManager: cartella remota non raggiungibile: ${path}`)} >&2; exit 1; }`,
+    // Senza claude sul server la connessione cadrebbe subito, lasciando solo
+    // un errore lampeggiante. Meglio restare sulla shell remota: da lì lo si
+    // può installare senza riaprire un altro terminale.
+    `command -v claude >/dev/null 2>&1 || { echo ${shellQuote('ClaudeManager: Claude Code non risulta installato su questo server.')} >&2; exec ${'${SHELL:-sh}'} -l; }`,
+    `exec ${claude}`
+  ].join('; ')
 }
 
 export interface SshInvocation {

@@ -106,6 +106,19 @@ export const ACTION_LABELS: { action: Action; label: string }[] = [
   { action: 'move-right', label: 'Sposta il riquadro a destra' },
   { action: 'move-up', label: 'Sposta il riquadro in alto' },
   { action: 'move-down', label: 'Sposta il riquadro in basso' },
+  // Le nove scorciatoie numeriche mancavano dall'elenco: non comparivano nel
+  // pannello, quindi non erano né scopribili né rimappabili né liberabili, e
+  // riassegnando Alt+1 il fuoco sul primo riquadro restava senza tasto senza
+  // che nessuna riga lo rivelasse.
+  { action: 'focus-1', label: 'Fuoco sul riquadro 1' },
+  { action: 'focus-2', label: 'Fuoco sul riquadro 2' },
+  { action: 'focus-3', label: 'Fuoco sul riquadro 3' },
+  { action: 'focus-4', label: 'Fuoco sul riquadro 4' },
+  { action: 'focus-5', label: 'Fuoco sul riquadro 5' },
+  { action: 'focus-6', label: 'Fuoco sul riquadro 6' },
+  { action: 'focus-7', label: 'Fuoco sul riquadro 7' },
+  { action: 'focus-8', label: 'Fuoco sul riquadro 8' },
+  { action: 'focus-9', label: 'Fuoco sul riquadro 9' },
   { action: 'search-pane', label: 'Cerca nel terminale' },
   { action: 'toggle-usage', label: 'Statistiche di utilizzo' },
   { action: 'toggle-settings', label: 'Impostazioni' },
@@ -178,15 +191,30 @@ export function resolveKeymap(custom: Record<string, string> | undefined): Resol
  * mano, e nessuno indovina l'ordine giusto al primo colpo.
  */
 export function normalizeCombo(raw: string): string | null {
-  const parts = raw
-    .toLowerCase()
-    .split('+')
-    .map((p) => p.trim())
-    .filter(Boolean)
-  if (parts.length === 0) return null
+  const testo = raw.toLowerCase()
 
-  const key = parts[parts.length - 1]
-  const mods = new Set(parts.slice(0, -1))
+  // Il tasto si stacca sull'ULTIMO '+', non con uno split su tutti. Prima
+  // `split('+')` seguito da `filter(Boolean)` faceva sparire proprio i tasti
+  // '+' e spazio, e l'ultimo modificatore rimasto veniva scambiato per il
+  // tasto: chi assegnava Alt+Spazio perdeva la scorciatoia vecchia, non ne
+  // otteneva una nuova, e l'app mostrava «Alt» come tasto assegnato.
+  const taglio = testo.lastIndexOf('+')
+
+  // Un '+' in ultima posizione significa che il tasto è proprio '+'.
+  const grezzo = taglio === -1 ? testo : testo.slice(taglio + 1)
+  const modificatori = taglio === -1 ? '' : testo.slice(0, taglio)
+
+  // Lo spazio è un tasto legittimo, quindi si toglie il contorno solo quando
+  // resta qualcosa: `alt + b` scritto con spazi deve continuare a funzionare.
+  const key = grezzo.trim() || (grezzo === '' ? '+' : grezzo)
+  if (!key) return null
+
+  const mods = new Set(
+    modificatori
+      .split('+')
+      .map((p) => p.trim())
+      .filter(Boolean)
+  )
   const order = ['ctrl', 'alt', 'shift', 'meta'].filter((m) => mods.has(m))
 
   // Un modificatore sconosciuto in mezzo verrebbe scambiato per il tasto:

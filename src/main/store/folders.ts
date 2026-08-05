@@ -21,10 +21,24 @@ function file(): string {
 function load(): FoldersState {
   if (cached) return cached
   const stored = readJson<Partial<FoldersState>>(file())
-  cached = {
-    recents: stored?.recents ?? [],
-    favorites: stored?.favorites ?? []
-  }
+
+  // I valori vanno controllati, non solo sostituiti quando mancano. Con
+  // `recents` uguale a una stringa (file corrotto, o modificato a mano) il
+  // selettore di cartelle sollevava un'eccezione ad ogni apertura, e non
+  // c'era modo di rimettersi in sesto se non cancellando il file: la funzione
+  // principale dell'app restava inaccessibile senza che nulla lo spiegasse.
+  const recents = Array.isArray(stored?.recents)
+    ? stored.recents.filter(
+        (r): r is { path: string; lastUsed: number } =>
+          Boolean(r) && typeof r === 'object' && typeof (r as { path?: unknown }).path === 'string'
+      )
+    : []
+
+  const favorites = Array.isArray(stored?.favorites)
+    ? stored.favorites.filter((f): f is string => typeof f === 'string')
+    : []
+
+  cached = { recents, favorites }
   return cached
 }
 

@@ -49,7 +49,15 @@ export function writeJsonAtomic(target: string, value: unknown): boolean {
 
 export function readJson<T>(target: string): T | null {
   try {
-    return JSON.parse(readFileSync(target, 'utf8')) as T
+    // Il BOM va tolto prima del parse: JSON.parse ci lancia sopra, l'errore
+    // viene inghiottito qui e il file finisce ignorato in silenzio, poi
+    // sovrascritto alla prima scrittura. Questi file sono dichiaratamente
+    // modificabili a mano, e su Windows gli strumenti piu' comuni
+    // (Set-Content -Encoding utf8, il Blocco note) il BOM ce lo mettono:
+    // senza questa riga una modifica innocua cancella impostazioni,
+    // preferiti, cartelle recenti e connessioni ssh.
+    const raw = readFileSync(target, 'utf8')
+    return JSON.parse(raw.charCodeAt(0) === 0xfeff ? raw.slice(1) : raw) as T
   } catch {
     return null
   }
@@ -67,24 +75,41 @@ export function getConfig(): AppConfig {
   if (cached) return cached
 
   const stored = readJson<Partial<AppConfig>>(pathToConfig())
+
+  // Il file è dichiaratamente modificabile a mano, quindi ogni campo va
+  // accettato solo se ha il tipo giusto. Prima lo era solo `keymap`, e un
+  // errore banale come `scanRoots` scritto come stringa invece che come
+  // elenco arrivava intatto al renderer, dove il pannello Impostazioni
+  // chiamava .join() su una stringa e smetteva di disegnarsi.
+  const str = (v: unknown, fallback: string): string =>
+    typeof v === 'string' && v.trim() ? v : fallback
+  const num = (v: unknown, fallback: number): number =>
+    typeof v === 'number' && Number.isFinite(v) && v > 0 ? Math.floor(v) : fallback
+  const bool = (v: unknown, fallback: boolean): boolean => (typeof v === 'boolean' ? v : fallback)
+  const obj = <T>(v: unknown, fallback: T): T =>
+    v && typeof v === 'object' && !Array.isArray(v) ? ({ ...fallback, ...v } as T) : fallback
+
+  const roots =
+    Array.isArray(stored?.scanRoots) && stored.scanRoots.every((r) => typeof r === 'string')
+      ? stored.scanRoots
+      : []
+
   cached = {
-    defaultCwd: stored?.defaultCwd ?? homedir(),
-    launchDefaults: { ...DEFAULT_CONFIG.launchDefaults, ...stored?.launchDefaults },
-    initialCols: stored?.initialCols ?? DEFAULT_CONFIG.initialCols,
-    initialRows: stored?.initialRows ?? DEFAULT_CONFIG.initialRows,
-    restoreResumesSessions: stored?.restoreResumesSessions ?? DEFAULT_CONFIG.restoreResumesSessions,
-    indexSources: { ...DEFAULT_CONFIG.indexSources, ...stored?.indexSources },
+    defaultCwd: str(stored?.defaultCwd, homedir()),
+    launchDefaults: obj(stored?.launchDefaults, DEFAULT_CONFIG.launchDefaults),
+    initialCols: num(stored?.initialCols, DEFAULT_CONFIG.initialCols),
+    initialRows: num(stored?.initialRows, DEFAULT_CONFIG.initialRows),
+    restoreResumesSessions: bool(
+      stored?.restoreResumesSessions,
+      DEFAULT_CONFIG.restoreResumesSessions
+    ),
+    indexSources: obj(stored?.indexSources, DEFAULT_CONFIG.indexSources),
     // Senza radici configurate si usano quelle in cui si tengono di solito i
     // progetti, così l'indice è utile al primo avvio senza chiedere nulla.
-    scanRoots: stored?.scanRoots?.length ? stored.scanRoots : defaultRoots(),
-    themeId: stored?.themeId ?? DEFAULT_CONFIG.themeId,
-    notifyOnWaiting: stored?.notifyOnWaiting ?? DEFAULT_CONFIG.notifyOnWaiting,
-    // Il file è modificabile a mano: una chiave non-oggetto lo renderebbe
-    // illeggibile al renderer invece di essere semplicemente ignorata.
-    keymap:
-      stored?.keymap && typeof stored.keymap === 'object' && !Array.isArray(stored.keymap)
-        ? stored.keymap
-        : {}
+    scanRoots: roots.length ? roots : defaultRoots(),
+    themeId: str(stored?.themeId, DEFAULT_CONFIG.themeId),
+    notifyOnWaiting: bool(stored?.notifyOnWaiting, DEFAULT_CONFIG.notifyOnWaiting),
+    keymap: obj(stored?.keymap, {} as AppConfig['keymap'])
   }
   return cached
 }

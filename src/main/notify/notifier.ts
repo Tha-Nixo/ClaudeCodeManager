@@ -33,7 +33,24 @@ import type { LiveSession, MonitorPane } from '@shared/types'
 const APP_USER_MODEL_ID = 'dev.nixo.claudemanager'
 
 /** Stato precedente per sessione, per riconoscere il passaggio. */
-const previous = new Map<string, string>()
+const previous = new Map<string, RememberedSession>()
+
+/**
+ * Stato ricordato di una sessione, con quanti giri consecutivi manca.
+ *
+ * Il conteggio non e' un dettaglio: il registro viene RISCRITTO quando una
+ * sessione cambia stato, e per un istante il file puo' non esserci. Se si
+ * dimenticasse la sessione al primo giro di assenza, il ritorno con stato
+ * 'waiting' sembrerebbe un primo avvistamento e l'avviso non partirebbe —
+ * proprio nel momento piu' probabile perche' serva.
+ */
+interface RememberedSession {
+  status: string
+  missing: number
+}
+
+/** Giri di assenza consecutivi tollerati prima di dimenticare una sessione. */
+const FORGET_AFTER_MISSES = 5
 /** Riquadri noti, ripubblicati dal renderer ad ogni cambiamento. */
 let known: MonitorPane[] = []
 let enabled = true
@@ -67,7 +84,7 @@ export interface PendingNotice {
 export function decideNotices(
   sessions: LiveSession[],
   panes: MonitorPane[],
-  seenBefore: Map<string, string>
+  seenBefore: Map<string, RememberedSession>
 ): PendingNotice[] {
   const present = new Set<string>()
   const out: PendingNotice[] = []
@@ -76,20 +93,27 @@ export function decideNotices(
     present.add(live.sessionId)
     const before = seenBefore.get(live.sessionId)
     const now = live.status ?? 'unknown'
-    seenBefore.set(live.sessionId, now)
+    seenBefore.set(live.sessionId, { status: now, missing: 0 })
 
     // Solo il passaggio, e solo verso l'attesa. `before` indefinito significa
     // primo avvistamento: all'avvio dell'app tutte le sessioni sarebbero
     // "nuove", e si aprirebbe una raffica di notifiche per stati che l'utente
     // conosce già.
-    if (before === undefined || before === now || now !== 'waiting') continue
+    if (before === undefined || before.status === now || now !== 'waiting') continue
 
     const pane = panes.find((p) => p.claudeSessionId === live.sessionId)
     if (pane) out.push({ pane, live })
   }
 
-  // Le sessioni sparite dal registro non devono restare in memoria per sempre.
-  for (const id of [...seenBefore.keys()]) if (!present.has(id)) seenBefore.delete(id)
+  // Le sessioni sparite non si dimenticano subito: il registro viene riscritto
+  // proprio quando lo stato cambia, e un'assenza di un solo giro e' normale.
+  // Dimenticarla subito faceva sembrare il ritorno un primo avvistamento, e
+  // l'avviso non partiva.
+  for (const [id, ricordo] of [...seenBefore.entries()]) {
+    if (present.has(id)) continue
+    if (ricordo.missing + 1 >= FORGET_AFTER_MISSES) seenBefore.delete(id)
+    else seenBefore.set(id, { ...ricordo, missing: ricordo.missing + 1 })
+  }
 
   return out
 }

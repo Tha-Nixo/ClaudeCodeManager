@@ -37,7 +37,8 @@ export interface PtyEnvOptions {
   cwd: string
   /** Eseguibile avviato dal bootstrap: `claude` in locale, `ssh` da remoto. */
   exe: string
-  argsJson: string
+  /** Riga di comando gia' composta, senza l'eseguibile. */
+  commandLine: string
   /** Riga mostrata prima dell'avvio, per dire dove si sta entrando. */
   label?: string
 }
@@ -57,7 +58,7 @@ export function buildPtyEnv(opts: PtyEnvOptions): Record<string, string | undefi
     TERM_PROGRAM: 'ClaudeManager',
     CM_CWD: opts.cwd,
     CM_EXE: opts.exe,
-    CM_ARGS_JSON: opts.argsJson,
+    CM_CMDLINE: opts.commandLine,
     CM_LABEL: opts.label ?? ''
   }
 }

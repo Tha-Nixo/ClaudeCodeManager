@@ -6,6 +6,7 @@ import type { CreateSessionResult, LaunchOptions } from '@shared/types'
 import { buildClaudeArgs, expectedClaudeSessionId, resolveClaudeExecutable } from '../claude/cli'
 import { ensureBootstrapScript, powershellArgs } from './bootstrap'
 import { buildPtyEnv } from './env'
+import { buildCommandLine } from './winargs'
 import { buildSshInvocation, sshDestination } from '../ssh/command'
 
 /** Intervallo di accorpamento dell'output prima di attraversare l'IPC. */
@@ -63,7 +64,10 @@ export class PtyManager extends EventEmitter<PtyManagerEvents> {
       env: buildPtyEnv({
         cwd,
         exe: invocation.file,
-        argsJson: JSON.stringify(invocation.args),
+        // Composta qui secondo le regole del runtime C: lasciata a PowerShell,
+        // la riga di comando perderebbe i doppi apici e spezzerebbe gli
+        // argomenti sullo spazio successivo.
+        commandLine: buildCommandLine(invocation.args),
         label: remote
           ? `Connessione a ${sshDestination(remote)} — ${remote.path}`
           : undefined

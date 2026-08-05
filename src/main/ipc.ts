@@ -14,7 +14,12 @@ import { folderInfo, listDir, listDrives } from './fs/browse'
 import { allStatuses, cancel as cancelIndex, rescan } from './indexer/diskIndex'
 import { invalidateIndex, searchFolders } from './indexer/sources'
 import { publishPanes, subscribe, unsubscribe } from './monitor/state'
-import { closeMonitorWindow, isMonitorOpen, openMonitorWindow } from './monitor/window'
+import {
+  closeMonitorWindow,
+  isMonitorOpen,
+  openMonitorWindow,
+  setDetachedListener
+} from './monitor/window'
 import { onLiveChange, setKnownPanes, setNotificationsEnabled } from './notify/notifier'
 import type { PtyManager } from './pty/manager'
 import {
@@ -167,16 +172,15 @@ export function registerIpc(
   ipcMain.handle('monitor:subscribe', (e) => subscribe(e.sender))
   ipcMain.on('monitor:unsubscribe', (e) => unsubscribe(e.sender))
   ipcMain.handle('monitor:detached', () => isMonitorOpen())
-  ipcMain.handle('monitor:detach', () => {
-    openMonitorWindow(!app.isPackaged)
-    // Chi ha chiesto lo stacco deve poter aggiornare subito la propria
-    // interfaccia senza aspettare un giro di aggiornamento.
-    getWindow()?.webContents.send('monitor:detached-change', true)
-  })
-  ipcMain.handle('monitor:attach', () => {
-    closeMonitorWindow()
-    getWindow()?.webContents.send('monitor:detached-change', false)
-  })
+  ipcMain.handle('monitor:detach', () => openMonitorWindow(!app.isPackaged))
+  ipcMain.handle('monitor:attach', () => closeMonitorWindow())
+
+  // L'annuncio parte dalla finestra stessa, non dai due comandi: cosi' vale
+  // anche per la chiusura diretta con la X, che prima non diceva niente e
+  // lasciava il cassetto convinto che il pannello fosse ancora altrove.
+  setDetachedListener((detached) =>
+    getWindow()?.webContents.send('monitor:detached-change', detached)
+  )
 
   // --- Aggiornamenti --------------------------------------------------------
 

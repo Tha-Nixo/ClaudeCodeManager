@@ -5,10 +5,18 @@ import { app } from 'electron'
 /**
  * Contenuto dello script di bootstrap eseguito in ogni riquadro.
  *
- * Gli argomenti NON vengono interpolati nella command line né in questo file:
- * arrivano via variabili d'ambiente (CM_CWD, CM_CLAUDE, CM_ARGS_JSON). Questo
- * elimina in blocco i bug di quoting su path con spazi, apici o backtick, che
- * su Windows sono la norma (`C:\Users\...\Saved Games\...`).
+ * Gli argomenti NON vengono interpolati in questo file: arrivano via variabili
+ * d'ambiente (CM_CWD, CM_EXE, CM_CMDLINE), il che elimina in blocco i bug di
+ * quoting sui percorsi Windows con spazi, apici o backtick.
+ *
+ * Il processo viene avviato con .NET e non con `& $exe @args`, perché
+ * PowerShell 5.1 costruisce male la riga di comando di un eseguibile nativo:
+ * non protegge i doppi apici presenti nel valore, non raddoppia i backslash
+ * finali, e decide se avvolgere l'argomento in base alla parità del numero di
+ * apici incontrati. Un prompt come `crea il file "README.md"` arrivava
+ * troncato e spezzato in due argomenti, senza alcun errore. Ora la riga di
+ * comando la compone `winargs.ts` secondo le regole del runtime C, e qui viene
+ * consegnata così com'è.
  *
  * Con `-NoExit`, all'uscita di Claude si resta nella shell nella stessa
  * cartella: si possono lanciare git/npm e rilanciare `claude` nello stesso
@@ -17,32 +25,22 @@ import { app } from 'electron'
 const BOOTSTRAP_PS1 = `# ClaudeManager - script generato automaticamente, le modifiche vanno perse.
 $ErrorActionPreference = 'Continue'
 
-$cmCwd    = $env:CM_CWD
-$cmExe    = $env:CM_EXE
-$cmArgs   = $env:CM_ARGS_JSON
-$cmLabel  = $env:CM_LABEL
+$cmCwd     = $env:CM_CWD
+$cmExe     = $env:CM_EXE
+$cmCmdLine = $env:CM_CMDLINE
+$cmLabel   = $env:CM_LABEL
 
 # Non lasciamo le variabili in giro nella shell interattiva né nei processi figli.
-Remove-Item Env:CM_CWD       -ErrorAction SilentlyContinue
-Remove-Item Env:CM_EXE       -ErrorAction SilentlyContinue
-Remove-Item Env:CM_ARGS_JSON -ErrorAction SilentlyContinue
-Remove-Item Env:CM_LABEL     -ErrorAction SilentlyContinue
+Remove-Item Env:CM_CWD     -ErrorAction SilentlyContinue
+Remove-Item Env:CM_EXE     -ErrorAction SilentlyContinue
+Remove-Item Env:CM_CMDLINE -ErrorAction SilentlyContinue
+Remove-Item Env:CM_LABEL   -ErrorAction SilentlyContinue
 
 if ($cmCwd -and (Test-Path -LiteralPath $cmCwd)) {
   Set-Location -LiteralPath $cmCwd
 }
 
 if (-not $cmExe) { $cmExe = 'claude' }
-
-$cmdArgs = @()
-if ($cmArgs) {
-  try {
-    $parsed = ConvertFrom-Json $cmArgs
-    if ($null -ne $parsed) { $cmdArgs = @($parsed) }
-  } catch {
-    Write-Host "ClaudeManager: argomenti non validi." -ForegroundColor DarkYellow
-  }
-}
 
 $resolved = Get-Command $cmExe -ErrorAction SilentlyContinue
 if (-not $resolved) {
@@ -57,12 +55,32 @@ if (-not $resolved) {
   Write-Host ""
 } else {
   if ($cmLabel) { Write-Host "  $cmLabel" -ForegroundColor DarkGray }
-  & $cmExe @cmdArgs
+
+  # Riga di comando gia' composta secondo le regole del runtime C: si passa a
+  # .NET intatta. Niente redirezione, cosi' il figlio eredita la console del
+  # terminale e puo' disegnare la propria interfaccia.
+  $psi = New-Object System.Diagnostics.ProcessStartInfo
+  $psi.FileName = $resolved.Source
+  $psi.Arguments = $cmCmdLine
+  $psi.UseShellExecute = $false
+  $psi.WorkingDirectory = (Get-Location).Path
+
+  $codice = 0
+  try {
+    $proc = [System.Diagnostics.Process]::Start($psi)
+    $proc.WaitForExit()
+    $codice = $proc.ExitCode
+  } catch {
+    Write-Host "  Impossibile avviare '$cmExe': $($_.Exception.Message)" -ForegroundColor Red
+    $codice = -1
+  }
+  $global:LASTEXITCODE = $codice
+
   # Con una connessione remota vale la pena dire perche' e' finita: senza
   # questo una caduta di rete lascerebbe solo un prompt locale inspiegabile.
   if ($cmExe -eq 'ssh') {
     Write-Host ""
-    Write-Host "  Connessione chiusa (codice $LASTEXITCODE). Sei tornato sulla shell locale." -ForegroundColor DarkGray
+    Write-Host "  Connessione chiusa (codice $codice). Sei tornato sulla shell locale." -ForegroundColor DarkGray
     Write-Host ""
   }
 }

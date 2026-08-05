@@ -135,6 +135,15 @@ export function validateTheme(raw: unknown, source?: string): ThemeValidation {
     return { theme: null, error: 'terminal.ansi deve contenere esattamente 16 colori esadecimali' }
   }
 
+  // `dark` era l'unico campo non controllato: bastava `"dark": "false"` con le
+  // virgolette di troppo — errore banale in JSON — perché la stringa risultasse
+  // diversa dal booleano false e il tema chiaro venisse applicato come scuro,
+  // con ombre nere sul fondo chiaro e barre di scorrimento invertite. Tutti gli
+  // altri campi rifiutano un tipo sbagliato: anche questo deve farlo.
+  if (t.dark !== undefined && typeof t.dark !== 'boolean') {
+    return { theme: null, error: 'dark deve essere true o false, senza virgolette' }
+  }
+
   return {
     theme: {
       id: t.id,

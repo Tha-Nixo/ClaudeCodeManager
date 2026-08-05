@@ -18,6 +18,20 @@ import { readJson, writeJsonAtomic } from '../store/config'
 
 let monitorWindow: BrowserWindow | null = null
 
+/**
+ * Avvisa il resto dell'app quando la finestra staccata compare o sparisce.
+ *
+ * Prima l'annuncio partiva solo dai due comandi «stacca» e «riaggancia».
+ * Chiudendo la finestra dalla finestra stessa — con la X o con Alt+F4 —
+ * nessuno diceva niente, e il cassetto restava a mostrare «Il pannello è in
+ * una finestra separata» indicando una finestra che non c'era più.
+ */
+let onDetachedChange: ((detached: boolean) => void) | null = null
+
+export function setDetachedListener(cb: (detached: boolean) => void): void {
+  onDetachedChange = cb
+}
+
 interface Bounds {
   x: number
   y: number
@@ -107,11 +121,15 @@ export function openMonitorWindow(isDev: boolean): void {
   monitorWindow.on('page-title-updated', (event) => event.preventDefault())
 
   monitorWindow.on('ready-to-show', () => monitorWindow?.show())
+  onDetachedChange?.(true)
   monitorWindow.on('moved', () => monitorWindow && rememberBounds(monitorWindow))
   monitorWindow.on('resized', () => monitorWindow && rememberBounds(monitorWindow))
   monitorWindow.on('close', () => monitorWindow && rememberBounds(monitorWindow))
   monitorWindow.on('closed', () => {
     monitorWindow = null
+    // Anche la chiusura diretta e' una transizione: senza questo annuncio il
+    // cassetto resterebbe convinto che il pannello sia altrove.
+    onDetachedChange?.(false)
   })
 
   // Stesse protezioni della finestra principale: niente navigazione, niente

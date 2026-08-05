@@ -60,8 +60,12 @@ function describeFailure(code: number | null, stderr: string): string {
   if (lower.includes('connection refused')) {
     return 'Connessione rifiutata: nessun servizio ssh sulla porta indicata.'
   }
-  if (lower.includes('connection timed out') || lower.includes('operation timed out')) {
-    return 'Il server non risponde entro il tempo previsto.'
+  if (
+    lower.includes('connection timed out') ||
+    lower.includes('operation timed out') ||
+    lower.includes('etimedout')
+  ) {
+    return 'Il server non ha risposto entro il tempo previsto. Potrebbe essere spento, irraggiungibile dalla rete, o molto lento.'
   }
   if (lower.includes('enoent')) {
     return 'Client ssh non trovato su questo computer. Si attiva da Impostazioni → App → Funzionalita’ facoltative → Client OpenSSH.'
@@ -69,7 +73,9 @@ function describeFailure(code: number | null, stderr: string): string {
   // Il primo rigo di stderr è quasi sempre quello utile; il resto è rumore.
   const first = raw.split('\n').find((l) => l.trim().length > 0)
   if (first) return first.trim()
-  return `Comando remoto terminato con codice ${code ?? '?'}.`
+  // Senza nessun indizio si dice almeno cosa provare: un codice numerico da
+  // solo non suggerisce nessuna azione a chi legge.
+  return `Il server non ha risposto in modo comprensibile (codice ${code ?? 'ignoto'}). Prova ad aprire la connessione a mano con ssh per vedere l’errore completo.`
 }
 
 /** Codici che gli script remoti usano per esiti previsti, non per errori. */
@@ -97,13 +103,27 @@ export function runRemote(
       (err, stdout, stderr) => {
         if (!err) return resolve({ ok: true, stdout, code: 0 })
 
-        const code =
-          typeof (err as { code?: unknown }).code === 'number'
-            ? (err as { code: number }).code
-            : null
-        // Il messaggio di execFile è la riga di comando completa: inutile da
-        // mostrare, e con dentro il nome del server. Conta solo lo stderr.
-        resolve({ ok: false, stdout, code, error: describeFailure(code, stderr) })
+        const rawCode = (err as { code?: unknown }).code
+        const code = typeof rawCode === 'number' ? rawCode : null
+
+        // Quando l'eseguibile non esiste, stderr e' vuoto e il motivo sta in
+        // `err.code` come stringa ('ENOENT'): cercandolo solo nello stderr il
+        // messaggio utile — quello che spiega come attivare il client OpenSSH
+        // — non compariva mai, proprio nel caso in cui serve. Stessa cosa per
+        // il timeout, che arriva come `killed`.
+        const indizio =
+          typeof rawCode === 'string'
+            ? rawCode
+            : (err as { killed?: boolean }).killed
+              ? 'ETIMEDOUT'
+              : ''
+
+        resolve({
+          ok: false,
+          stdout,
+          code,
+          error: describeFailure(code, stderr || indizio)
+        })
       }
     )
   })

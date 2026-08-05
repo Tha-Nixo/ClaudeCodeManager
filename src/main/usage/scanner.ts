@@ -202,7 +202,7 @@ function parseTranscript(file: string): Omit<FileContribution, 'mtimeMs' | 'size
     contribution.byModel[model] = addTokens(contribution.byModel[model] ?? ZERO_TOKENS, turn.tokens)
 
     if (turn.timestamp > 0) {
-      const day = new Date(turn.timestamp).toISOString().slice(0, 10)
+      const day = localDayKey(new Date(turn.timestamp))
       contribution.byDay[day] ??= {}
       contribution.byDay[day][model] = addTokens(
         contribution.byDay[day][model] ?? ZERO_TOKENS,
@@ -306,10 +306,26 @@ export function sessionUsage(): Record<string, SessionUsage> {
   return out
 }
 
+/**
+ * Chiave del giorno secondo il fuso dell'utente, non secondo Greenwich.
+ *
+ * `toISOString()` dava il giorno UTC: per chi sta in Italia il lavoro fatto
+ * fra mezzanotte e le due del mattino finiva contato nel giorno precedente, e
+ * «Oggi» — il numero piu' in vista dell'app — diceva una cosa diversa da
+ * quella che l'utente aveva appena fatto. Nei fusi negativi succedeva il
+ * contrario. La chiave resta nella stessa forma AAAA-MM-GG, quindi i confronti
+ * e l'ordinamento non cambiano.
+ */
+function localDayKey(d: Date): string {
+  const mese = String(d.getMonth() + 1).padStart(2, '0')
+  const giorno = String(d.getDate()).padStart(2, '0')
+  return `${d.getFullYear()}-${mese}-${giorno}`
+}
+
 function dayKey(offsetDays: number): string {
   const d = new Date()
   d.setDate(d.getDate() - offsetDays)
-  return d.toISOString().slice(0, 10)
+  return localDayKey(d)
 }
 
 export function summarize(): UsageSummary {

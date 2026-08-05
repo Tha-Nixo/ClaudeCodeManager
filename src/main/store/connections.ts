@@ -29,7 +29,13 @@ function sanitize(raw: unknown): SshConnection | null {
   if (typeof c.host !== 'string' || !c.host.trim()) return null
   if (typeof c.user !== 'string') return null
 
-  const port = typeof c.port === 'number' && c.port > 0 && c.port < 65536 ? c.port : undefined
+  // Deve essere un intero: 22.7 passava il controllo precedente e veniva
+  // salvato, poi ssh rifiutava la sessione con «Bad port '22.7'» ad ogni
+  // tentativo, lasciando la porta sbagliata memorizzata.
+  const port =
+    typeof c.port === 'number' && Number.isInteger(c.port) && c.port >= 1 && c.port <= 65535
+      ? c.port
+      : undefined
   return {
     id: typeof c.id === 'string' && c.id ? c.id : randomUUID(),
     name: typeof c.name === 'string' && c.name.trim() ? c.name.trim() : c.host.trim(),
