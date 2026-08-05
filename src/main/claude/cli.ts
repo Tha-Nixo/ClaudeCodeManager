@@ -61,12 +61,22 @@ export function buildClaudeArgs(opts: LaunchOptions, newSessionId: string): stri
 
   // Il nome finisce nel prompt box e nel titolo: si tiene su una sola riga e
   // si scartano i caratteri di controllo.
-  if (opts.name) {
-    const name = opts.name.replace(/[\p{Cc}\p{Cf}]/gu, '').trim().slice(0, 64)
+  //
+  // Il controllo di tipo non e' teorico: `name` e `initialPrompt` erano gli
+  // unici campi di LaunchOptions senza, e un valore non testuale — da un
+  // layout salvato modificato a mano, o da una chiamata sbagliata — sollevava
+  // un TypeError che faceva fallire l'apertura del riquadro invece di essere
+  // semplicemente ignorato.
+  if (typeof opts.name === 'string' && opts.name) {
+    const pulito = opts.name.replace(/[\p{Cc}\p{Cf}]/gu, '').trim()
+    // Il taglio conta i caratteri veri, non le unita' UTF-16: `slice` spezzava
+    // a meta' un'emoji al confine dei 64, lasciando un mezzo surrogato che si
+    // vede come carattere sostitutivo nel titolo.
+    const name = Array.from(pulito).slice(0, 64).join('')
     if (name) args.push('--name', name)
   }
 
-  const prompt = opts.initialPrompt?.trim()
+  const prompt = typeof opts.initialPrompt === 'string' ? opts.initialPrompt.trim() : undefined
   if (prompt) {
     // '--' chiude le opzioni: senza, un prompt che inizia con un trattino
     // verrebbe letto come flag della CLI invece che come testo.

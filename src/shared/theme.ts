@@ -131,8 +131,17 @@ export function validateTheme(raw: unknown, source?: string): ThemeValidation {
       return { theme: null, error: `terminal.${key} mancante o non è un colore esadecimale` }
     }
   }
-  if (!Array.isArray(term.ansi) || term.ansi.length !== 16 || !term.ansi.every(isColor)) {
+  // `every` SALTA le posizioni mai assegnate, quindi un array con un buco
+  // (`delete ansi[7]`, o un JSON con una virgola di troppo) passava il
+  // controllo e arrivava fino a xterm con un colore indefinito. Il ciclo
+  // esplicito guarda ogni posizione.
+  if (!Array.isArray(term.ansi) || term.ansi.length !== 16) {
     return { theme: null, error: 'terminal.ansi deve contenere esattamente 16 colori esadecimali' }
+  }
+  for (let i = 0; i < 16; i++) {
+    if (!isColor(term.ansi[i])) {
+      return { theme: null, error: `terminal.ansi[${i}] mancante o non è un colore esadecimale` }
+    }
   }
 
   // `dark` era l'unico campo non controllato: bastava `"dark": "false"` con le

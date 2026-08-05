@@ -57,6 +57,11 @@ export function nodeAt(root: LayoutNode | null, path: string): LayoutNode | null
   let current = root
   for (const step of path) {
     if (!current || current.kind !== 'split') return null
+    // Qualunque carattere diverso da 'a' veniva seguito come se fosse 'b',
+    // quindi un percorso spazzatura non era un'operazione a vuoto: andava a
+    // ridimensionare uno split qualsiasi. I percorsi arrivano dal layout
+    // salvato su disco, che si puo' modificare a mano.
+    if (step !== 'a' && step !== 'b') return null
     current = step === 'a' ? current.a : current.b
   }
   return current
@@ -166,6 +171,12 @@ export function setRatio(layout: Layout, path: string, ratio: number): Layout {
   if (!layout.root) return layout
   const node = nodeAt(layout.root, path)
   if (!node || node.kind !== 'split') return layout
+  // NaN attraversa indenne sia Math.min sia Math.max, e finisce memorizzato:
+  // la geometria calcola poi larghezze NaN e i due riquadri dello split
+  // spariscono entrambi dallo schermo, senza nessun errore. Infinito invece
+  // viene limitato correttamente e resta un valore utilizzabile, quindi si
+  // respinge solo NaN.
+  if (Number.isNaN(ratio)) return layout
   const clamped = Math.min(MAX_RATIO, Math.max(MIN_RATIO, ratio))
   return { ...layout, root: replaceAt(layout.root, path, { ...node, ratio: clamped }) }
 }

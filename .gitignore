@@ -10,3 +10,6 @@ build/*.ico
 # Configurazione dell'updater usata solo con CM_UPDATE_DEV=1: punta a una
 # build locale e non deve finire nel repository.
 dev-app-update.yml
+
+# uscita dei test, rigenerata ad ogni esecuzione
+.test-out/

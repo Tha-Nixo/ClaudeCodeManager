@@ -161,7 +161,12 @@ export function resolveKeymap(custom: Record<string, string> | undefined): Resol
   for (const [rawCombo, action] of Object.entries(custom ?? {})) {
     const combo = normalizeCombo(rawCombo)
     if (!combo) {
-      problems.push({ combo: rawCombo, reason: 'combinazione vuota' })
+      // La ragione va distinta: dire «combinazione vuota» a chi ha scritto
+      // `super+b` manda a cercare il problema dove non e'.
+      problems.push({
+        combo: rawCombo,
+        reason: rawCombo.trim() === '' ? 'combinazione vuota' : 'modificatore o tasto non valido'
+      })
       continue
     }
 
@@ -192,6 +197,12 @@ export function resolveKeymap(custom: Record<string, string> | undefined): Resol
  */
 export function normalizeCombo(raw: string): string | null {
   const testo = raw.toLowerCase()
+
+  // Una stringa vuota non e' una combinazione. Senza questo controllo finiva
+  // interpretata come «tasto +», e una chiave vuota nel file di
+  // configurazione legava silenziosamente il '+' a un'azione, togliendolo al
+  // terminale.
+  if (testo === '') return null
 
   // Il tasto si stacca sull'ULTIMO '+', non con uno split su tutti. Prima
   // `split('+')` seguito da `filter(Boolean)` faceva sparire proprio i tasti
@@ -282,6 +293,12 @@ export function prettyKey(sig: string): string {
           return '↓'
         case 'enter':
           return 'Invio'
+        // Senza un nome, «Alt+ » a schermo si legge «Alt+» e sembra una
+        // scorciatoia monca invece di una assegnata alla barra spaziatrice.
+        case ' ':
+          return 'Spazio'
+        case 'escape':
+          return 'Esc'
         default:
           return part.length === 1 ? part.toUpperCase() : part.toUpperCase()
       }

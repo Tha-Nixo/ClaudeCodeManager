@@ -86,8 +86,36 @@ export function getConfig(): AppConfig {
   const num = (v: unknown, fallback: number): number =>
     typeof v === 'number' && Number.isFinite(v) && v > 0 ? Math.floor(v) : fallback
   const bool = (v: unknown, fallback: boolean): boolean => (typeof v === 'boolean' ? v : fallback)
-  const obj = <T>(v: unknown, fallback: T): T =>
-    v && typeof v === 'object' && !Array.isArray(v) ? ({ ...fallback, ...v } as T) : fallback
+
+  /**
+   * Fonde un oggetto memorizzato sopra il predefinito, ma tiene solo le chiavi
+   * gia' previste e solo se il valore ha lo stesso tipo di quello predefinito.
+   *
+   * Una fusione cieca lasciava passare `indexSources: { claude: 'si' }` e
+   * `launchDefaults: { model: 42 }`: l'oggetto arrivava al renderer con la
+   * forma sbagliata, che e' esattamente il difetto che la convalida doveva
+   * chiudere. Le chiavi in piu' vengono scartate: non appartengono ad
+   * AppConfig e nessuno le leggerebbe.
+   */
+  const obj = <T extends Record<string, unknown>>(v: unknown, fallback: T): T => {
+    if (!v || typeof v !== 'object' || Array.isArray(v)) return fallback
+    const out = { ...fallback }
+    for (const [k, val] of Object.entries(v as Record<string, unknown>)) {
+      if (!(k in fallback)) continue
+      if (typeof val === typeof fallback[k]) out[k as keyof T] = val as T[keyof T]
+    }
+    return out
+  }
+
+  /** Tiene solo le coppie in cui chiave e valore sono stringhe. */
+  const mappaDiStringhe = (v: unknown): Record<string, string> => {
+    if (!v || typeof v !== 'object' || Array.isArray(v)) return {}
+    const out: Record<string, string> = {}
+    for (const [k, val] of Object.entries(v as Record<string, unknown>)) {
+      if (typeof val === 'string') out[k] = val
+    }
+    return out
+  }
 
   const roots =
     Array.isArray(stored?.scanRoots) && stored.scanRoots.every((r) => typeof r === 'string')
@@ -109,7 +137,11 @@ export function getConfig(): AppConfig {
     scanRoots: roots.length ? roots : defaultRoots(),
     themeId: str(stored?.themeId, DEFAULT_CONFIG.themeId),
     notifyOnWaiting: bool(stored?.notifyOnWaiting, DEFAULT_CONFIG.notifyOnWaiting),
-    keymap: obj(stored?.keymap, {} as AppConfig['keymap'])
+    // La keymap e' una mappa aperta, non un oggetto a forma fissa: le chiavi
+    // sono combinazioni che l'utente inventa, quindi qui si controlla solo che
+    // sia un oggetto di stringhe. Il resto lo valida `resolveKeymap`, che sa
+    // quali azioni esistono e riporta i problemi all'utente.
+    keymap: mappaDiStringhe(stored?.keymap)
   }
   return cached
 }

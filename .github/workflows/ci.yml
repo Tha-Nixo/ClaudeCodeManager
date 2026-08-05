@@ -1,0 +1,49 @@
+name: CI
+
+# Su Windows e non su Linux, che sarebbe piu' economico: il prodotto e'
+# un'applicazione Windows, e una parte dei test attraversa PowerShell 5.1 e il
+# runtime C per verificare come arrivano gli argomenti a un eseguibile nativo.
+# Su un altro sistema quei test si saltano da soli, e proprio il difetto piu'
+# grave trovato finora passerebbe inosservato.
+
+on:
+  push:
+    branches: [main]
+    tags-ignore: ['**']
+  pull_request:
+  workflow_dispatch:
+
+# Un push che arriva mentre la CI gira rende inutile l'esecuzione precedente.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verifica:
+    runs-on: windows-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # `npm ci` rispetta il lockfile. Gli script di installazione servono:
+      # senza, il binario di Electron non viene scaricato e la build fallisce
+      # in un punto che non ha niente a che vedere con la causa.
+      - name: Installa le dipendenze
+        run: npm ci
+
+      - name: Controllo dei tipi
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      # La build e' parte della verifica: un errore di impacchettamento non si
+      # vede ne' dal controllo dei tipi ne' dai test.
+      - name: Build
+        run: npm run build

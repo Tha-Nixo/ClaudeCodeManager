@@ -188,9 +188,13 @@ export const BUILTIN_THEMES: Theme[] = [
       cursor: '#FFB000',
       selection: '#404040',
       ansi: [
-        '#000000', '#FF5252', '#00E676', '#FFD400',
+        // Il nero ANSI non può coincidere con lo sfondo: era '#000000' su
+        // fondo '#000000', cioè invisibile, e qualunque output che lo usa —
+        // cornici, barre di avanzamento, diff — spariva del tutto. Proprio nel
+        // tema che promette la massima leggibilità.
+        '#4D4D4D', '#FF5252', '#00E676', '#FFD400',
         '#40A9FF', '#E066FF', '#00E5FF', '#D9D9D9',
-        '#666666', '#FF8A80', '#69F0AE', '#FFEA00',
+        '#808080', '#FF8A80', '#69F0AE', '#FFEA00',
         '#82CFFF', '#EA96FF', '#84FFFF', '#FFFFFF'
       ]
     }

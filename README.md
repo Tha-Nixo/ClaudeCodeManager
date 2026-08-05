@@ -125,9 +125,35 @@ invece funziona, perche' interroga il server quando serve.
 npm install
 npm run dev          # avvio con hot reload del renderer
 npm run typecheck    # controllo dei tipi di main, preload e renderer
+npm test             # suite di test (vedi sotto)
 npm run build        # compila in out/
 npm run dist         # genera installer NSIS ed eseguibile portabile in release/
 ```
+
+### Test
+
+```powershell
+npm test             # tutti
+npm test -- fuzzy    # solo i file il cui nome contiene "fuzzy"
+```
+
+I test stanno in `test/*.test.ts` e usano il runner incorporato di Node, senza
+alcuna dipendenza aggiuntiva. Ogni file viene impacchettato da esbuild prima di
+essere eseguito: serve a risolvere l'alias `@shared` e soprattutto a sostituire
+il modulo `electron`, che in Node puro non esiste, con lo stub in
+`test/helpers/electron.ts`. Senza quello stub la maggior parte del processo
+principale non sarebbe provabile fuori da Electron, e ogni caso limite
+richiederebbe di avviare l'applicazione.
+
+L'impacchettamento ha anche un effetto voluto: ogni file riceve la propria
+copia dei moduli, quindi le cache interne di configurazione, cartelle e
+connessioni ripartono pulite invece di sporcarsi a vicenda.
+
+Gran parte della suite sono **test di regressione**: ognuno cita nel commento
+la issue del difetto che impedisce di far tornare. Il piu' importante fa
+attraversare a un corpus di argomenti ostili PowerShell e .NET veri, e verifica
+che arrivino identici al processo figlio — su un sistema diverso da Windows si
+salta da solo, perche' il difetto che copre non puo' presentarsi.
 
 ### Rilasciare una versione
 
@@ -181,6 +207,8 @@ Comandi accettati: `{"type":"key","key":"b","modifiers":["alt"]}`,
 ## Come è fatto
 
 ```
+test/            suite di regressione, un file per sottosistema
+  helpers/       stub di electron, per far girare il main in Node puro
 src/
   main/          processo principale: possiede i PTY e ogni accesso al disco
     pty/         node-pty, script di bootstrap PowerShell, sanificazione env
@@ -208,6 +236,14 @@ Alcune scelte che non si deducono dal codice:
   figlia, togliendo le fondamenta a ripresa e statistiche.
 - **Gli argomenti di `claude` passano per variabili d'ambiente**, non per la
   riga di comando: elimina i bug di quoting sui percorsi Windows.
+- **La riga di comando la compone il prodotto, non PowerShell.** PowerShell 5.1
+  costruisce male quella di un eseguibile nativo: non protegge i doppi apici
+  presenti nel valore, non raddoppia i backslash finali, e decide se avvolgere
+  l'argomento in base alla *parità* del numero di apici incontrati prima dello
+  spazio. Un prompt come `scrivi una funzione "ciao mondo"` arrivava spezzato in
+  due argomenti, senza alcun errore. `pty/winargs.ts` la compone secondo le
+  regole documentate del runtime C di Windows, e il bootstrap la consegna a
+  `ProcessStartInfo.Arguments`, che non la rielabora.
 - **Il menu predefinito di Electron è rimosso.** Portava `Ctrl+R`, che
   ricaricando il renderer avrebbe azzerato tutti i buffer dei terminali.
 - **Durante le animazioni di layout la misurazione dei terminali è congelata.**
