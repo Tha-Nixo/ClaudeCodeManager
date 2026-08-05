@@ -8,9 +8,52 @@ arrivano funzioni nuove, il terzo per le correzioni.
 
 ## 1.1.1 — 2026-08-05
 
-- Suite di test, CI, e nove difetti trovati scrivendola
-- Correzioni dalla campagna di test: 15 difetti
-- Una cartella per versione negli artefatti di release
+Solo correzioni: ventiquattro difetti, quindici trovati da una campagna di test
+sistematica e nove dalla suite scritta subito dopo. Niente di nuovo da imparare.
+
+- **Le virgolette nel prompt iniziale non vengono più mangiate.** Gli argomenti
+  per `claude` passavano attraverso PowerShell, che ogni `"` lo perdeva per
+  strada: un prompt iniziale veniva troncato al primo apice, e un riquadro
+  remoto con virgolette nel percorso non si apriva affatto. Ora arrivano al
+  processo figlio esattamente come sono stati scritti.
+- **Statistiche allineate al tuo giorno.** «Oggi» e «ultimi sette giorni»
+  tagliavano a mezzanotte UTC: fino alle due del mattino il lavoro di ieri
+  risultava di oggi.
+- **Il riempimento del contesto non dice più «circa».** Gli identificativi di
+  modello con la data in coda non venivano riconosciuti, e la percentuale
+  restava perennemente approssimata.
+- **Notifiche più affidabili.** Se una sessione spariva per un giro dal registro
+  di Claude Code, il suo passaggio ad «attende input» non veniva annunciato.
+- **File di configurazione modificati a mano.** Salvarne uno con il Blocco note
+  ci mette in testa un BOM, e la lettura falliva: tutte le impostazioni
+  tornavano ai valori predefiniti, in silenzio. Un `folders.json` corrotto
+  rendeva il selettore di cartelle inutilizzabile per sempre invece che per un
+  avvio. I valori di tipo sbagliato ora si scartano uno a uno, e non fanno più
+  fallire il pannello Impostazioni.
+- **Ricerca cartelle.** Cercando «cm», ClaudeManager finiva dietro Musica e
+  Modelli: ora il nome della cartella pesa più del percorso che la contiene.
+- **Scorciatoie.** Assegnare `+` o la barra spaziatrice cancellava la
+  combinazione vecchia senza crearne una nuova; le azioni `Alt+1`…`Alt+9` non
+  comparivano nell'elenco, quindi non c'era modo di rimapparle.
+- **Riquadri.** Dall'ottava divisione consecutiva il nuovo riquadro nasceva
+  largo zero pixel: ora la divisione si rifiuta quando lo spazio non basta. E un
+  `layout.json` con valori impossibili non fa più sparire dallo schermo i due
+  riquadri di una divisione.
+- **Cassetto di monitoraggio.** Chiudendo la finestra staccata, la linguetta
+  restava convinta che fosse ancora fuori.
+- **Temi.** Nel tema «Alto contrasto» il nero ANSI coincideva con lo sfondo del
+  terminale: cornici, barre di avanzamento e diff sparivano del tutto, proprio
+  nel tema che promette la massima leggibilità. Un tema con un colore mancante,
+  o con `dark` di tipo sbagliato, ora viene rifiutato invece di applicarsi a
+  metà.
+- **Sessioni.** Le etichette nell'elenco di ripresa mostravano il markup grezzo
+  dei comandi slash; una porta SSH con i decimali veniva accettata e salvata, e
+  poi rifiutata da ssh; un nome con un'emoji al sessantaquattresimo carattere
+  veniva spezzato a metà.
+
+Sotto il cofano: 376 test automatici che girano a ogni modifica, su Windows,
+perché una parte verifica proprio come arrivano gli argomenti a un eseguibile
+nativo — dove il difetto più grave si nascondeva.
 
 ## 1.1.0 — 2026-08-02
 
