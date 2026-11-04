@@ -7,33 +7,23 @@ import { contextWindowFor, costOf, priceFor } from '../src/main/usage/pricing'
 import { scan, sessionUsage, summarize } from '../src/main/usage/scanner'
 
 /**
- * Contabilita' dei token: prezzi, finestre di contesto e lettura dei transcript.
+ * Token accounting: prices, context windows, and transcript parsing.
  *
- * `projectsDir()` passa per `CLAUDE_CONFIG_DIR`, quindi lo scanner si puo'
- * puntare su una radice temporanea e provare per intero, dal file JSONL fino
- * ai numeri che finiscono nel pannello. Nessun caso legge la cartella
- * ~/.claude reale di chi lancia i test.
+ * `projectsDir()` uses `CLAUDE_CONFIG_DIR`, so the scanner runs against
+ * an isolated temporary directory. No test touches ~/.claude on the host.
  */
 
-// --- Impalcatura ------------------------------------------------------------
+// --- Test Fixtures ----------------------------------------------------------
 
-/**
- * Radice finta di ~/.claude per un singolo caso.
- *
- * Ogni caso ha la propria cartella: la cache dello scanner e' indicizzata per
- * percorso assoluto e toglie i file che non esistono piu', quindi cambiando
- * radice il contributo del caso precedente sparisce da solo e l'ordine di
- * esecuzione non conta.
- */
-function radiceFinta(): string {
+function fakeRoot(): string {
   const home = mkdtempSync(join(tmpdir(), 'cm-usage-'))
-  const progetto = join(home, 'projects', 'C--finto-progetto')
-  mkdirSync(progetto, { recursive: true })
+  const project = join(home, 'projects', 'C--fake-project')
+  mkdirSync(project, { recursive: true })
   process.env.CLAUDE_CONFIG_DIR = home
-  return progetto
+  return project
 }
 
-interface Uso {
+interface UsageData {
   input?: number
   output?: number
   cacheRead?: number
@@ -41,19 +31,19 @@ interface Uso {
   cacheWrite1h?: number
 }
 
-/** Una riga di transcript nella forma che scrive Claude Code. */
-function riga(opts: {
+/** Formats a JSONL transcript line matching Claude Code structure. */
+function makeRow(opts: {
   id?: string
   model?: string
   type?: string
   cwd?: string
   at?: Date | number
-  uso?: Uso
+  uso?: UsageData
 }): string {
   const u = opts.uso ?? {}
   const rec: Record<string, unknown> = {
     type: opts.type ?? 'assistant',
-    cwd: opts.cwd ?? 'C:\\finto\\progetto',
+    cwd: opts.cwd ?? 'C:\\fake\\project',
     message: {
       id: opts.id,
       model: opts.model ?? 'claude-opus-5',
@@ -72,26 +62,20 @@ function riga(opts: {
   return JSON.stringify(rec)
 }
 
-function scriviTranscript(dir: string, nome: string, righe: string[]): string {
-  const file = join(dir, `${nome}.jsonl`)
-  writeFileSync(file, `${righe.join('\n')}\n`, 'utf8')
+function writeTranscript(dir: string, name: string, lines: string[]): string {
+  const file = join(dir, `${name}.jsonl`)
+  writeFileSync(file, `${lines.join('\n')}\n`, 'utf8')
   return file
 }
 
-/** Rilettura forzata: `scan()` da solo ha una frequenza minima di 2 secondi,
- *  e fra un caso e l'altro ne passano molti meno. */
-function rileggi(): void {
+function rescan(): void {
   scan(true)
 }
 
-// --- Prezzi e finestra di contesto ------------------------------------------
+// --- Pricing & Context Windows ----------------------------------------------
 
-describe('pricing: finestra di contesto (Regressione della issue #11)', () => {
-  it('riconosce un id con suffisso di data senza marcarlo «circa»', () => {
-    // Gli id scritti nei transcript hanno SEMPRE il suffisso di data: se solo
-    // la corrispondenza esatta contasse, ogni riquadro mostrerebbe «circa»
-    // accanto a una percentuale che invece e' esatta, e l'avvertenza
-    // smetterebbe di significare qualcosa dove serve davvero.
+describe('pricing: context window (issue #11 regression)', () => {
+  it('recognizes id with date suffix without marking it approximate', () => {
     assert.deepEqual(contextWindowFor('claude-haiku-4-5-20251001'), {
       window: 200_000,
       approximate: false
@@ -102,7 +86,7 @@ describe('pricing: finestra di contesto (Regressione della issue #11)', () => {
     })
   })
 
-  it('Opus 5 vale un milione di token, esatto', () => {
+  it('Opus 5 has an exact 1M token window', () => {
     assert.deepEqual(contextWindowFor('claude-opus-5'), { window: 1_000_000, approximate: false })
     assert.deepEqual(contextWindowFor('claude-opus-5-20260315'), {
       window: 1_000_000,
@@ -110,24 +94,18 @@ describe('pricing: finestra di contesto (Regressione della issue #11)', () => {
     })
   })
 
-  it('Haiku resta a 200.000 e non eredita il milione degli altri', () => {
-    // E' l'unica famiglia con una finestra piu' piccola: sbagliarla farebbe
-    // vedere il contesto pieno al 20% quando in realta' e' pieno al 100%.
+  it('Haiku remains 200K without inheriting 1M from other models', () => {
     assert.equal(contextWindowFor('claude-haiku-4-5').window, 200_000)
   })
 
-  it('un modello sconosciuto non fa inventare una percentuale', () => {
-    // Meglio nessun indicatore che un denominatore a caso: la barra di
-    // riempimento sarebbe credibile e falsa.
+  it('unknown model does not produce fabricated percentage', () => {
     assert.deepEqual(contextWindowFor('gpt-5-turbo'), { window: 0, approximate: false })
     assert.deepEqual(contextWindowFor(null), { window: 0, approximate: false })
     assert.deepEqual(contextWindowFor(undefined), { window: 0, approximate: false })
     assert.deepEqual(contextWindowFor(''), { window: 0, approximate: false })
   })
 
-  it('«circa» resta per i modelli futuri riconosciuti solo dalla famiglia', () => {
-    // Qui la deduzione c'e' davvero, quindi l'avvertenza e' dovuta: e' il caso
-    // che distingue una finestra dedotta da una nota.
+  it('marks approximate for future models matched by family heuristic', () => {
     assert.deepEqual(contextWindowFor('claude-haiku-9-0-20270101'), {
       window: 200_000,
       approximate: true
@@ -135,7 +113,7 @@ describe('pricing: finestra di contesto (Regressione della issue #11)', () => {
     assert.equal(contextWindowFor('claude-opus-42').approximate, true)
   })
 
-  it('maiuscole e minuscole non cambiano il risultato', () => {
+  it('case insensitive matching', () => {
     assert.deepEqual(contextWindowFor('CLAUDE-HAIKU-4-5-20251001'), {
       window: 200_000,
       approximate: false
@@ -143,8 +121,8 @@ describe('pricing: finestra di contesto (Regressione della issue #11)', () => {
   })
 })
 
-describe('pricing: costo dei token', () => {
-  const soloInput = (n: number): Parameters<typeof costOf>[1] => ({
+describe('pricing: token cost computation', () => {
+  const onlyInput = (n: number): Parameters<typeof costOf>[1] => ({
     input: n,
     output: 0,
     cacheRead: 0,
@@ -152,23 +130,19 @@ describe('pricing: costo dei token', () => {
     cacheWrite1h: 0
   })
 
-  it('applica la tariffa del modello, suffisso di data compreso', () => {
-    // Un milione di input e un milione di output su Haiku: 1$ + 5$.
-    const costo = costOf('claude-haiku-4-5-20251001', {
+  it('applies model rate including date suffix', () => {
+    const cost = costOf('claude-haiku-4-5-20251001', {
       input: 1_000_000,
       output: 1_000_000,
       cacheRead: 0,
       cacheWrite5m: 0,
       cacheWrite1h: 0
     })
-    assert.equal(costo, 6)
+    assert.equal(cost, 6)
   })
 
-  it("la cache costa meno in lettura e piu' in scrittura", () => {
-    // Sono i moltiplicatori che fanno la differenza fra una sessione lunga
-    // «economica» e una «cara»: in una sessione di ore la cache e' la voce
-    // dominante, non l'input.
-    const base = costOf('claude-opus-5', soloInput(1_000_000))
+  it('cache read costs less and cache write costs more', () => {
+    const base = costOf('claude-opus-5', onlyInput(1_000_000))
     assert.equal(base, 5)
     assert.equal(
       costOf('claude-opus-5', {
@@ -202,139 +176,119 @@ describe('pricing: costo dei token', () => {
     )
   })
 
-  it('un modello sconosciuto costa zero invece di un numero inventato', () => {
-    assert.equal(costOf('gpt-5-turbo', soloInput(1_000_000)), 0)
-    assert.equal(costOf(null, soloInput(1_000_000)), 0)
+  it('unknown model costs zero', () => {
+    assert.equal(costOf('gpt-5-turbo', onlyInput(1_000_000)), 0)
+    assert.equal(costOf(null, onlyInput(1_000_000)), 0)
     assert.equal(priceFor('gpt-5-turbo'), null)
   })
 
-  it('numeri enormi restano numeri: mai Infinity ne NaN', () => {
-    // Un transcript corrotto puo' dichiarare cifre assurde. Se il calcolo
-    // trabocca, il pannello scrive «$Infinity» o «$NaN» e tutti i totali
-    // accanto diventano inservibili.
-    const assurdo = {
+  it('large numbers remain finite without NaN or Infinity', () => {
+    const huge = {
       input: 1e15,
       output: 1e15,
       cacheRead: 1e15,
       cacheWrite5m: 1e15,
       cacheWrite1h: 1e15
     }
-    const costo = costOf('claude-opus-5', assurdo)
-    assert.ok(Number.isFinite(costo), `costo non finito: ${costo}`)
-    assert.ok(costo > 0)
-    // 46,75e15 token-dollari / 1e6 = 4,675e10.
-    assert.ok(costo > 4.6e10 && costo < 4.8e10, `ordine di grandezza inatteso: ${costo}`)
+    const cost = costOf('claude-opus-5', huge)
+    assert.ok(Number.isFinite(cost), `non-finite cost: ${cost}`)
+    assert.ok(cost > 0)
+    assert.ok(cost > 4.6e10 && cost < 4.8e10, `unexpected magnitude: ${cost}`)
 
-    const doppio = costOf('claude-opus-5', {
+    const doubleCost = costOf('claude-opus-5', {
       input: 2e15,
       output: 2e15,
       cacheRead: 2e15,
       cacheWrite5m: 2e15,
       cacheWrite1h: 2e15
     })
-    assert.ok(Number.isFinite(doppio))
-    assert.ok(doppio > costo)
+    assert.ok(Number.isFinite(doubleCost))
+    assert.ok(doubleCost > cost)
   })
 })
 
-// --- Lettura dei transcript -------------------------------------------------
+// --- Transcript Parsing -----------------------------------------------------
 
-describe('scanner: cuore del parser', () => {
-  it('conta UNA volta le righe che condividono message.id, con i valori ultimi', () => {
-    // Claude Code scrive piu' record per la stessa risposta API e solo
-    // l'ultimo porta i totali definitivi. Sommarli tutti gonfiava il costo di
-    // ogni sessione lunga; tenere il primo lo sottostimava.
-    const progetto = radiceFinta()
-    scriviTranscript(progetto, 'sessione-dedup', [
-      riga({ id: 'msg_A', uso: { output: 100 }, at: '2026-01-15T10:00:00.000Z' }),
-      riga({ id: 'msg_A', uso: { output: 500 }, at: '2026-01-15T10:00:03.000Z' })
+describe('scanner: core parser logic', () => {
+  it('deduplicates lines sharing message.id using latest values', () => {
+    const project = fakeRoot()
+    writeTranscript(project, 'dedup-session', [
+      makeRow({ id: 'msg_A', uso: { output: 100 }, at: '2026-01-15T10:00:00.000Z' }),
+      makeRow({ id: 'msg_A', uso: { output: 500 }, at: '2026-01-15T10:00:03.000Z' })
     ])
 
-    rileggi()
-    const totali = summarize()
-    assert.equal(totali.totalTokens, 500)
-    assert.equal(totali.sessions, 1)
-    assert.equal(sessionUsage()['sessione-dedup'].turns, 1)
+    rescan()
+    const totals = summarize()
+    assert.equal(totals.totalTokens, 500)
+    assert.equal(totals.sessions, 1)
+    assert.equal(sessionUsage()['dedup-session'].turns, 1)
   })
 
-  it('senza message.id i turni restano distinti invece di sovrascriversi', () => {
-    // Non potendo deduplicare, l'errore da evitare e' l'opposto: due risposte
-    // vere che si annullano a vicenda e spariscono dal conto.
-    const progetto = radiceFinta()
-    scriviTranscript(progetto, 'sessione-anonima', [
-      riga({ uso: { output: 100 } }),
-      riga({ uso: { output: 500 } })
+  it('preserves distinct turns when message.id is absent', () => {
+    const project = fakeRoot()
+    writeTranscript(project, 'anonymous-session', [
+      makeRow({ uso: { output: 100 } }),
+      makeRow({ uso: { output: 500 } })
     ])
 
-    rileggi()
+    rescan()
     assert.equal(summarize().totalTokens, 600)
-    assert.equal(sessionUsage()['sessione-anonima'].turns, 2)
+    assert.equal(sessionUsage()['anonymous-session'].turns, 2)
   })
 
-  it('una riga malformata non fa perdere il resto del file', () => {
-    // I transcript vengono letti mentre Claude Code li sta scrivendo: l'ultima
-    // riga e' spesso troncata a meta'. Se una riga rotta facesse saltare il
-    // file, la sessione attiva — quella che l'utente sta guardando — sarebbe
-    // proprio quella senza numeri.
-    const progetto = radiceFinta()
-    scriviTranscript(progetto, 'sessione-rotta', [
-      riga({ id: 'm1', uso: { output: 10 } }),
+  it('malformed line does not drop the rest of the file', () => {
+    const project = fakeRoot()
+    writeTranscript(project, 'broken-session', [
+      makeRow({ id: 'm1', uso: { output: 10 } }),
       '{"type":"assistant","message":{"id":"m2","usage":{"output_toke',
-      'questa riga non e\' json, pero\' contiene "usage"',
+      'this line is not json, but contains "usage"',
       '{"type":"assistant","usage":{"output_tokens":9999}}',
       '{}',
       '',
       '   ',
-      riga({ id: 'm3', uso: { output: 7 } })
+      makeRow({ id: 'm3', uso: { output: 7 } })
     ])
 
-    rileggi()
-    const totali = summarize()
-    assert.equal(totali.totalTokens, 17)
-    assert.equal(totali.sessions, 1)
-    assert.equal(sessionUsage()['sessione-rotta'].turns, 2)
+    rescan()
+    const totals = summarize()
+    assert.equal(totals.totalTokens, 17)
+    assert.equal(totals.sessions, 1)
+    assert.equal(sessionUsage()['broken-session'].turns, 2)
   })
 
-  it('conta solo i record assistant', () => {
-    // Il record utente riporta l'usage della richiesta a cui risponde: contarlo
-    // raddoppierebbe ogni turno.
-    const progetto = radiceFinta()
-    scriviTranscript(progetto, 'sessione-tipi', [
-      riga({ id: 'u1', type: 'user', uso: { output: 9000 } }),
-      riga({ id: 's1', type: 'summary', uso: { output: 9000 } }),
-      riga({ id: 'a1', uso: { output: 42 } })
+  it('counts only assistant records', () => {
+    const project = fakeRoot()
+    writeTranscript(project, 'types-session', [
+      makeRow({ id: 'u1', type: 'user', uso: { output: 9000 } }),
+      makeRow({ id: 's1', type: 'summary', uso: { output: 9000 } }),
+      makeRow({ id: 'a1', uso: { output: 42 } })
     ])
 
-    rileggi()
+    rescan()
     assert.equal(summarize().totalTokens, 42)
-    assert.equal(sessionUsage()['sessione-tipi'].turns, 1)
+    assert.equal(sessionUsage()['types-session'].turns, 1)
   })
 
-  it('scarta i turni a somma zero e i modelli non fatturabili', () => {
-    // Claude Code emette record di servizio con usage tutto a zero e risposte
-    // di modelli interni: contarli riempirebbe l'elenco delle sessioni di voci
-    // che non corrispondono a niente che l'utente abbia fatto.
-    const progetto = radiceFinta()
-    scriviTranscript(progetto, 'sessione-vuota', [
-      riga({ id: 'z1', uso: {} }),
-      riga({ id: 'z2', model: '<synthetic>', uso: { output: 5000 } })
+  it('discards zero-token turns and synthetic models', () => {
+    const project = fakeRoot()
+    writeTranscript(project, 'empty-session', [
+      makeRow({ id: 'z1', uso: {} }),
+      makeRow({ id: 'z2', model: '<synthetic>', uso: { output: 5000 } })
     ])
 
-    rileggi()
-    const totali = summarize()
-    assert.equal(totali.totalTokens, 0)
-    assert.equal(totali.sessions, 0, 'una sessione senza turni non va nel conto')
-    assert.equal(sessionUsage()['sessione-vuota'].turns, 0)
+    rescan()
+    const totals = summarize()
+    assert.equal(totals.totalTokens, 0)
+    assert.equal(totals.sessions, 0)
+    assert.equal(sessionUsage()['empty-session'].turns, 0)
   })
 
-  it('senza la ripartizione 5m/1h la scrittura in cache va tutta sui 5 minuti', () => {
-    // E' il formato piu' vecchio, ancora presente nei transcript archiviati:
-    // attribuirla a 1 ora la farebbe costare il 60% in piu'.
-    const progetto = radiceFinta()
-    scriviTranscript(progetto, 'sessione-cache', [
+  it('legacy cache write without 5m/1h breakdown defaults to 5m', () => {
+    const project = fakeRoot()
+    writeTranscript(project, 'cache-session', [
       JSON.stringify({
         type: 'assistant',
-        cwd: 'C:\\finto\\progetto',
+        cwd: 'C:\\fake\\project',
         message: {
           id: 'c1',
           model: 'claude-opus-5',
@@ -343,223 +297,187 @@ describe('scanner: cuore del parser', () => {
       })
     ])
 
-    rileggi()
-    const totali = summarize()
-    assert.equal(totali.totalTokens, 1_000_000)
-    // 1M di scrittura 5 minuti su Opus 5: 5$ * 1.25 = 6,25$.
-    assert.equal(totali.totalCost, 6.25)
+    rescan()
+    const totals = summarize()
+    assert.equal(totals.totalTokens, 1_000_000)
+    assert.equal(totals.totalCost, 6.25)
   })
 
-  it('aggrega per modello e per cartella', () => {
-    // Sono le due tabelle del pannello: se la chiave sbagliasse, due sessioni
-    // nella stessa cartella comparirebbero come due progetti diversi.
-    const progetto = radiceFinta()
-    scriviTranscript(progetto, 'sessione-uno', [
-      riga({ id: 'a', cwd: 'C:\\lavoro\\alfa', uso: { output: 1000 } })
+  it('aggregates by model and by project folder', () => {
+    const project = fakeRoot()
+    writeTranscript(project, 'session-one', [
+      makeRow({ id: 'a', cwd: 'C:\\work\\alpha', uso: { output: 1000 } })
     ])
-    scriviTranscript(progetto, 'sessione-due', [
-      riga({ id: 'b', cwd: 'C:\\lavoro\\alfa', model: 'claude-haiku-4-5-20251001', uso: { output: 2000 } })
+    writeTranscript(project, 'session-two', [
+      makeRow({ id: 'b', cwd: 'C:\\work\\alpha', model: 'claude-haiku-4-5-20251001', uso: { output: 2000 } })
     ])
 
-    rileggi()
-    const totali = summarize()
-    assert.equal(totali.sessions, 2)
-    assert.equal(totali.byProject.length, 1)
-    assert.equal(totali.byProject[0].path, 'C:\\lavoro\\alfa')
-    assert.equal(totali.byProject[0].tokens, 3000)
+    rescan()
+    const totals = summarize()
+    assert.equal(totals.sessions, 2)
+    assert.equal(totals.byProject.length, 1)
+    assert.equal(totals.byProject[0].path, 'C:\\work\\alpha')
+    assert.equal(totals.byProject[0].tokens, 3000)
 
-    assert.equal(totali.byModel.length, 2)
-    // Ordinati per costo: 1000 token Opus (0,025$) battono 2000 Haiku (0,01$).
-    assert.equal(totali.byModel[0].model, 'claude-opus-5')
-    assert.equal(totali.byModel[0].tokens, 1000)
-    assert.equal(totali.byModel[1].tokens, 2000)
+    assert.equal(totals.byModel.length, 2)
+    assert.equal(totals.byModel[0].model, 'claude-opus-5')
+    assert.equal(totals.byModel[0].tokens, 1000)
+    assert.equal(totals.byModel[1].tokens, 2000)
   })
 })
 
-describe('scanner: contesto della sessione', () => {
-  it("lastContext e' l'ultimo turno, non il massimo ne' la somma", () => {
-    // E' l'indicatore di quanto e' pieno il contesto ADESSO. Prendere il
-    // massimo lo lascerebbe inchiodato in alto dopo un turno grosso; sommare i
-    // turni lo manderebbe oltre il 100% in qualunque sessione lunga, perche'
-    // ogni richiesta rimanda l'intera conversazione.
-    const progetto = radiceFinta()
-    scriviTranscript(progetto, 'sessione-contesto', [
-      riga({ id: 't1', uso: { input: 100, cacheRead: 900, output: 50 } }),
-      riga({ id: 't2', uso: { input: 200, cacheRead: 49_800, output: 60 } }),
-      riga({ id: 't3', uso: { input: 50, cacheRead: 250, output: 70 } })
+describe('scanner: session context tracking', () => {
+  it('lastContext reflects the latest turn, not maximum or sum', () => {
+    const project = fakeRoot()
+    writeTranscript(project, 'context-session', [
+      makeRow({ id: 't1', uso: { input: 100, cacheRead: 900, output: 50 } }),
+      makeRow({ id: 't2', uso: { input: 200, cacheRead: 49_800, output: 60 } }),
+      makeRow({ id: 't3', uso: { input: 50, cacheRead: 250, output: 70 } })
     ])
 
-    rileggi()
-    const sessione = sessionUsage()['sessione-contesto']
-    assert.equal(sessione.contextTokens, 300)
-    assert.notEqual(sessione.contextTokens, 50_000, 'non e\' il massimo')
-    assert.notEqual(sessione.contextTokens, 51_300, 'non e\' la somma')
-    // L'output non fa parte del contesto in ingresso del turno successivo.
-    assert.equal(sessione.turns, 3)
-    assert.equal(sessione.tokens, 51_480)
+    rescan()
+    const session = sessionUsage()['context-session']
+    assert.equal(session.contextTokens, 300)
+    assert.notEqual(session.contextTokens, 50_000)
+    assert.notEqual(session.contextTokens, 51_300)
+    assert.equal(session.turns, 3)
+    assert.equal(session.tokens, 51_480)
   })
 
-  it('la finestra mostrata segue il modello dell\'ultimo turno (issue #11)', () => {
-    // Il collegamento fra la tabella dei modelli e il riquadro: e' qui che
-    // l'utente vedeva «circa» su una percentuale che era esatta.
-    const progetto = radiceFinta()
-    scriviTranscript(progetto, 'sessione-haiku', [
-      riga({ id: 'h1', model: 'claude-opus-5', uso: { input: 1000 } }),
-      riga({ id: 'h2', model: 'claude-haiku-4-5-20251001', uso: { input: 2000 } })
+  it('context window tracks model of latest turn (issue #11)', () => {
+    const project = fakeRoot()
+    writeTranscript(project, 'haiku-session', [
+      makeRow({ id: 'h1', model: 'claude-opus-5', uso: { input: 1000 } }),
+      makeRow({ id: 'h2', model: 'claude-haiku-4-5-20251001', uso: { input: 2000 } })
     ])
 
-    rileggi()
-    const sessione = sessionUsage()['sessione-haiku']
-    assert.equal(sessione.model, 'claude-haiku-4-5-20251001')
-    assert.equal(sessione.contextWindow, 200_000)
-    assert.equal(sessione.contextApproximate, false)
+    rescan()
+    const session = sessionUsage()['haiku-session']
+    assert.equal(session.model, 'claude-haiku-4-5-20251001')
+    assert.equal(session.contextWindow, 200_000)
+    assert.equal(session.contextApproximate, false)
   })
 
-  it('un transcript cancellato sparisce dai totali', () => {
-    // Claude Code fa pulizia periodica dei transcript vecchi. Continuare a
-    // sommarli farebbe crescere per sempre un totale che non corrisponde a
-    // nessun file esistente, quindi non verificabile.
-    const progetto = radiceFinta()
-    scriviTranscript(progetto, 'sessione-che-resta', [riga({ id: 'r1', uso: { output: 1000 } })])
-    const daCancellare = scriviTranscript(progetto, 'sessione-che-sparisce', [
-      riga({ id: 'x1', uso: { output: 2000 } })
+  it('deleted transcript is removed from totals', () => {
+    const project = fakeRoot()
+    writeTranscript(project, 'session-remaining', [makeRow({ id: 'r1', uso: { output: 1000 } })])
+    const toDelete = writeTranscript(project, 'session-to-delete', [
+      makeRow({ id: 'x1', uso: { output: 2000 } })
     ])
 
-    rileggi()
+    rescan()
     assert.equal(summarize().totalTokens, 3000)
     assert.equal(summarize().sessions, 2)
 
-    rmSync(daCancellare)
-    rileggi()
+    rmSync(toDelete)
+    rescan()
 
-    const dopo = summarize()
-    assert.equal(dopo.totalTokens, 1000)
-    assert.equal(dopo.sessions, 1)
-    assert.equal(sessionUsage()['sessione-che-sparisce'], undefined)
-    assert.ok(sessionUsage()['sessione-che-resta'])
+    const after = summarize()
+    assert.equal(after.totalTokens, 1000)
+    assert.equal(after.sessions, 1)
+    assert.equal(sessionUsage()['session-to-delete'], undefined)
+    assert.ok(sessionUsage()['session-remaining'])
   })
 
-  it('legge anche i transcript dei sotto-agenti nelle sottocartelle', () => {
-    const progetto = radiceFinta()
-    const sotto = join(progetto, 'subagents')
-    mkdirSync(sotto, { recursive: true })
-    scriviTranscript(progetto, 'principale', [riga({ id: 'p1', uso: { output: 100 } })])
-    scriviTranscript(sotto, 'agente', [riga({ id: 'a1', uso: { output: 400 } })])
+  it('reads transcripts from subagent subfolders', () => {
+    const project = fakeRoot()
+    const subagents = join(project, 'subagents')
+    mkdirSync(subagents, { recursive: true })
+    writeTranscript(project, 'main-session', [makeRow({ id: 'p1', uso: { output: 100 } })])
+    writeTranscript(subagents, 'subagent-session', [makeRow({ id: 'a1', uso: { output: 400 } })])
 
-    rileggi()
+    rescan()
     assert.equal(summarize().totalTokens, 500)
     assert.equal(summarize().sessions, 2)
   })
 })
 
-// --- Giorno locale ----------------------------------------------------------
+// --- Local Day Accounting ---------------------------------------------------
 
-describe('scanner: giorno locale (Regressione della issue #3)', () => {
-  it('un turno di oggi finisce in «oggi» anche quando in UTC e\' un altro giorno', () => {
-    // Il giorno veniva ricavato da toISOString(), cioe' da Greenwich: in
-    // Italia il lavoro fatto fra mezzanotte e le due finiva contato nel giorno
-    // prima, e «Oggi» — il numero piu' in vista dell'app — non corrispondeva a
-    // quello che l'utente aveva appena fatto.
-    //
-    // L'istante e' costruito a partire dal giorno locale corrente, non
-    // dall'ora in cui il test viene lanciato: alle 03:00 come alle 23:00 il
-    // caso e' lo stesso. L'ora scelta e' quella che, nel fuso in vigore,
-    // ricade in un giorno UTC diverso: 00:30 a est di Greenwich, 23:30 a ovest.
-    const adesso = new Date()
-    const aEst = -adesso.getTimezoneOffset() > 0
-    const istante = new Date(
-      adesso.getFullYear(),
-      adesso.getMonth(),
-      adesso.getDate(),
-      aEst ? 0 : 23,
+describe('scanner: local day tracking (issue #3 regression)', () => {
+  it('assigns today turn to today even when UTC is a different calendar day', () => {
+    const now = new Date()
+    const isEast = -now.getTimezoneOffset() > 0
+    const instant = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate(),
+      isEast ? 0 : 23,
       30
     )
 
-    const chiaveLocale = [
-      istante.getFullYear(),
-      String(istante.getMonth() + 1).padStart(2, '0'),
-      String(istante.getDate()).padStart(2, '0')
+    const localKey = [
+      instant.getFullYear(),
+      String(instant.getMonth() + 1).padStart(2, '0'),
+      String(instant.getDate()).padStart(2, '0')
     ].join('-')
 
-    if (adesso.getTimezoneOffset() !== 0) {
+    if (now.getTimezoneOffset() !== 0) {
       assert.notEqual(
-        istante.toISOString().slice(0, 10),
-        chiaveLocale,
-        'il caso deve cadere a cavallo della mezzanotte UTC, altrimenti non prova nulla'
+        instant.toISOString().slice(0, 10),
+        localKey,
+        'test must cross UTC midnight'
       )
     }
 
-    // Mezzogiorno locale, cosi' l'ora legale non sposta il giorno.
-    const treGiorniFa = new Date(adesso.getFullYear(), adesso.getMonth(), adesso.getDate() - 3, 12)
-    const dieciGiorniFa = new Date(
-      adesso.getFullYear(),
-      adesso.getMonth(),
-      adesso.getDate() - 10,
+    const threeDaysAgo = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 3, 12)
+    const tenDaysAgo = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate() - 10,
       12
     )
 
-    const progetto = radiceFinta()
-    scriviTranscript(progetto, 'sessione-giorni', [
-      riga({ id: 'g1', uso: { output: 1000 }, at: istante }),
-      riga({ id: 'g2', uso: { output: 200 }, at: treGiorniFa }),
-      riga({ id: 'g3', uso: { output: 30 }, at: dieciGiorniFa })
+    const project = fakeRoot()
+    writeTranscript(project, 'days-session', [
+      makeRow({ id: 'g1', uso: { output: 1000 }, at: instant }),
+      makeRow({ id: 'g2', uso: { output: 200 }, at: threeDaysAgo }),
+      makeRow({ id: 'g3', uso: { output: 30 }, at: tenDaysAgo })
     ])
 
-    rileggi()
-    const totali = summarize()
+    rescan()
+    const totals = summarize()
 
-    assert.equal(totali.todayTokens, 1000, 'il turno di stanotte deve stare in «oggi»')
-    assert.equal(totali.weekTokens, 1200, 'sette giorni: oggi piu\' tre giorni fa')
-    assert.equal(totali.totalTokens, 1230, 'il totale comprende anche dieci giorni fa')
-
-    // I costi seguono gli stessi insiemi: 1000 token di output Opus 5 = 0,025$.
-    assert.equal(totali.todayCost, 0.025)
-    assert.ok(totali.weekCost > totali.todayCost)
-    assert.ok(totali.totalCost > totali.weekCost)
+    assert.equal(totals.todayTokens, 1000)
+    assert.equal(totals.weekTokens, 1200)
+    assert.equal(totals.totalTokens, 1230)
+    assert.equal(totals.todayCost, 0.025)
+    assert.ok(totals.weekCost > totals.todayCost)
+    assert.ok(totals.totalCost > totals.weekCost)
   })
 
-  it('un turno di ieri sera non viene tirato dentro «oggi»', () => {
-    // Il rovescio del difetto: spostare la chiave al giorno locale non deve
-    // far entrare in «oggi» quello che oggi non e'.
-    //
-    // Serve anche a coprire il caso precedente nelle ore in cui quello non
-    // basta: con la chiave UTC, fra mezzanotte e le due di notte in Italia
-    // anche «oggi» diventa il giorno UTC precedente e i due sbagli si
-    // compensano. In quella finestra e' questo caso a fallire, perche' le
-    // 23:30 di ieri locali sono il giorno UTC che il difetto chiama «oggi».
-    const adesso = new Date()
-    const ieriSera = new Date(
-      adesso.getFullYear(),
-      adesso.getMonth(),
-      adesso.getDate() - 1,
+  it('yesterday evening turn is not counted in today', () => {
+    const now = new Date()
+    const yesterdayEvening = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate() - 1,
       23,
       30
     )
 
-    const progetto = radiceFinta()
-    scriviTranscript(progetto, 'sessione-ieri', [
-      riga({ id: 'i1', uso: { output: 500 }, at: ieriSera })
+    const project = fakeRoot()
+    writeTranscript(project, 'yesterday-session', [
+      makeRow({ id: 'i1', uso: { output: 500 }, at: yesterdayEvening })
     ])
 
-    rileggi()
-    const totali = summarize()
-    assert.equal(totali.todayTokens, 0)
-    assert.equal(totali.todayCost, 0)
-    assert.equal(totali.weekTokens, 500)
-    assert.equal(totali.totalTokens, 500)
+    rescan()
+    const totals = summarize()
+    assert.equal(totals.todayTokens, 0)
+    assert.equal(totals.todayCost, 0)
+    assert.equal(totals.weekTokens, 500)
+    assert.equal(totals.totalTokens, 500)
   })
 
-  it('un turno senza timestamp resta nel totale ma non in «oggi»', () => {
-    // Meglio perderlo dai riquadri a tempo che attribuirlo al giorno sbagliato:
-    // il totale generale resta comunque verificabile.
-    const progetto = radiceFinta()
-    scriviTranscript(progetto, 'sessione-senza-data', [riga({ id: 'n1', uso: { output: 800 } })])
+  it('turn missing timestamp remains in grand total but excluded from today', () => {
+    const project = fakeRoot()
+    writeTranscript(project, 'dateless-session', [makeRow({ id: 'n1', uso: { output: 800 } })])
 
-    rileggi()
-    const totali = summarize()
-    assert.equal(totali.totalTokens, 800)
-    assert.equal(totali.todayTokens, 0)
-    assert.equal(totali.weekTokens, 0)
-    assert.equal(sessionUsage()['sessione-senza-data'].lastAt, 0)
+    rescan()
+    const totals = summarize()
+    assert.equal(totals.totalTokens, 800)
+    assert.equal(totals.todayTokens, 0)
+    assert.equal(totals.weekTokens, 0)
+    assert.equal(sessionUsage()['dateless-session'].lastAt, 0)
   })
 })

@@ -1,18 +1,17 @@
 import type { Theme } from '../theme'
 
 /**
- * Temi integrati. Il primo è il predefinito.
+ * Built-in themes. The first theme is the default.
  *
- * Ogni palette è costruita perché il terminale e la cornice condividano la
- * stessa famiglia di grigi: è la differenza fra un tema e due tavolozze
- * accostate. I 16 colori ANSI sono desaturati verso il fondo, così l'output
- * colorato di Claude Code non stona con l'interfaccia.
+ * Each palette is designed so the terminal and UI share the same family of grays.
+ * The 16 ANSI colors are desaturated against the background so Claude Code's
+ * colored output harmonizes with the surrounding interface.
  */
 export const BUILTIN_THEMES: Theme[] = [
   {
     id: 'claude-dark',
     name: 'Claude Dark',
-    description: 'grigio caldo e terracotta',
+    description: 'warm gray and terracotta',
     dark: true,
     ui: {
       desktop: '#1F1E1D',
@@ -43,7 +42,7 @@ export const BUILTIN_THEMES: Theme[] = [
   {
     id: 'claude-light',
     name: 'Claude Light',
-    description: 'la stessa palette, su carta',
+    description: 'the same palette, on paper',
     dark: false,
     ui: {
       desktop: '#EDEAE2',
@@ -73,8 +72,8 @@ export const BUILTIN_THEMES: Theme[] = [
   },
   {
     id: 'mezzanotte',
-    name: 'Mezzanotte',
-    description: 'blu freddo, poco contrasto',
+    name: 'Midnight',
+    description: 'cool blue, low contrast',
     dark: true,
     ui: {
       desktop: '#16181D',
@@ -105,7 +104,7 @@ export const BUILTIN_THEMES: Theme[] = [
   {
     id: 'gruvbox',
     name: 'Gruvbox',
-    description: 'caldo, retro, alto contrasto',
+    description: 'warm, retro, high contrast',
     dark: true,
     ui: {
       desktop: '#1D2021',
@@ -136,7 +135,7 @@ export const BUILTIN_THEMES: Theme[] = [
   {
     id: 'nord',
     name: 'Nord',
-    description: 'grigio-azzurro, riposante',
+    description: 'cool slate-blue, easy on the eyes',
     dark: true,
     ui: {
       desktop: '#2E3440',
@@ -166,8 +165,8 @@ export const BUILTIN_THEMES: Theme[] = [
   },
   {
     id: 'alto-contrasto',
-    name: 'Alto contrasto',
-    description: 'massima leggibilità',
+    name: 'High Contrast',
+    description: 'maximum legibility',
     dark: true,
     ui: {
       desktop: '#000000',
@@ -188,10 +187,8 @@ export const BUILTIN_THEMES: Theme[] = [
       cursor: '#FFB000',
       selection: '#404040',
       ansi: [
-        // Il nero ANSI non può coincidere con lo sfondo: era '#000000' su
-        // fondo '#000000', cioè invisibile, e qualunque output che lo usa —
-        // cornici, barre di avanzamento, diff — spariva del tutto. Proprio nel
-        // tema che promette la massima leggibilità.
+        // ANSI black must not match the background:
+        // ensures borders, progress bars, and diffs remain clearly legible.
         '#4D4D4D', '#FF5252', '#00E676', '#FFD400',
         '#40A9FF', '#E066FF', '#00E5FF', '#D9D9D9',
         '#808080', '#FF8A80', '#69F0AE', '#FFEA00',

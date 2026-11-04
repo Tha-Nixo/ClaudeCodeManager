@@ -4,9 +4,9 @@ import { normalizePath } from '../claude/paths'
 import { readJson, writeJsonAtomic } from './config'
 
 interface FoldersState {
-  /** Cartelle aperte da ClaudeManager, dalla piu' recente. */
+  /** Folders opened by ClaudeManager, most recent first. */
   recents: { path: string; lastUsed: number }[]
-  /** Preferiti fissati dall'utente, nell'ordine di aggiunta. */
+  /** Pinned user favorites, in order of addition. */
   favorites: string[]
 }
 
@@ -22,11 +22,10 @@ function load(): FoldersState {
   if (cached) return cached
   const stored = readJson<Partial<FoldersState>>(file())
 
-  // I valori vanno controllati, non solo sostituiti quando mancano. Con
-  // `recents` uguale a una stringa (file corrotto, o modificato a mano) il
-  // selettore di cartelle sollevava un'eccezione ad ogni apertura, e non
-  // c'era modo di rimettersi in sesto se non cancellando il file: la funzione
-  // principale dell'app restava inaccessibile senza che nulla lo spiegasse.
+  // Values must be validated, not just substituted with defaults when missing.
+  // With `recents` stored as a string (corrupted file, or hand-edited),
+  // the folder selector threw an exception on every open, with no recovery
+  // other than deleting the file.
   const recents = Array.isArray(stored?.recents)
     ? stored.recents.filter(
         (r): r is { path: string; lastUsed: number } =>
@@ -54,7 +53,7 @@ export function getFavorites(): string[] {
   return load().favorites
 }
 
-/** Registra l'apertura di una cartella; la lista resta ordinata e senza duplicati. */
+/** Records opening a folder; list remains sorted with no duplicates. */
 export function touchRecent(path: string): void {
   const state = load()
   const key = normalizePath(path)

@@ -1,44 +1,36 @@
 import type { MonitorPane, MonitorState } from '@shared/types'
 import { formatCost, formatTokens } from '../usage/UsagePanel'
 
-/**
- * Contenuto del pannello di monitoraggio.
- *
- * Lo stesso componente disegna il cassetto agganciato e la finestra staccata:
- * cambia solo la cornice attorno. Non conosce nessuna delle due — riceve lo
- * stato e basta, così non può divergere fra i due contenitori.
- */
-
 interface MonitorPanelProps {
   state: MonitorState | null
-  /** Assente nella finestra staccata, che non può dare il fuoco a un riquadro. */
+  /** Omitted when rendered in detached window. */
   onFocusPane?: (paneId: string) => void
 }
 
 export function MonitorPanel({ state, onFocusPane }: MonitorPanelProps): React.JSX.Element {
-  if (!state) return <div className="cm-monitor__empty">Lettura…</div>
+  if (!state) return <div className="cm-monitor__empty">Loading…</div>
 
   return (
     <div className="cm-monitor__body">
       <div className="cm-monitor__totals">
         <div className="cm-monitor__total">
           <span className="cm-monitor__total-value">{formatCost(state.todayCost)}</span>
-          <span className="cm-monitor__total-label">oggi</span>
+          <span className="cm-monitor__total-label">today</span>
         </div>
         <div className="cm-monitor__total">
           <span className="cm-monitor__total-value">{formatTokens(state.todayTokens)}</span>
-          <span className="cm-monitor__total-label">token</span>
+          <span className="cm-monitor__total-label">tokens</span>
         </div>
         <div className="cm-monitor__total">
           <span className="cm-monitor__total-value">{state.panes.length}</span>
           <span className="cm-monitor__total-label">
-            {state.panes.length === 1 ? 'sessione' : 'sessioni'}
+            {state.panes.length === 1 ? 'session' : 'sessions'}
           </span>
         </div>
       </div>
 
       {state.panes.length === 0 ? (
-        <div className="cm-monitor__empty">Nessuna sessione aperta.</div>
+        <div className="cm-monitor__empty">No active sessions.</div>
       ) : (
         <div className="cm-monitor__list">
           {state.panes.map((pane) => (
@@ -48,8 +40,7 @@ export function MonitorPanel({ state, onFocusPane }: MonitorPanelProps): React.J
       )}
 
       <div className="cm-monitor__foot">
-        Costi a tariffe di listino. Il riempimento del contesto è stimato dai token in
-        ingresso dell&apos;ultimo turno.
+        List pricing. Context saturation estimated from last turn input tokens.
       </div>
     </div>
   )
@@ -63,8 +54,6 @@ function Row({
   onFocus?: (paneId: string) => void
 }): React.JSX.Element {
   const usage = pane.usage
-  // Senza finestra nota non si mostra una percentuale: un numero inventato
-  // sarebbe peggio di nessun numero.
   const fill =
     usage && usage.contextWindow > 0
       ? Math.min(100, Math.round((usage.contextTokens / usage.contextWindow) * 100))
@@ -93,9 +82,9 @@ function Row({
             />
           </div>
           <div className="cm-monitor__detail">
-            contesto {fill}%
-            {usage.contextApproximate ? ' circa' : ''} · {formatTokens(usage.contextTokens)} di{' '}
-            {formatTokens(usage.contextWindow)} · {usage.turns} turni
+            context {fill}%
+            {usage.contextApproximate ? ' approx' : ''} · {formatTokens(usage.contextTokens)} of{' '}
+            {formatTokens(usage.contextWindow)} · {usage.turns} turns
           </div>
         </>
       ) : (
@@ -103,8 +92,8 @@ function Row({
           {pane.waitingFor
             ? pane.waitingFor
             : usage
-              ? `${usage.turns} turni · ${formatTokens(usage.tokens)} token`
-              : 'nessun dato ancora'}
+              ? `${usage.turns} turns · ${formatTokens(usage.tokens)} tokens`
+              : 'no data yet'}
         </div>
       )}
     </div>

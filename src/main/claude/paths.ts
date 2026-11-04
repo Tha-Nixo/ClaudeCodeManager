@@ -3,22 +3,22 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 
 /**
- * Corrispondenza fra cartella di lavoro e directory dei transcript.
+ * Working directory to transcripts directory mapping.
  *
- * Claude Code sostituisce con '-' OGNI carattere non alfanumerico:
+ * Claude Code replaces EVERY non-alphanumeric character with '-':
  *   C:\Users\Tha_Nixo\Desktop\ClaudeManager
  *   -> C--Users-Tha-Nixo-Desktop-ClaudeManager
  *
- * La trasformazione e' LOSSY: '_', ' ', '.' e '-' collassano tutti su '-'.
- * Si codifica quindi solo in avanti, mai al contrario: per risalire al
- * percorso reale si legge il campo `cwd` dentro un transcript, oppure il campo
- * `project` di history.jsonl, che contiene gia' il percorso non codificato.
+ * The transformation is LOSSY: '_', ' ', '.' and '-' all collapse to '-'.
+ * Therefore, we only encode forward, never backward: to recover the real
+ * path, read the `cwd` field inside a transcript, or the `project` field
+ * in history.jsonl, which already contains the unencoded path.
  */
 export function encodeProjectDir(fullPath: string): string {
-  // I separatori vanno normalizzati PRIMA di codificare: 'C:\foo\' e 'C:\foo'
-  // sono la stessa cartella, ma darebbero 'C--foo-' e 'C--foo', e solo il
-  // secondo corrisponde a quello che scrive Claude Code. La radice di
-  // un'unità ('C:\') fa eccezione, perché lì il separatore è significativo.
+  // Separators must be normalized BEFORE encoding: 'C:\foo\' and 'C:\foo'
+  // are the same folder, but would yield 'C--foo-' and 'C--foo', and only the
+  // second matches what Claude Code writes. Drive roots ('C:\') are the exception,
+  // because there the separator is significant.
   const normalized = fullPath.replace(/[\\/]+/g, '\\').replace(/(?<!:)\\+$/, '')
   return normalized.replace(/[^a-zA-Z0-9]/g, '-')
 }
@@ -43,8 +43,8 @@ export function transcriptsFor(fullPath: string): string[] {
   }
 }
 
-/** Percorsi normalizzati per il confronto: Windows e' case-insensitive e i
- *  separatori compaiono misti anche dentro lo stesso file di configurazione. */
+/** Normalized paths for comparison: Windows is case-insensitive and
+ *  separators appear mixed even within the same configuration file. */
 export function normalizePath(p: string): string {
   return p.replace(/[\\/]+/g, '\\').replace(/\\+$/, '').toLowerCase()
 }
@@ -52,9 +52,9 @@ export function normalizePath(p: string): string {
 const CWD_RE = /"cwd"\s*:\s*"((?:[^"\\]|\\.)*)"/
 
 /**
- * Estrae la cwd reale da un transcript leggendone solo la testa: i record di
- * intestazione non hanno il campo, quindi si scandisce un blocco iniziale
- * invece di caricare file che possono pesare megabyte.
+ * Extracts the real cwd from a transcript by reading only its head:
+ * header records do not have the field, so scanning an initial chunk avoids
+ * loading files that can be many megabytes.
  */
 export function readCwdFromTranscript(file: string, bytes = 64 * 1024): string | null {
   let fd: number | null = null
@@ -74,19 +74,19 @@ export function readCwdFromTranscript(file: string, bytes = 64 * 1024): string |
 
 export interface KnownFolder {
   path: string
-  /** Ultima volta che la cartella e' stata usata, epoch ms. */
+  /** Last time the folder was used, epoch ms. */
   lastUsed: number
-  /** Numero di prompt registrati in history.jsonl per questa cartella. */
+  /** Number of prompts recorded in history.jsonl for this folder. */
   uses: number
 }
 
 /**
- * Cartelle in cui Claude Code e' gia' stato usato.
+ * Folders where Claude Code has previously been used.
  *
- * La sorgente principale e' history.jsonl, che elenca i percorsi REALI ed e'
- * un solo file da leggere. Le directory in projects/ servono a coprire i casi
- * che la history non contiene; per quelle si risale alla cwd leggendo la testa
- * di un transcript, mai decodificando il nome della cartella.
+ * The main source is history.jsonl, which lists REAL paths and is a single
+ * file to read. Directories in projects/ cover cases not present in history;
+ * for those, cwd is retrieved by reading the transcript head, never by decoding
+ * the folder name.
  */
 export function knownFolders(): KnownFolder[] {
   const byPath = new Map<string, KnownFolder>()
@@ -102,7 +102,7 @@ export function knownFolders(): KnownFolder[] {
     }
   }
 
-  // 1. history.jsonl -> percorsi reali, con frequenza e recenza.
+  // 1. history.jsonl -> real paths, with frequency and recency.
   const history = join(claudeHome(), 'history.jsonl')
   if (existsSync(history)) {
     try {
@@ -112,15 +112,15 @@ export function knownFolders(): KnownFolder[] {
           const rec = JSON.parse(line) as { project?: string; timestamp?: number }
           if (rec.project) add(rec.project, rec.timestamp ?? 0, true)
         } catch {
-          // Riga corrotta: si ignora e si prosegue.
+          // Corrupted line: ignore and continue.
         }
       }
     } catch {
-      // History illeggibile: restano le directory dei progetti.
+      // Unreadable history: project directories remain as fallback.
     }
   }
 
-  // 2. projects/ -> cartelle mai finite nella history.
+  // 2. projects/ -> folders never recorded in history.
   const dir = projectsDir()
   if (existsSync(dir)) {
     let entries: string[] = []
@@ -131,8 +131,8 @@ export function knownFolders(): KnownFolder[] {
     }
 
     for (const entry of entries) {
-      // Le sessioni remote usano 'ssh-<uuid>' e non uno schema di percorso:
-      // non sono cartelle locali e non vanno nell'indice.
+      // Remote sessions use 'ssh-<uuid>' and not a path scheme:
+      // they are not local folders and are excluded from the index.
       if (entry.startsWith('ssh-')) continue
 
       const projectPath = join(dir, entry)
@@ -153,17 +153,17 @@ export function knownFolders(): KnownFolder[] {
   return [...byPath.values()].sort((a, b) => b.lastUsed - a.lastUsed)
 }
 
-// --- Fiducia sulle cartelle -------------------------------------------------
+// --- Folder trust -------------------------------------------------
 
 let trustCache: { at: number; map: Map<string, boolean> } | null = null
 const TRUST_TTL_MS = 30_000
 
 /**
- * Cartelle per cui il dialogo di fiducia e' gia' stato accettato.
+ * Folders for which the trust dialog has already been accepted.
  *
- * ~/.claude.json contiene anche `oauthAccount` e, dentro projects[].mcpServers,
- * variabili d'ambiente con chiavi API: si estrae SOLO hasTrustDialogAccepted e
- * il resto viene scartato subito, senza mai registrarlo o esporlo.
+ * ~/.claude.json also contains `oauthAccount` and, inside projects[].mcpServers,
+ * environment variables with API keys: we extract ONLY hasTrustDialogAccepted
+ * and immediately discard the rest, never recording or exposing it.
  */
 export function trustedFolders(): Map<string, boolean> {
   if (trustCache && Date.now() - trustCache.at < TRUST_TTL_MS) return trustCache.map
@@ -180,7 +180,7 @@ export function trustedFolders(): Map<string, boolean> {
         map.set(normalizePath(path), entry?.hasTrustDialogAccepted === true)
       }
     } catch {
-      // File assente o illeggibile: nessun badge di fiducia, nient'altro.
+      // Missing or unreadable file: no trust badge, nothing else.
     }
   }
 

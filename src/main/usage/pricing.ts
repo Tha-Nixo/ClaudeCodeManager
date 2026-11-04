@@ -1,18 +1,13 @@
 /**
- * Tariffe di listino dell'API Anthropic, in dollari per MILIONE di token.
+ * Anthropic API list rates in USD per MILLION tokens.
  *
- * Le tariffe di cache derivano da moltiplicatori fissi sul prezzo di input:
- *   lettura da cache      0.1x
- *   scrittura cache 5 min 1.25x
- *   scrittura cache 1 ora 2x
- * Vengono calcolate invece che riscritte a mano, così aggiornare `input`
- * aggiorna coerentemente tutto il resto.
+ * Cache pricing is computed from multipliers on input price:
+ *   cache read:           0.1x
+ *   cache write (5 min):  1.25x
+ *   cache write (1 hour): 2.0x
  *
- * ATTENZIONE: sono prezzi API di listino. Con un abbonamento Max o Pro il
- * costo mostrato NON è una spesa reale: è "quanto sarebbe costato via API".
- * La UI deve dirlo esplicitamente.
- *
- * Fonte: skill claude-api (catalogo modelli aggiornato al 2026-06-24).
+ * NOTE: These are standard API list prices. For Max or Pro subscriptions,
+ * the displayed cost is not actual billing but "what this would have cost via API".
  */
 
 export const CACHE_READ_MULTIPLIER = 0.1
@@ -20,21 +15,18 @@ export const CACHE_WRITE_5M_MULTIPLIER = 1.25
 export const CACHE_WRITE_1H_MULTIPLIER = 2
 
 export interface ModelPrice {
-  /** Etichetta leggibile per la UI. */
+  /** Human-readable label for UI. */
   label: string
-  /** Dollari per milione di token di input. */
+  /** USD per million input tokens. */
   input: number
-  /** Dollari per milione di token di output. */
+  /** USD per million output tokens. */
   output: number
-  /** Nota mostrata accanto al prezzo, es. tariffa introduttiva. */
+  /** Note displayed alongside price, e.g. introductory rates. */
   note?: string
 }
 
 /**
- * Chiavi in ordine di specificità: la ricerca prova prima la corrispondenza
- * esatta, poi il prefisso, infine la famiglia. I modelli della famiglia -5
- * mancano nella tabella di claude-usage, che li farebbe cadere in silenzio
- * sulle tariffe 4.6.
+ * Keys ordered by specificity: exact match, then prefix, then family heuristic.
  */
 export const PRICING: Record<string, ModelPrice> = {
   'claude-fable-5': { label: 'Fable 5', input: 10, output: 50 },
@@ -44,12 +36,12 @@ export const PRICING: Record<string, ModelPrice> = {
   'claude-opus-4-7': { label: 'Opus 4.7', input: 5, output: 25 },
   'claude-opus-4-6': { label: 'Opus 4.6', input: 5, output: 25 },
   'claude-opus-4-5': { label: 'Opus 4.5', input: 5, output: 25 },
-  // Tariffa introduttiva in vigore fino al 31/08/2026; poi 3 / 15.
+  // Introductory pricing until 2026-08-31; afterwards 3 / 15.
   'claude-sonnet-5': {
     label: 'Sonnet 5',
     input: 2,
     output: 10,
-    note: 'tariffa introduttiva fino al 31/08/2026'
+    note: 'introductory pricing until 2026-08-31'
   },
   'claude-sonnet-4-6': { label: 'Sonnet 4.6', input: 3, output: 15 },
   'claude-sonnet-4-5': { label: 'Sonnet 4.5', input: 3, output: 15 },
@@ -57,16 +49,7 @@ export const PRICING: Record<string, ModelPrice> = {
 }
 
 /**
- * Finestra di contesto per modello, in token.
- *
- * Non c'è niente da "rilevare": sui modelli correnti il milione di token è
- * insieme il valore predefinito e il massimo, senza intestazioni beta da
- * attivare. L'unica eccezione è Haiku, che si ferma a 200.000.
- *
- * Il numero serve come denominatore dell'indicatore di riempimento del
- * contesto. Quando il modello non è in tabella si prende la finestra della
- * famiglia, e il riquadro lo segnala come approssimato invece di mostrare una
- * percentuale che sembra esatta.
+ * Context window per model in tokens.
  */
 export const CONTEXT_WINDOWS: Record<string, number> = {
   'claude-fable-5': 1_000_000,
@@ -80,7 +63,7 @@ export const CONTEXT_WINDOWS: Record<string, number> = {
   'claude-haiku-4-5': 200_000
 }
 
-/** Ultima spiaggia per modelli non ancora in tabella. */
+/** Fallback heuristic for unrecognized models in known families. */
 const FAMILY_FALLBACK: { keyword: string; key: string }[] = [
   { keyword: 'fable', key: 'claude-fable-5' },
   { keyword: 'mythos', key: 'claude-mythos-5' },
@@ -90,9 +73,8 @@ const FAMILY_FALLBACK: { keyword: string; key: string }[] = [
 ]
 
 /**
- * Finestra di contesto del modello, con l'indicazione se è dedotta.
- * Ritorna 0 quando non si sa nulla del modello: meglio nessuna percentuale
- * che una sbagliata.
+ * Returns context window for a model, indicating whether it was inferred.
+ * Returns 0 when completely unrecognized.
  */
 export function contextWindowFor(model: string | null | undefined): {
   window: number
@@ -104,11 +86,6 @@ export function contextWindowFor(model: string | null | undefined): {
   const exact = CONTEXT_WINDOWS[id]
   if (exact) return { window: exact, approximate: false }
 
-  // Gli id scritti nei transcript hanno il suffisso di data
-  // (claude-haiku-4-5-20251001), quindi la corrispondenza per prefisso e' il
-  // caso normale, non l'eccezione: senza, ogni percentuale di riempimento del
-  // contesto veniva marcata «circa» pur essendo esatta, e l'avvertenza perdeva
-  // valore proprio dove servirebbe. `priceFor` fa gia' lo stesso.
   for (const [key, window] of Object.entries(CONTEXT_WINDOWS)) {
     if (id.startsWith(key)) return { window, approximate: false }
   }
@@ -120,7 +97,7 @@ export function contextWindowFor(model: string | null | undefined): {
 }
 
 export interface ResolvedPrice extends ModelPrice {
-  /** true quando il prezzo viene da una corrispondenza per famiglia. */
+  /** True when price was resolved via family heuristic fallback. */
   approximate: boolean
 }
 
@@ -131,8 +108,6 @@ export function priceFor(model: string | null | undefined): ResolvedPrice | null
   const exact = PRICING[id]
   if (exact) return { ...exact, approximate: false }
 
-  // Corrispondenza per prefisso: copre gli id con suffisso di data,
-  // es. claude-haiku-4-5-20251001.
   for (const [key, value] of Object.entries(PRICING)) {
     if (id.startsWith(key)) return { ...value, approximate: false }
   }
@@ -144,7 +119,7 @@ export function priceFor(model: string | null | undefined): ResolvedPrice | null
   return null
 }
 
-/** I sotto-agenti e i modelli interni non fatturabili non vanno conteggiati. */
+/** Checks whether a model is billable. */
 export function isBillable(model: string | null | undefined): boolean {
   return priceFor(model) !== null
 }
@@ -153,9 +128,9 @@ export interface TokenCounts {
   input: number
   output: number
   cacheRead: number
-  /** Scritture in cache con TTL 5 minuti. */
+  /** Cache creation tokens with 5-minute TTL. */
   cacheWrite5m: number
-  /** Scritture in cache con TTL 1 ora, che costano il doppio delle 5 minuti. */
+  /** Cache creation tokens with 1-hour TTL. */
   cacheWrite1h: number
 }
 
@@ -181,7 +156,7 @@ export function totalTokens(t: TokenCounts): number {
   return t.input + t.output + t.cacheRead + t.cacheWrite5m + t.cacheWrite1h
 }
 
-/** Costo in dollari di un insieme di token per un dato modello. */
+/** USD cost calculation for given token counts and model. */
 export function costOf(model: string | null | undefined, tokens: TokenCounts): number {
   const price = priceFor(model)
   if (!price) return 0

@@ -4,7 +4,7 @@ import { dirname, join, parse } from 'node:path'
 import type { DirEntry, FolderInfo } from '@shared/types'
 import { normalizePath, transcriptsFor, trustedFolders } from '../claude/paths'
 
-/** Unita' disponibili, sonda A: .. Z: senza dipendenze esterne. */
+/** Available drives, probes A: .. Z: without external dependencies. */
 export function listDrives(): string[] {
   const drives: string[] = []
   for (let i = 65; i <= 90; i++) {
@@ -12,7 +12,7 @@ export function listDrives(): string[] {
     try {
       if (existsSync(root)) drives.push(root)
     } catch {
-      // Unita' non pronta (lettore vuoto, rete assente): si salta.
+      // Drive not ready (empty drive, disconnected network): skip.
     }
   }
   return drives
@@ -27,7 +27,7 @@ export interface ListDirResult {
   error?: string
 }
 
-/** Contenuto di una cartella, sole sottocartelle: qui si scelgono directory. */
+/** Directory contents, subdirectories only: here we choose folders. */
 export function listDir(target: string): ListDirResult {
   const path = target || homedir()
   const parsed = parse(path)
@@ -41,7 +41,7 @@ export function listDir(target: string): ListDirResult {
         return true
       })
       .map((e) => ({ name: e.name, path: join(path, e.name) }))
-      .sort((a, b) => a.name.localeCompare(b.name, 'it', { sensitivity: 'base' }))
+      .sort((a, b) => a.name.localeCompare(b.name, 'en', { sensitivity: 'base' }))
 
     return { path, parent, entries }
   } catch (err) {
@@ -55,9 +55,9 @@ export function listDir(target: string): ListDirResult {
 }
 
 /**
- * Ramo git corrente letto direttamente da .git/HEAD.
- * Evita di lanciare un processo git per ogni riga della lista: con qualche
- * decina di risultati il costo sarebbe visibile.
+ * Current git branch read directly from .git/HEAD.
+ * Avoids spawning a git process for each list entry: with dozens
+ * of candidates, process overhead would be noticeable.
  */
 function gitBranch(folder: string): string | null {
   const head = join(folder, '.git', 'HEAD')
@@ -66,14 +66,14 @@ function gitBranch(folder: string): string | null {
     const content = readFileSync(head, 'utf8').trim()
     const match = /^ref:\s*refs\/heads\/(.+)$/.exec(content)
     if (match) return match[1]
-    // HEAD staccato: si mostra il commit abbreviato.
+    // Detached HEAD: return abbreviated commit hash.
     return content.slice(0, 7)
   } catch {
     return null
   }
 }
 
-/** Informazioni per i badge di una riga del selettore. */
+/** Badge metadata for a selector entry. */
 export function folderInfo(folder: string): FolderInfo {
   let exists = false
   try {

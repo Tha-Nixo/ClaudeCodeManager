@@ -6,17 +6,17 @@ import { WebglAddon } from '@xterm/addon-webgl'
 import '@xterm/xterm/css/xterm.css'
 import { claudeDarkXterm } from '../theme/xterm-theme'
 
-/** Valore di una variabile CSS del tema, letto al momento dell'uso. */
+/** Value of a theme CSS variable, read at time of use. */
 function readVar(name: string): string {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim()
 }
 
 /**
- * Un terminale xterm, gestito imperativamente e volutamente FUORI dalla
- * riconciliazione di React: un remount di React distruggerebbe il buffer e
- * la history di scorrimento. React possiede solo il `<div>` slot in cui
- * innestiamo `element`; il ciclo di vita di questo oggetto lo decide il
- * registro in `registry.ts`.
+ * An xterm terminal instance, managed imperatively and intentionally OUTSIDE
+ * React reconciliation: a React remount would destroy the buffer and
+ * scroll history. React owns only the `<div>` mount slot in which
+ * `element` is attached; the lifecycle of this object is managed by the
+ * registry in `registry.ts`.
  */
 export class TerminalHost {
   readonly element: HTMLDivElement
@@ -29,22 +29,22 @@ export class TerminalHost {
   private fitFrame = 0
 
   /**
-   * Durante un'animazione di layout il contenitore cambia dimensione a ogni
-   * frame. Rimisurare significherebbe una dozzina di pty.resize per
-   * transizione, con Claude Code che ridisegna ogni volta: si congela la
-   * misura e si rimisura una sola volta alla fine.
+   * During layout animations, the container changes dimensions on every
+   * frame. Measuring continuously would trigger a dozen pty.resize calls per
+   * transition, causing Claude Code to redraw every time: we freeze
+   * measurement and remeasure once when the transition concludes.
    */
   private fitSuspended = false
 
   private sessionId: string | null = null
-  /** Tasti premuti prima che il PTY esista: vanno consegnati, non persi. */
+  /** Keystrokes received before PTY exists: must be buffered, not lost. */
   private pendingInput: string[] = []
   private opened = false
   private disposed = false
 
-  /** Titolo impostato dal processo via sequenza OSC. */
+  /** Title set by process via OSC sequence. */
   onTitle: ((title: string) => void) | null = null
-  /** Nuove dimensioni in celle dopo un fit. */
+  /** New dimensions in cells after fit. */
   onResize: ((dims: { cols: number; rows: number }) => void) | null = null
 
   constructor(theme?: ITheme) {
@@ -61,8 +61,8 @@ export class TerminalHost {
       letterSpacing: 0,
       scrollback: 10000,
       theme: theme ?? claudeDarkXterm,
-      // Dice a xterm che dall'altra parte c'è ConPTY: cambia le euristiche di
-      // riavvolgimento riga, altrimenti il riflow dopo un resize è sbagliato.
+      // Informs xterm that ConPTY is on the other end: alters word-wrap
+      // heuristics, preventing incorrect reflow after resize.
       windowsPty: { backend: 'conpty' }
     })
 
@@ -75,7 +75,7 @@ export class TerminalHost {
     })
   }
 
-  /** Innesta il terminale nello slot fornito da React e inizia a osservarlo. */
+  /** Mounts terminal into provided React slot and observes resize events. */
   attach(parent: HTMLElement): void {
     if (this.disposed) return
     if (this.element.parentElement !== parent) parent.appendChild(this.element)
@@ -101,8 +101,8 @@ export class TerminalHost {
   }
 
   /**
-   * Associa il terminale a un PTY. Da questo momento l'input viene inoltrato;
-   * quanto digitato prima viene consegnato subito.
+   * Associates the terminal with a PTY session. Input forwarding begins;
+   * any keystrokes buffered beforehand are sent immediately.
    */
   bind(sessionId: string): void {
     this.sessionId = sessionId
@@ -111,7 +111,7 @@ export class TerminalHost {
       this.pendingInput = []
       window.cm.pty.write(sessionId, queued)
     }
-    // Il PTY è nato con dimensioni stimate: allineiamolo a quelle reali.
+    // PTY was created with estimated dimensions: align to actual terminal size.
     window.cm.pty.resize(sessionId, this.term.cols, this.term.rows)
   }
 
@@ -119,7 +119,7 @@ export class TerminalHost {
     if (!this.disposed) this.term.write(data)
   }
 
-  /** Scrive senza passare dal PTY: per messaggi dell'app dentro il riquadro. */
+  /** Writes directly without passing through PTY: used for app messages inside pane. */
   writeAppMessage(text: string): void {
     this.write(`\r\n\x1b[38;2;140;139;135m${text}\x1b[0m\r\n`)
   }
@@ -132,12 +132,12 @@ export class TerminalHost {
     return { cols: this.term.cols, rows: this.term.rows }
   }
 
-  /** Misura subito l'elemento. Da chiamare quando è già nel DOM e visibile. */
+  /** Immediately measures element. Call when mounted in DOM and visible. */
   fitNow(): { cols: number; rows: number } {
     try {
       this.fitAddon.fit()
     } catch {
-      // L'elemento può essere a dimensione zero durante una transizione.
+      // Element may have zero dimensions during transition.
     }
     return this.dimensions
   }
@@ -158,14 +158,12 @@ export class TerminalHost {
     else this.pendingInput.push(data)
   }
 
-  /** Cambia la tavolozza del terminale senza toccarne il contenuto. */
   /**
-   * Cerca nello scrollback e porta la vista sulla corrispondenza.
+   * Searches scrollback and navigates view to match.
    *
-   * L'evidenziazione delle altre occorrenze richiede `decorations`, che
-   * servono a capire quante ce ne sono senza scorrere a mano. I colori
-   * arrivano dal tema attivo, altrimenti su un tema chiaro l'evidenziazione
-   * predefinita di xterm sparisce nel fondo.
+   * Highlighting additional occurrences requires `decorations`, indicating
+   * match counts without manual scrolling. Colors derive from the active
+   * theme, avoiding illegible highlights on light backgrounds.
    */
   search(query: string, direction: 'next' | 'previous'): boolean {
     if (!query) {
@@ -173,21 +171,21 @@ export class TerminalHost {
       return false
     }
 
-    // I colori vengono da variabili che OGNI tema ha già. Aggiungerne una
-    // nuova al formato romperebbe i temi personali esistenti: un tema
-    // incompleto viene rifiutato, non completato con valori di ripiego.
-    const attivo = readVar('--cm-accent') || '#d97757'
-    const altre = readVar('--cm-panel-raised') || '#2e2d2b'
-    const righello = readVar('--cm-text-dim') || '#8c8b87'
+    // Colors derive from variables guaranteed to exist in EVERY theme.
+    // Adding new custom properties would break user themes: incomplete
+    // themes are rejected rather than silently completed with fallbacks.
+    const activeColor = readVar('--cm-accent') || '#d97757'
+    const otherMatches = readVar('--cm-panel-raised') || '#2e2d2b'
+    const rulerColor = readVar('--cm-text-dim') || '#8c8b87'
 
     const options = {
       decorations: {
-        matchBackground: altre,
-        matchBorder: righello,
-        matchOverviewRuler: righello,
-        activeMatchBackground: attivo,
-        activeMatchBorder: attivo,
-        activeMatchColorOverviewRuler: attivo
+        matchBackground: otherMatches,
+        matchBorder: rulerColor,
+        matchOverviewRuler: rulerColor,
+        activeMatchBackground: activeColor,
+        activeMatchBorder: activeColor,
+        activeMatchColorOverviewRuler: activeColor
       }
     }
 
@@ -205,7 +203,7 @@ export class TerminalHost {
     this.term.options.theme = theme
   }
 
-  /** Congela o riprende la misurazione; alla ripresa rimisura subito. */
+  /** Freezes or resumes measurement; upon resumption, immediately remeasures. */
   setFitSuspended(suspended: boolean): void {
     if (this.fitSuspended === suspended) return
     this.fitSuspended = suspended
@@ -224,9 +222,8 @@ export class TerminalHost {
   private enableWebgl(): void {
     try {
       const addon = new WebglAddon()
-      // Alla perdita del contesto WebGL xterm non ridisegna più nulla: si
-      // scarica l'addon e si torna al renderer DOM, che è più lento ma sempre
-      // disponibile.
+      // On WebGL context loss, xterm ceases rendering: dispose addon and
+      // fall back to DOM renderer, which is slower but always available.
       addon.onContextLoss(() => {
         addon.dispose()
         this.webgl = null
@@ -234,7 +231,7 @@ export class TerminalHost {
       this.term.loadAddon(addon)
       this.webgl = addon
     } catch {
-      // Nessun WebGL2 disponibile: xterm resta sul renderer DOM.
+      // WebGL2 unavailable: xterm remains on DOM renderer.
       this.webgl = null
     }
   }

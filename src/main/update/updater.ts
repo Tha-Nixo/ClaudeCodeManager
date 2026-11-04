@@ -3,37 +3,34 @@ import electronUpdater from 'electron-updater'
 import type { UpdateState } from '@shared/types'
 
 /**
- * Aggiornamenti dalle release di GitHub.
+ * Updates from GitHub releases.
  *
- * Tre scelte che determinano tutto il resto:
+ * Three core design decisions:
  *
- * 1. Si SCARICA da soli, ma non si installa da soli. Installare significa
- *    riavviare, e un riavvio a sorpresa ucciderebbe tutte le sessioni Claude
- *    aperte. L'installazione avviene alla chiusura dell'app, oppure quando
- *    l'utente la chiede.
- * 2. L'eseguibile portabile CONTROLLA ma non scarica. Non puo' sostituirsi da
- *    solo — un .exe in esecuzione non si puo' rimpiazzare, e il file pubblicato
- *    per l'aggiornamento automatico e' comunque l'installer, che trasformerebbe
- *    a sorpresa una copia portabile in una installata. Sapere che esiste una
- *    versione nuova pero' serve lo stesso, quindi il controllo si fa e il
- *    risultato si mostra, con il collegamento da cui scaricarla.
- * 3. In sviluppo e' tutto spento, salvo CM_UPDATE_DEV=1.
+ * 1. DOWNLOAD automatically, but DO NOT install automatically. Installing
+ *    requires restarting, and an unexpected restart would kill all active Claude
+ *    sessions. Installation takes place when closing the app or when requested by the user.
+ * 2. Portable builds CHECK but DO NOT download. A running .exe cannot replace
+ *    itself, and the published automatic update asset is the installer, which
+ *    would inadvertently convert a portable setup into an installed one. Knowing a
+ *    new version exists is still useful, so checks run and the release download link is shown.
+ * 3. In development mode everything is disabled, unless CM_UPDATE_DEV=1 is set.
  */
 
 /**
- * Deve corrispondere al blocco `publish` di electron-builder.yml. Serve solo a
- * comporre l'indirizzo della pagina da aprire: il canale vero lo legge
- * electron-updater da app-update.yml, generato da quello stesso blocco.
+ * Must match the `publish` block of electron-builder.yml. Used only to
+ * compose release page URLs: the update feed channel itself is read by
+ * electron-updater from app-update.yml generated from that same block.
  */
 const RELEASES_URL = 'https://github.com/Tha-Nixo/ClaudeCodeManager/releases'
 
-// electron-updater e' CommonJS: la destrutturazione diretta non funziona
-// nel bundle ESM del main.
+// electron-updater is CommonJS: direct destructuring fails
+// within the main ESM bundle.
 const { autoUpdater } = electronUpdater
 
-/** Attesa prima del primo controllo: l'avvio deve restare veloce. */
+/** Delay before initial update check to keep startup fast. */
 const FIRST_CHECK_MS = 20_000
-/** Un controllo al giorno basta per un'app che si tiene aperta a lungo. */
+/** Checking once a day suffices for an application kept open long term. */
 const INTERVAL_MS = 24 * 60 * 60 * 1000
 
 let state: UpdateState = { status: 'idle' }
@@ -46,44 +43,42 @@ function setState(next: UpdateState): void {
 }
 
 /**
- * electron-builder popola PORTABLE_EXECUTABLE_DIR solo nel target portabile:
- * e' il modo affidabile per distinguerlo dall'installazione NSIS.
+ * electron-builder sets PORTABLE_EXECUTABLE_DIR only for portable targets:
+ * reliable way to distinguish portable mode from an NSIS installation.
  */
 function isPortable(): boolean {
   return Boolean(process.env.PORTABLE_EXECUTABLE_DIR)
 }
 
 /**
- * In sviluppo l'updater e' spento, il che lo rende anche non verificabile:
- * un aggiornamento che non funziona non se ne accorge nessuno finche' non
- * serve. Con CM_UPDATE_DEV=1 si accende usando l'app-update.yml prodotto
- * dall'ultima build, cosi' si puo' controllare che il canale sia davvero
- * raggiungibile. Nel pacchetto la variabile non cambia niente.
+ * In development mode the updater is normally disabled, which makes it hard
+ * to verify: a broken update workflow goes unnoticed until needed.
+ * Setting CM_UPDATE_DEV=1 enables it using app-update.yml from the latest build,
+ * allowing channel verification. Has no effect in packaged builds.
  */
 const devOverride = (): boolean => !app.isPackaged && process.env.CM_UPDATE_DEV === '1'
 
-/** Pagina di una versione, da aprire quando l'installazione va fatta a mano. */
+/** Release page URL to open when manual installation is required. */
 function releasePage(version?: string): string {
   return version ? `${RELEASES_URL}/tag/v${version}` : `${RELEASES_URL}/latest`
 }
 
-/** Quanto testo di anteprima delle novita' ha senso tenere. */
+/** Maximum length for release notes preview. */
 const NOTES_LIMIT = 240
 
 /**
- * Riduce le note della release a testo semplice.
+ * Strips release notes down to plain text.
  *
- * GitHub le restituisce come HTML gia' reso. Farlo attraversare l'IPC cosi'
- * com'e' significa consegnare al renderer del markup di provenienza remota:
- * oggi nessuno lo mostra, ma basta che un giorno qualcuno lo renda con
- * dangerouslySetInnerHTML perche' diventi un'iniezione. Meglio che oltre
- * questo confine passi solo testo.
+ * GitHub returns notes as pre-rendered HTML. Passing raw HTML over IPC
+ * introduces remote markup to the renderer: while not currently rendered as HTML,
+ * using dangerouslySetInnerHTML in the future would introduce an injection vulnerability.
+ * Only sanitized plain text should cross this boundary.
  */
 function plainNotes(raw: unknown): string | undefined {
   if (typeof raw !== 'string' || !raw) return undefined
 
   const text = raw
-    // I blocchi diventano spazi, altrimenti le parole si incollano fra loro.
+    // Block tags become spaces to prevent adjacent words from running together.
     .replace(/<\/(p|li|h\d|tr|div)>/gi, ' ')
     .replace(/<[^>]*>/g, '')
     .replace(/&(amp|lt|gt|quot|#39|nbsp);/g, (m) =>
@@ -105,11 +100,11 @@ export function initUpdater(send: (s: UpdateState) => void): void {
   notify = send
 
   if (!app.isPackaged && !devOverride()) {
-    setState({ status: 'unsupported', message: 'Aggiornamenti non attivi durante lo sviluppo.' })
+    setState({ status: 'unsupported', message: 'Updates disabled during development.' })
     return
   }
 
-  // Nel portabile si controlla soltanto: vedi la nota in testa al file.
+  // Portable builds only check for updates without auto-downloading.
   const manual = isPortable()
 
   autoUpdater.autoDownload = !manual
@@ -117,7 +112,6 @@ export function initUpdater(send: (s: UpdateState) => void): void {
   autoUpdater.logger = null
 
   if (devOverride()) {
-    // Senza questo electron-updater rifiuta di partire fuori da un pacchetto.
     autoUpdater.forceDevUpdateConfig = true
   }
 
@@ -132,7 +126,7 @@ export function initUpdater(send: (s: UpdateState) => void): void {
             releaseUrl: releasePage(info.version),
             notes: plainNotes(info.releaseNotes),
             message:
-              'La copia portabile non si aggiorna da sola: scarica il nuovo eseguibile e sostituisci quello attuale.'
+              'The portable build cannot self-update: download the new executable and replace the current file.'
           }
         : { status: 'downloading', version: info.version, percent: 0 }
     )
@@ -151,9 +145,7 @@ export function initUpdater(send: (s: UpdateState) => void): void {
   )
 
   autoUpdater.on('error', (err) =>
-    // Un aggiornamento fallito non deve disturbare: si annota e si riprova al
-    // controllo successivo. Nessun dialogo modale.
-    setState({ status: 'error', message: err?.message || 'Controllo non riuscito.' })
+    setState({ status: 'error', message: err?.message || 'Update check failed.' })
   )
 
   timer = setTimeout(() => {
@@ -169,19 +161,19 @@ export async function check(): Promise<UpdateState> {
   } catch (err) {
     setState({
       status: 'error',
-      message: err instanceof Error ? err.message : 'Controllo non riuscito.'
+      message: err instanceof Error ? err.message : 'Update check failed.'
     })
   }
   return state
 }
 
-/** Riavvia e installa. Chiamata solo su richiesta esplicita. */
+/** Restarts and installs the update. Called only upon explicit user request. */
 export function installNow(): void {
   if (state.status !== 'ready') return
   autoUpdater.quitAndInstall()
 }
 
-/** Pagina da cui scaricare a mano, quando l'app non puo' aggiornarsi da sola. */
+/** Manual download page URL when the application cannot self-update. */
 export function releaseUrl(): string {
   return state.releaseUrl ?? releasePage()
 }

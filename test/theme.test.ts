@@ -4,51 +4,44 @@ import { validateTheme, type Theme } from '../src/shared/theme'
 import { BUILTIN_THEMES, DEFAULT_THEME_ID } from '../src/shared/themes/builtin'
 
 /**
- * Un tema e' l'unica cosa che l'utente vede prima ancora di leggere qualsiasi
- * testo dell'app: se la validazione lascia passare un tema mezzo rotto, il
- * risultato non e' un errore ma una finestra illeggibile. Da qui l'insistenza
- * sul fatto che ogni rifiuto nomini il campo colpevole: il tema arriva da un
- * file JSON scritto a mano, e "non valido" senza altro non aiuta a correggerlo.
+ * A theme is the first visual element rendered by the app: if validation
+ * permits a partially malformed theme, the result is an unreadable UI.
+ * Rejection messages must clearly specify the erroneous field so user-edited
+ * theme JSON files can be easily corrected.
  */
 
-type Grezzo = Record<string, unknown>
+type RawTheme = Record<string, unknown>
 
 /**
- * Punto di partenza dei casi negativi: una copia profonda di un tema integrato,
- * cioe' un oggetto che sicuramente passa la validazione. Mutando un solo campo
- * si e' certi che il rifiuto arrivi da quel campo e non da un altro difetto
- * gia' presente nel materiale di partenza.
+ * Baseline for negative tests: a deep clone of a built-in theme.
+ * Mutating a single field isolates failures to that specific field.
  */
-function clonaTema(id = 'claude-light'): Grezzo {
+function cloneTheme(id = 'claude-light'): RawTheme {
   const base = BUILTIN_THEMES.find((t) => t.id === id)
-  assert.ok(base, `tema integrato mancante: ${id}`)
-  return JSON.parse(JSON.stringify(base)) as Grezzo
+  assert.ok(base, `missing built-in theme: ${id}`)
+  return JSON.parse(JSON.stringify(base)) as RawTheme
 }
 
-function ui(tema: Grezzo): Grezzo {
-  return tema.ui as Grezzo
+function ui(theme: RawTheme): RawTheme {
+  return theme.ui as RawTheme
 }
 
-function terminal(tema: Grezzo): Grezzo {
-  return tema.terminal as Grezzo
+function terminal(theme: RawTheme): RawTheme {
+  return theme.terminal as RawTheme
 }
 
-function assertAccettato(raw: unknown, contesto: string): Theme {
+function assertAccepted(raw: unknown, context: string): Theme {
   const { theme, error } = validateTheme(raw)
-  assert.equal(error, null, `${contesto}: rifiutato con "${error}"`)
-  assert.ok(theme, `${contesto}: accettato ma senza tema`)
+  assert.equal(error, null, `${context}: rejected with "${error}"`)
+  assert.ok(theme, `${context}: accepted but theme missing`)
   return theme
 }
 
-/**
- * Un rifiuto vale solo se dice all'utente dove guardare: si controlla sia che
- * il tema non venga applicato, sia che il messaggio nomini il campo.
- */
-function assertRifiutato(raw: unknown, campo: RegExp, contesto: string): string {
+function assertRejected(raw: unknown, fieldPattern: RegExp, context: string): string {
   const { theme, error } = validateTheme(raw)
-  assert.equal(theme, null, `${contesto}: accettato invece che rifiutato`)
-  assert.ok(typeof error === 'string' && error.length > 0, `${contesto}: rifiutato senza messaggio`)
-  assert.match(error, campo, `${contesto}: il messaggio non dice quale campo e' il problema`)
+  assert.equal(theme, null, `${context}: accepted instead of rejected`)
+  assert.ok(typeof error === 'string' && error.length > 0, `${context}: rejected without message`)
+  assert.match(error, fieldPattern, `${context}: message does not identify field`)
   return error
 }
 
@@ -68,9 +61,8 @@ const UI_KEYS = [
 
 const TERM_KEYS = ['background', 'foreground', 'cursor', 'selection'] as const
 
-/** Valori che nessun campo colore deve accettare, comunque siano scritti. */
-const NON_COLORI = [
-  'rosso',
+const INVALID_COLORS = [
+  'red',
   '#GGG',
   '#12345',
   'rgb(1,2,3)',
@@ -86,485 +78,404 @@ const NON_COLORI = [
   { hex: '#ffffff' }
 ]
 
-describe('Regressione della issue #15: dark deve essere un booleano vero', () => {
-  /**
-   * Il caso reale: `"dark": "false"` con le virgolette di troppo. La stringa
-   * non e' uguale al booleano false, quindi il tema chiaro veniva applicato
-   * come scuro — ombre nere su fondo chiaro, barre di scorrimento invertite —
-   * senza nessun avviso. Si parte da claude-light perche' e' l'unico tema
-   * integrato con dark: false: e' esattamente lo scenario che si rompeva.
-   */
-  it('il tema di partenza e chiaro e valido, altrimenti il caso non proverebbe niente', () => {
-    const tema = assertAccettato(clonaTema('claude-light'), 'claude-light clonato')
-    assert.equal(tema.dark, false, 'il tema di partenza deve essere chiaro')
+describe('issue #15 regression: dark must be a strict boolean', () => {
+  it('baseline theme is light and valid', () => {
+    const theme = assertAccepted(cloneTheme('claude-light'), 'cloned claude-light')
+    assert.equal(theme.dark, false, 'baseline theme should be light')
   })
 
-  it('rifiuta "false" fra virgolette nominando il campo dark', () => {
-    const tema = clonaTema('claude-light')
-    tema.dark = 'false'
-    const errore = assertRifiutato(tema, /dark/, 'dark = "false"')
-    // Il messaggio deve far capire che il problema sono le virgolette, non il
-    // valore: chi ha scritto il file vede "false" e lo crede giusto.
-    assert.match(errore, /dark/)
+  it('rejects "false" as string naming dark field', () => {
+    const theme = cloneTheme('claude-light')
+    theme.dark = 'false'
+    const error = assertRejected(theme, /dark/, 'dark = "false"')
+    assert.match(error, /dark/)
   })
 
-  it('rifiuta "true" fra virgolette, che sarebbe passato per caso', () => {
-    const tema = clonaTema('claude-dark')
-    tema.dark = 'true'
-    assertRifiutato(tema, /dark/, 'dark = "true"')
+  it('rejects "true" as string', () => {
+    const theme = cloneTheme('claude-dark')
+    theme.dark = 'true'
+    assertRejected(theme, /dark/, 'dark = "true"')
   })
 
-  it('rifiuta qualsiasi altro tipo al posto del booleano', () => {
-    for (const valore of [0, 1, null, [], {}, 'si', 'no', 'sì', 'yes']) {
-      const tema = clonaTema('claude-light')
-      tema.dark = valore
-      assertRifiutato(tema, /dark/, `dark = ${JSON.stringify(valore)}`)
+  it('rejects other non-boolean types for dark', () => {
+    for (const val of [0, 1, null, [], {}, 'si', 'no', 'yes']) {
+      const theme = cloneTheme('claude-light')
+      theme.dark = val
+      assertRejected(theme, /dark/, `dark = ${JSON.stringify(val)}`)
     }
   })
 
-  it('true e false veri continuano a funzionare e arrivano intatti', () => {
-    const scuro = clonaTema('claude-light')
-    scuro.dark = true
-    assert.equal(assertAccettato(scuro, 'dark = true').dark, true)
+  it('accepts genuine booleans true and false', () => {
+    const dark = cloneTheme('claude-light')
+    dark.dark = true
+    assert.equal(assertAccepted(dark, 'dark = true').dark, true)
 
-    const chiaro = clonaTema('claude-dark')
-    chiaro.dark = false
-    assert.equal(assertAccettato(chiaro, 'dark = false').dark, false)
+    const light = cloneTheme('claude-dark')
+    light.dark = false
+    assert.equal(assertAccepted(light, 'dark = false').dark, false)
   })
 
-  it('un tema senza dark vale come scuro: e il ripiego, non un rifiuto', () => {
-    // dark e' l'unico campo facoltativo. Chi omette il campo ottiene un tema
-    // scuro, che e' il caso di gran lunga piu' comune; chi lo scrive male
-    // ottiene un errore invece di un risultato a sorpresa.
-    const tema = clonaTema('claude-light')
-    delete tema.dark
-    assert.equal(assertAccettato(tema, 'dark assente').dark, true)
+  it('theme omitting dark defaults to dark: true as fallback', () => {
+    const theme = cloneTheme('claude-light')
+    delete theme.dark
+    assert.equal(assertAccepted(theme, 'dark omitted').dark, true)
   })
 })
 
-describe('temi integrati: invarianti', () => {
-  it('ogni tema integrato passa la stessa validazione dei temi personali', () => {
-    // Se un tema integrato non passasse, l'app spedirebbe un tema che rifiuta
-    // di caricare quando l'utente lo copia per personalizzarlo.
-    for (const tema of BUILTIN_THEMES) {
-      const { theme, error } = validateTheme(tema)
-      assert.equal(error, null, `tema integrato "${tema.id}" rifiutato: ${error}`)
-      assert.ok(theme, `tema integrato "${tema.id}" senza risultato`)
+describe('built-in themes: invariants', () => {
+  it('every built-in theme passes validateTheme', () => {
+    for (const theme of BUILTIN_THEMES) {
+      const { theme: valid, error } = validateTheme(theme)
+      assert.equal(error, null, `built-in theme "${theme.id}" rejected: ${error}`)
+      assert.ok(valid, `built-in theme "${theme.id}" missing output`)
     }
   })
 
-  it('ogni tema ha esattamente 16 colori ansi, tutti esadecimali a 6 cifre', () => {
-    for (const tema of BUILTIN_THEMES) {
-      const ansi = tema.terminal.ansi
-      assert.ok(Array.isArray(ansi), `${tema.id}: ansi non e' un elenco`)
-      assert.equal(ansi.length, 16, `${tema.id}: ansi ha ${ansi.length} voci invece di 16`)
-      ansi.forEach((colore, i) => {
-        // Forma piena e opaca: le 16 caselle finiscono in xterm, dove un colore
-        // con canale alfa o abbreviato produce rese diverse fra le piattaforme.
-        assert.match(colore, /^#[0-9a-fA-F]{6}$/, `${tema.id}: ansi[${i}] = ${JSON.stringify(colore)}`)
+  it('every theme contains exactly 16 6-digit hex ANSI colors', () => {
+    for (const theme of BUILTIN_THEMES) {
+      const ansi = theme.terminal.ansi
+      assert.ok(Array.isArray(ansi), `${theme.id}: ansi is not an array`)
+      assert.equal(ansi.length, 16, `${theme.id}: ansi length ${ansi.length} instead of 16`)
+      ansi.forEach((color, i) => {
+        assert.match(color, /^#[0-9a-fA-F]{6}$/, `${theme.id}: ansi[${i}] = ${JSON.stringify(color)}`)
       })
     }
   })
 
-  it('i 16 colori ansi sono tutti diversi fra loro', () => {
-    // Due caselle identiche per copia-incolla rendono indistinguibili due tipi
-    // di output nel terminale (per esempio errori e avvisi).
-    for (const tema of BUILTIN_THEMES) {
-      const visti = new Map<string, number>()
-      tema.terminal.ansi.forEach((colore, i) => {
-        const chiave = colore.toLowerCase()
-        const primo = visti.get(chiave)
-        assert.equal(primo, undefined, `${tema.id}: ansi[${i}] ripete ansi[${primo}] (${colore})`)
-        visti.set(chiave, i)
+  it('all 16 ANSI colors are unique', () => {
+    for (const theme of BUILTIN_THEMES) {
+      const seen = new Map<string, number>()
+      theme.terminal.ansi.forEach((color, i) => {
+        const key = color.toLowerCase()
+        const first = seen.get(key)
+        assert.equal(first, undefined, `${theme.id}: ansi[${i}] duplicates ansi[${first}] (${color})`)
+        seen.set(key, i)
       })
     }
   })
 
-  it('tutti i colori di ui e terminal sono esadecimali', () => {
-    for (const tema of BUILTIN_THEMES) {
+  it('all ui and terminal colors are hex codes', () => {
+    for (const theme of BUILTIN_THEMES) {
       for (const key of UI_KEYS) {
-        assert.match(tema.ui[key], /^#[0-9a-fA-F]{3,8}$/, `${tema.id}: ui.${key}`)
+        assert.match(theme.ui[key], /^#[0-9a-fA-F]{3,8}$/, `${theme.id}: ui.${key}`)
       }
       for (const key of TERM_KEYS) {
-        assert.match(tema.terminal[key], /^#[0-9a-fA-F]{3,8}$/, `${tema.id}: terminal.${key}`)
+        assert.match(theme.terminal[key], /^#[0-9a-fA-F]{3,8}$/, `${theme.id}: terminal.${key}`)
       }
     }
   })
 
-  it('gli identificatori sono unici: sono la chiave salvata nella configurazione', () => {
-    const visti = new Set<string>()
-    for (const tema of BUILTIN_THEMES) {
-      assert.ok(!visti.has(tema.id), `identificatore duplicato: ${tema.id}`)
-      visti.add(tema.id)
+  it('theme IDs are unique', () => {
+    const seen = new Set<string>()
+    for (const theme of BUILTIN_THEMES) {
+      assert.ok(!seen.has(theme.id), `duplicate theme id: ${theme.id}`)
+      seen.add(theme.id)
     }
   })
 
-  it('ogni tema ha un nome leggibile e un dark booleano', () => {
-    for (const tema of BUILTIN_THEMES) {
-      assert.ok(tema.name.trim().length > 0, `${tema.id}: nome vuoto`)
-      assert.equal(typeof tema.dark, 'boolean', `${tema.id}: dark non e' un booleano`)
+  it('every theme has non-empty name and boolean dark', () => {
+    for (const theme of BUILTIN_THEMES) {
+      assert.ok(theme.name.trim().length > 0, `${theme.id}: empty name`)
+      assert.equal(typeof theme.dark, 'boolean', `${theme.id}: dark not a boolean`)
     }
   })
 
-  it('nessun tema integrato si dichiara personale', () => {
-    // custom distingue nella UI i temi caricati da file: un integrato marcato
-    // custom comparirebbe nella sezione sbagliata delle impostazioni.
-    for (const tema of BUILTIN_THEMES) {
-      assert.ok(!tema.custom, `${tema.id}: marcato come personale`)
-      assert.equal(tema.source, undefined, `${tema.id}: ha un file di origine`)
+  it('no built-in theme is marked custom', () => {
+    for (const theme of BUILTIN_THEMES) {
+      assert.ok(!theme.custom, `${theme.id}: marked custom`)
+      assert.equal(theme.source, undefined, `${theme.id}: has source file`)
     }
   })
 
-  it('il tema predefinito esiste davvero fra gli integrati', () => {
-    // Se puntasse a un identificatore inesistente l'app partirebbe senza tema.
+  it('default theme ID exists in built-in list', () => {
     assert.ok(
       BUILTIN_THEMES.some((t) => t.id === DEFAULT_THEME_ID),
-      `DEFAULT_THEME_ID "${DEFAULT_THEME_ID}" non corrisponde a nessun tema`
+      `DEFAULT_THEME_ID "${DEFAULT_THEME_ID}" does not match any theme`
     )
   })
 
-  it('esiste almeno un tema chiaro e almeno uno scuro', () => {
-    assert.ok(BUILTIN_THEMES.some((t) => t.dark === false), 'nessun tema chiaro')
-    assert.ok(BUILTIN_THEMES.some((t) => t.dark === true), 'nessun tema scuro')
+  it('includes at least one light theme and one dark theme', () => {
+    assert.ok(BUILTIN_THEMES.some((t) => t.dark === false), 'no light theme')
+    assert.ok(BUILTIN_THEMES.some((t) => t.dark === true), 'no dark theme')
   })
 })
 
-describe('validateTheme: cose che non sono un tema', () => {
-  it('rifiuta i valori che non sono oggetti', () => {
-    for (const valore of [null, undefined, '', 'claude-dark', 42, 0, true, false]) {
-      const { theme, error } = validateTheme(valore)
-      assert.equal(theme, null, `${JSON.stringify(valore)} accettato come tema`)
-      assert.match(error ?? '', /oggetto/, `${JSON.stringify(valore)}: messaggio poco chiaro`)
+describe('validateTheme: non-theme values', () => {
+  it('rejects values that are not objects', () => {
+    for (const val of [null, undefined, '', 'claude-dark', 42, 0, true, false]) {
+      const { theme, error } = validateTheme(val)
+      assert.equal(theme, null, `${JSON.stringify(val)} accepted as theme`)
+      assert.match(error ?? '', /object/, `${JSON.stringify(val)}: ambiguous error message`)
     }
   })
 
-  it('rifiuta un oggetto vuoto dicendo qual e il primo campo mancante', () => {
-    assertRifiutato({}, /id/, 'oggetto vuoto')
+  it('rejects empty object specifying first missing field', () => {
+    assertRejected({}, /id/, 'empty object')
   })
 
-  it('rifiuta un elenco al posto di un oggetto', () => {
-    // Un file che contiene `[ {...} ]` invece del tema e' un errore frequente:
-    // non deve essere scambiato per un tema con campi mancanti silenziosi.
-    assertRifiutato([], /id|oggetto/, 'elenco vuoto')
-    assertRifiutato([clonaTema()], /id|oggetto/, 'elenco con dentro un tema')
+  it('rejects array passed instead of object', () => {
+    assertRejected([], /id|object/, 'empty array')
+    assertRejected([cloneTheme()], /id|object/, 'array containing theme')
   })
 })
 
-describe('validateTheme: campi mancanti, uno alla volta', () => {
-  it('senza id, o con un id malformato, lo dice', () => {
-    for (const valore of [undefined, '', 'Claude Dark', '-inizia', 'con spazio', 'CIAO', 'à', 42, null]) {
-      const tema = clonaTema()
-      if (valore === undefined) delete tema.id
-      else tema.id = valore
-      assertRifiutato(tema, /id/, `id = ${JSON.stringify(valore)}`)
+describe('validateTheme: missing required fields', () => {
+  it('reports missing or invalid id', () => {
+    for (const val of [undefined, '', 'Claude Dark', '-starts', 'with space', 'HELLO', 'à', 42, null]) {
+      const theme = cloneTheme()
+      if (val === undefined) delete theme.id
+      else theme.id = val
+      assertRejected(theme, /id/, `id = ${JSON.stringify(val)}`)
     }
   })
 
-  it('senza name, o con un name di soli spazi, lo dice', () => {
-    for (const valore of [undefined, '', '   ', '\t\n', 42, null, {}]) {
-      const tema = clonaTema()
-      if (valore === undefined) delete tema.name
-      else tema.name = valore
-      assertRifiutato(tema, /name/, `name = ${JSON.stringify(valore)}`)
+  it('reports missing or whitespace-only name', () => {
+    for (const val of [undefined, '', '   ', '\t\n', 42, null, {}]) {
+      const theme = cloneTheme()
+      if (val === undefined) delete theme.name
+      else theme.name = val
+      assertRejected(theme, /name/, `name = ${JSON.stringify(val)}`)
     }
   })
 
-  it('senza la sezione ui lo dice, senza attribuirlo a un colore', () => {
-    for (const valore of [undefined, null, 'chiaro', 42, true]) {
-      const tema = clonaTema()
-      if (valore === undefined) delete tema.ui
-      else tema.ui = valore
-      assertRifiutato(tema, /ui/, `ui = ${JSON.stringify(valore)}`)
+  it('reports missing ui section', () => {
+    for (const val of [undefined, null, 'light', 42, true]) {
+      const theme = cloneTheme()
+      if (val === undefined) delete theme.ui
+      else theme.ui = val
+      assertRejected(theme, /ui/, `ui = ${JSON.stringify(val)}`)
     }
   })
 
-  it('senza la sezione terminal lo dice', () => {
-    for (const valore of [undefined, null, 'scuro', 42, true]) {
-      const tema = clonaTema()
-      if (valore === undefined) delete tema.terminal
-      else tema.terminal = valore
-      assertRifiutato(tema, /terminal/, `terminal = ${JSON.stringify(valore)}`)
+  it('reports missing terminal section', () => {
+    for (const val of [undefined, null, 'dark', 42, true]) {
+      const theme = cloneTheme()
+      if (val === undefined) delete theme.terminal
+      else theme.terminal = val
+      assertRejected(theme, /terminal/, `terminal = ${JSON.stringify(val)}`)
     }
   })
 
-  it('nomina la singola chiave di ui che manca', () => {
+  it('identifies missing individual ui key', () => {
     for (const key of UI_KEYS) {
-      const tema = clonaTema()
-      delete ui(tema)[key]
-      const errore = assertRifiutato(tema, new RegExp(`ui\\.${key}\\b`), `ui.${key} mancante`)
-      // Nominare la sezione non basta: il file ha undici colori nella ui.
-      assert.ok(errore.includes(key), `il messaggio "${errore}" non nomina ${key}`)
+      const theme = cloneTheme()
+      delete ui(theme)[key]
+      const error = assertRejected(theme, new RegExp(`ui\\.${key}\\b`), `missing ui.${key}`)
+      assert.ok(error.includes(key), `message "${error}" does not name ${key}`)
     }
   })
 
-  it('nomina la singola chiave di terminal che manca', () => {
+  it('identifies missing individual terminal key', () => {
     for (const key of TERM_KEYS) {
-      const tema = clonaTema()
-      delete terminal(tema)[key]
-      assertRifiutato(tema, new RegExp(`terminal\\.${key}\\b`), `terminal.${key} mancante`)
+      const theme = cloneTheme()
+      delete terminal(theme)[key]
+      assertRejected(theme, new RegExp(`terminal\\.${key}\\b`), `missing terminal.${key}`)
     }
   })
 
-  it('rifiuta un terminal senza ansi', () => {
-    const tema = clonaTema()
-    delete terminal(tema).ansi
-    assertRifiutato(tema, /ansi/, 'ansi mancante')
+  it('rejects terminal missing ansi', () => {
+    const theme = cloneTheme()
+    delete terminal(theme).ansi
+    assertRejected(theme, /ansi/, 'missing ansi')
   })
 })
 
-describe('validateTheme: colori', () => {
-  it('rifiuta i valori che non sono colori esadecimali, in ogni campo di ui', () => {
-    for (const valore of NON_COLORI) {
-      const tema = clonaTema()
-      ui(tema).text = valore
-      assertRifiutato(tema, /ui\.text\b/, `ui.text = ${JSON.stringify(valore)}`)
+describe('validateTheme: color validation', () => {
+  it('rejects non-hex color values in ui fields', () => {
+    for (const val of INVALID_COLORS) {
+      const theme = cloneTheme()
+      ui(theme).text = val
+      assertRejected(theme, /ui\.text\b/, `ui.text = ${JSON.stringify(val)}`)
     }
   })
 
-  it('rifiuta i valori che non sono colori esadecimali nel terminale', () => {
-    for (const valore of NON_COLORI) {
-      const tema = clonaTema()
-      terminal(tema).background = valore
-      assertRifiutato(tema, /terminal\.background\b/, `terminal.background = ${JSON.stringify(valore)}`)
+  it('rejects non-hex color values in terminal fields', () => {
+    for (const val of INVALID_COLORS) {
+      const theme = cloneTheme()
+      terminal(theme).background = val
+      assertRejected(theme, /terminal\.background\b/, `terminal.background = ${JSON.stringify(val)}`)
     }
   })
 
-  it('rifiuta un colore non valido anche se e nascosto in fondo ad ansi', () => {
-    // Il quindicesimo colore si nota solo quando un programma lo usa: se
-    // passasse, il difetto si manifesterebbe giorni dopo il caricamento.
-    for (const valore of NON_COLORI) {
-      const tema = clonaTema()
-      const ansi = terminal(tema).ansi as unknown[]
-      ansi[15] = valore
-      assertRifiutato(tema, /ansi/, `ansi[15] = ${JSON.stringify(valore)}`)
+  it('rejects invalid color in ansi array', () => {
+    for (const val of INVALID_COLORS) {
+      const theme = cloneTheme()
+      const ansi = terminal(theme).ansi as unknown[]
+      ansi[15] = val
+      assertRejected(theme, /ansi/, `ansi[15] = ${JSON.stringify(val)}`)
     }
   })
 
-  it('accetta le tre forme esadecimali legittime', () => {
-    for (const colore of ['#abc', '#ABC', '#aabbcc', '#AABBCC', '#aabbccdd']) {
-      const tema = clonaTema()
-      ui(tema).text = colore
-      const risultato = assertAccettato(tema, `ui.text = ${colore}`)
-      assert.equal(risultato.ui.text, colore, 'il colore non deve essere riscritto')
+  it('accepts legitimate hex color formats', () => {
+    for (const color of ['#abc', '#ABC', '#aabbcc', '#AABBCC', '#aabbccdd']) {
+      const theme = cloneTheme()
+      ui(theme).text = color
+      const res = assertAccepted(theme, `ui.text = ${color}`)
+      assert.equal(res.ui.text, color)
     }
   })
 })
 
-describe('validateTheme: la tavolozza ansi deve avere esattamente 16 voci', () => {
-  it('rifiuta un elenco piu corto', () => {
+describe('validateTheme: ansi palette must have exactly 16 colors', () => {
+  it('rejects shorter array', () => {
     for (const n of [0, 1, 8, 15]) {
-      const tema = clonaTema()
-      const ansi = terminal(tema).ansi as string[]
-      terminal(tema).ansi = ansi.slice(0, n)
-      assertRifiutato(tema, /ansi/, `ansi con ${n} voci`)
+      const theme = cloneTheme()
+      const ansi = terminal(theme).ansi as string[]
+      terminal(theme).ansi = ansi.slice(0, n)
+      assertRejected(theme, /ansi/, `ansi with ${n} items`)
     }
   })
 
-  it('rifiuta un elenco piu lungo', () => {
-    // Con 17 voci le ultime verrebbero ignorate in silenzio: chi ha aggiunto
-    // un colore in mezzo si ritroverebbe tutta la tavolozza sfasata di uno.
+  it('rejects longer array', () => {
     for (const n of [17, 20, 32]) {
-      const tema = clonaTema()
-      const ansi = terminal(tema).ansi as string[]
-      terminal(tema).ansi = [...ansi, ...Array(n - 16).fill('#ffffff')]
-      assertRifiutato(tema, /ansi/, `ansi con ${n} voci`)
+      const theme = cloneTheme()
+      const ansi = terminal(theme).ansi as string[]
+      terminal(theme).ansi = [...ansi, ...Array(n - 16).fill('#ffffff')]
+      assertRejected(theme, /ansi/, `ansi with ${n} items`)
     }
   })
 
-  it('rifiuta un ansi che non e un elenco', () => {
-    for (const valore of [null, '#ffffff', 16, {}, { 0: '#ffffff' }, true]) {
-      const tema = clonaTema()
-      terminal(tema).ansi = valore
-      assertRifiutato(tema, /ansi/, `ansi = ${JSON.stringify(valore)}`)
+  it('rejects non-array ansi', () => {
+    for (const val of [null, '#ffffff', 16, {}, { 0: '#ffffff' }, true]) {
+      const theme = cloneTheme()
+      terminal(theme).ansi = val
+      assertRejected(theme, /ansi/, `ansi = ${JSON.stringify(val)}`)
     }
   })
 
-  it('rifiuta un ansi in cui una voce e null', () => {
-    // Questo e' il caso che il JSON puo' davvero produrre: `null` in mezzo
-    // all'elenco, per esempio dopo aver cancellato un colore a meta'.
-    const tema = clonaTema()
-    const ansi = terminal(tema).ansi as unknown[]
+  it('rejects ansi with null item', () => {
+    const theme = cloneTheme()
+    const ansi = terminal(theme).ansi as unknown[]
     ansi[7] = null
-    assertRifiutato(tema, /ansi/, 'ansi con la settima voce a null')
+    assertRejected(theme, /ansi/, 'ansi with 7th item null')
   })
 
-  /**
-   * DIFETTO NUOVO, non corretto: un elenco ansi con un buco (voce mai
-   * assegnata) viene ACCETTATO. Il controllo usa `term.ansi.every(isColor)`, e
-   * `every` salta le posizioni vuote invece di visitarle: la lunghezza resta 16
-   * e la validazione passa, restituendo un tema con `terminal.ansi[7] ===
-   * undefined`. Osservato con `delete ansi[7]` su una copia di claude-light:
-   * error === null e theme.terminal.ansi[7] === undefined.
-   *
-   * Oggi non e' raggiungibile dall'utente, perche' l'unico chiamante
-   * (src/main/theme/store.ts) passa il risultato di JSON.parse, che non produce
-   * mai elenchi con buchi. Resta una trappola per il prossimo chiamante: basta
-   * un tema costruito in memoria perche' xterm riceva un colore undefined.
-   */
-  it('rifiuta un ansi con un buco in mezzo (oggi lo accetta)', () => {
-    const tema = clonaTema()
-    const ansi = terminal(tema).ansi as unknown[]
+  it('rejects sparse ansi array with missing index', () => {
+    const theme = cloneTheme()
+    const ansi = terminal(theme).ansi as unknown[]
     delete ansi[7]
-    assertRifiutato(tema, /ansi/, 'ansi con la settima voce assente')
+    assertRejected(theme, /ansi/, 'ansi with 7th item missing')
   })
 
-  it('accetta esattamente 16 colori validi', () => {
-    const tema = clonaTema()
-    terminal(tema).ansi = Array(16).fill('#123456')
-    const risultato = assertAccettato(tema, 'ansi con 16 colori')
-    assert.equal(risultato.terminal.ansi.length, 16)
+  it('accepts exactly 16 valid colors', () => {
+    const theme = cloneTheme()
+    terminal(theme).ansi = Array(16).fill('#123456')
+    const res = assertAccepted(theme, 'ansi with 16 colors')
+    assert.equal(res.terminal.ansi.length, 16)
   })
 })
 
-describe('validateTheme: cosa restituisce quando accetta', () => {
-  it('senza file di origine il tema non e personale', () => {
-    const risultato = assertAccettato(clonaTema(), 'senza source')
-    assert.equal(risultato.custom, false, 'un tema senza file non va nella sezione dei personali')
-    assert.equal(risultato.source, undefined)
+describe('validateTheme: returned object properties', () => {
+  it('theme without source file is not marked custom', () => {
+    const res = assertAccepted(cloneTheme(), 'without source')
+    assert.equal(res.custom, false)
+    assert.equal(res.source, undefined)
   })
 
-  it('con un file di origine conserva il percorso da mostrare in caso di errore', () => {
-    const { theme, error } = validateTheme(clonaTema(), 'C:\\temi\\mio.json')
+  it('preserves source file path for custom theme', () => {
+    const { theme, error } = validateTheme(cloneTheme(), 'C:\\themes\\my.json')
     assert.equal(error, null)
     assert.ok(theme)
     assert.equal(theme.custom, true)
-    assert.equal(theme.source, 'C:\\temi\\mio.json')
+    assert.equal(theme.source, 'C:\\themes\\my.json')
   })
 
-  it('ripulisce il nome dagli spazi ai bordi', () => {
-    // Il nome finisce in un elenco allineato: gli spazi si vedrebbero.
-    const tema = clonaTema()
-    tema.name = '  Mio tema  '
-    assert.equal(assertAccettato(tema, 'nome con spazi').name, 'Mio tema')
+  it('trims whitespace around name', () => {
+    const theme = cloneTheme()
+    theme.name = '  My Theme  '
+    assert.equal(assertAccepted(theme, 'name with spaces').name, 'My Theme')
   })
 
-  it('ignora una description del tipo sbagliato invece di rifiutare il tema', () => {
-    // La descrizione e' decorativa: perdere un tema intero per colpa sua
-    // sarebbe una punizione sproporzionata.
-    for (const valore of [42, null, {}, ['ciao']]) {
-      const tema = clonaTema()
-      tema.description = valore
+  it('ignores invalid description type rather than rejecting theme', () => {
+    for (const val of [42, null, {}, ['hello']]) {
+      const theme = cloneTheme()
+      theme.description = val
       assert.equal(
-        assertAccettato(tema, `description = ${JSON.stringify(valore)}`).description,
+        assertAccepted(theme, `description = ${JSON.stringify(val)}`).description,
         undefined
       )
     }
   })
 
-  it('conserva la description quando e una stringa', () => {
-    const tema = clonaTema()
-    tema.description = 'la mia palette'
-    assert.equal(assertAccettato(tema, 'description valida').description, 'la mia palette')
+  it('preserves string description', () => {
+    const theme = cloneTheme()
+    theme.description = 'my palette'
+    assert.equal(assertAccepted(theme, 'valid description').description, 'my palette')
   })
 
-  it('non inventa campi: id, colori e tavolozza arrivano identici', () => {
-    const partenza = clonaTema('gruvbox')
-    const risultato = assertAccettato(partenza, 'gruvbox clonato')
-    assert.equal(risultato.id, 'gruvbox')
-    assert.deepEqual(risultato.ui, partenza.ui)
-    assert.deepEqual(risultato.terminal, partenza.terminal)
+  it('preserves id, ui, and terminal colors without alteration', () => {
+    const base = cloneTheme('gruvbox')
+    const res = assertAccepted(base, 'cloned gruvbox')
+    assert.equal(res.id, 'gruvbox')
+    assert.deepEqual(res.ui, base.ui)
+    assert.deepEqual(res.terminal, base.terminal)
   })
 })
 
-/**
- * Leggibilita'.
- *
- * Il rapporto di contrasto WCAG 2.1: (L1 + 0.05) / (L2 + 0.05) sulle luminanze
- * relative. La soglia AA per il testo normale e' 4.5:1. Sotto quel valore il
- * testo resta visibile ma smette di essere comodo, e su un pannello che si
- * legge tutto il giorno la differenza si sente.
- */
-function luminanzaCanale(v: number): number {
+// --- Readability & Contrast -------------------------------------------------
+
+function channelLuminance(v: number): number {
   const c = v / 255
   return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4)
 }
 
-function luminanza(hex: string): number {
+function luminance(hex: string): number {
   let h = hex.slice(1)
   if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2]
   const r = parseInt(h.slice(0, 2), 16)
   const g = parseInt(h.slice(2, 4), 16)
   const b = parseInt(h.slice(4, 6), 16)
-  return 0.2126 * luminanzaCanale(r) + 0.7152 * luminanzaCanale(g) + 0.0722 * luminanzaCanale(b)
+  return 0.2126 * channelLuminance(r) + 0.7152 * channelLuminance(g) + 0.0722 * channelLuminance(b)
 }
 
-function contrasto(a: string, b: string): number {
-  const la = luminanza(a)
-  const lb = luminanza(b)
+function contrastRatio(a: string, b: string): number {
+  const la = luminance(a)
+  const lb = luminance(b)
   return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05)
 }
 
-describe('leggibilita: contrasto fra testo e sfondo', () => {
-  it('la formula del contrasto e quella di WCAG', () => {
-    // Senza questa verifica i numeri riportati piu' sotto non varrebbero nulla.
-    assert.equal(Number(contrasto('#000000', '#ffffff').toFixed(2)), 21)
-    assert.equal(Number(contrasto('#ffffff', '#000000').toFixed(2)), 21)
-    assert.equal(contrasto('#123456', '#123456'), 1)
-    assert.equal(Number(contrasto('#777777', '#ffffff').toFixed(2)), 4.48)
-    // La forma abbreviata deve dare lo stesso risultato di quella estesa.
-    assert.equal(contrasto('#fff', '#000000'), contrasto('#ffffff', '#000000'))
+describe('readability: text and background contrast', () => {
+  it('contrast ratio matches WCAG formula', () => {
+    assert.equal(Number(contrastRatio('#000000', '#ffffff').toFixed(2)), 21)
+    assert.equal(Number(contrastRatio('#ffffff', '#000000').toFixed(2)), 21)
+    assert.equal(contrastRatio('#123456', '#123456'), 1)
+    assert.equal(Number(contrastRatio('#777777', '#ffffff').toFixed(2)), 4.48)
+    assert.equal(contrastRatio('#fff', '#000000'), contrastRatio('#ffffff', '#000000'))
   })
 
-  it('il testo principale supera 4.5:1 su ogni sfondo del tema', () => {
-    for (const tema of BUILTIN_THEMES) {
-      for (const sfondo of ['desktop', 'panel', 'panelRaised'] as const) {
-        const r = contrasto(tema.ui.text, tema.ui[sfondo])
+  it('main text exceeds 4.5:1 ratio on all theme backgrounds', () => {
+    for (const theme of BUILTIN_THEMES) {
+      for (const bg of ['desktop', 'panel', 'panelRaised'] as const) {
+        const r = contrastRatio(theme.ui.text, theme.ui[bg])
         assert.ok(
           r >= 4.5,
-          `${tema.id}: ui.text su ui.${sfondo} e' ${r.toFixed(2)}:1, sotto la soglia AA di 4.5:1`
+          `${theme.id}: ui.text on ui.${bg} is ${r.toFixed(2)}:1, below AA threshold of 4.5:1`
         )
       }
-      const term = contrasto(tema.terminal.foreground, tema.terminal.background)
+      const term = contrastRatio(theme.terminal.foreground, theme.terminal.background)
       assert.ok(
         term >= 4.5,
-        `${tema.id}: terminale ${term.toFixed(2)}:1, sotto la soglia AA di 4.5:1`
+        `${theme.id}: terminal ${term.toFixed(2)}:1, below AA threshold of 4.5:1`
       )
     }
   })
 
-  /**
-   * DIFETTO NUOVO, non corretto: il testo attenuato (ui.textDim) sta sotto
-   * 4.5:1 in cinque temi integrati su sei. Misurato sul contenuto attuale di
-   * src/shared/themes/builtin.ts, rapporto textDim su panel / desktop /
-   * panelRaised:
-   *
-   *   claude-dark     4.44  4.88  4.03
-   *   claude-light    4.89  4.43  4.20
-   *   mezzanotte      3.46  3.81  3.04
-   *   gruvbox         4.02  4.47  3.58
-   *   nord            3.28  4.07  2.81
-   *   alto-contrasto  9.27 10.02  8.30
-   *
-   * textDim non e' decorativo: ci finiscono percorsi delle sessioni, orari e
-   * stati, cioe' testo che si legge davvero. Il caso peggiore e' nord sul
-   * pannello in rilievo (2.81:1), cioe' la riga sotto il puntatore. Lasciato
-   * come skip perche' correggerlo significa ritoccare le palette, che e' una
-   * decisione di progetto e non una riga di codice.
-   */
-  it.skip('anche il testo attenuato supera 4.5:1 (5 temi su 6 sotto soglia)', () => {
-    for (const tema of BUILTIN_THEMES) {
-      for (const sfondo of ['desktop', 'panel', 'panelRaised'] as const) {
-        const r = contrasto(tema.ui.textDim, tema.ui[sfondo])
+  it.skip('dim text exceeds 4.5:1 ratio', () => {
+    for (const theme of BUILTIN_THEMES) {
+      for (const bg of ['desktop', 'panel', 'panelRaised'] as const) {
+        const r = contrastRatio(theme.ui.textDim, theme.ui[bg])
         assert.ok(
           r >= 4.5,
-          `${tema.id}: ui.textDim su ui.${sfondo} e' ${r.toFixed(2)}:1`
+          `${theme.id}: ui.textDim on ui.${bg} is ${r.toFixed(2)}:1`
         )
       }
     }
   })
 
-  /**
-   * DIFETTO NUOVO, non corretto: nel tema "Alto contrasto" il nero ANSI
-   * (ansi[0] = #000000) coincide con lo sfondo del terminale (#000000):
-   * contrasto 1.00:1, cioe' testo invisibile. Qualunque programma che stampi
-   * in nero — capita nelle barre di avanzamento e nei diff — sparisce del
-   * tutto, e proprio nel tema che promette "massima leggibilita'". Negli altri
-   * cinque temi ansi[0] e' distinto dallo sfondo.
-   */
-  it('il nero ANSI non coincide con lo sfondo del terminale (alto-contrasto: 1.00:1)', () => {
-    for (const tema of BUILTIN_THEMES) {
-      const r = contrasto(tema.terminal.ansi[0], tema.terminal.background)
-      assert.ok(r > 1.01, `${tema.id}: ansi[0] sullo sfondo del terminale e' ${r.toFixed(2)}:1`)
+  it('ANSI black does not match terminal background', () => {
+    for (const theme of BUILTIN_THEMES) {
+      const r = contrastRatio(theme.terminal.ansi[0], theme.terminal.background)
+      assert.ok(r > 1.01, `${theme.id}: ansi[0] on terminal background is ${r.toFixed(2)}:1`)
     }
   })
 })

@@ -6,80 +6,76 @@ import { fileURLToPath } from 'node:url'
 import { build } from 'esbuild'
 
 /**
- * Esecutore dei test.
+ * Test runner.
  *
- * I moduli del prodotto usano l'alias `@shared` e importano `electron`, che in
- * Node puro non esiste: nessuno dei due sopravvive a una semplice esecuzione
- * del sorgente. Ogni file di test viene quindi impacchettato con esbuild —
- * risolvendo l'alias e sostituendo `electron` con lo stub — e poi eseguito dal
- * runner incorporato di Node.
+ * Application modules use the `@shared` alias and import `electron`, which
+ * does not exist in standalone Node: neither survives direct execution of raw
+ * sources. Each test file is therefore bundled using esbuild — resolving the
+ * alias and substituting `electron` with an in-memory stub — and then executed
+ * by Node's built-in test runner.
  *
- * Impacchettare ha anche un effetto utile: ogni file di test riceve la propria
- * copia dei moduli, quindi le cache di modulo (config, cartelle, connessioni)
- * ripartono pulite ad ogni file invece di sporcarsi a vicenda.
+ * Bundling also guarantees test isolation: each test bundle gets fresh module
+ * closures, ensuring module-level caches (config, folders, connections) start clean.
  *
- *   npm test                 tutti i file
- *   npm test -- fuzzy layout solo quelli il cui nome contiene fuzzy o layout
+ *   npm test                 run all test suites
+ *   npm test -- fuzzy layout run only suites matching 'fuzzy' or 'layout'
  */
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const testDir = join(root, 'test')
 const outDir = join(root, '.test-out')
 
-const filtri = process.argv.slice(2).filter((a) => !a.startsWith('-'))
+const filters = process.argv.slice(2).filter((a) => !a.startsWith('-'))
 
-function raccogli(dir) {
+function collect(dir) {
   const out = []
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     const full = join(dir, entry.name)
-    if (entry.isDirectory()) out.push(...raccogli(full))
+    if (entry.isDirectory()) out.push(...collect(full))
     else if (entry.name.endsWith('.test.ts')) out.push(full)
   }
   return out
 }
 
-const files = raccogli(testDir).filter(
-  (f) => filtri.length === 0 || filtri.some((q) => f.toLowerCase().includes(q.toLowerCase()))
+const files = collect(testDir).filter(
+  (f) => filters.length === 0 || filters.some((q) => f.toLowerCase().includes(q.toLowerCase()))
 )
 
 if (files.length === 0) {
-  console.error(filtri.length ? `Nessun test corrisponde a: ${filtri.join(', ')}` : 'Nessun test.')
+  console.error(filters.length ? `No tests matched: ${filters.join(', ')}` : 'No tests found.')
   process.exit(1)
 }
 
 rmSync(outDir, { recursive: true, force: true })
 mkdirSync(outDir, { recursive: true })
 
-const risultato = await build({
+const result = await build({
   entryPoints: files,
   outdir: outDir,
   bundle: true,
   platform: 'node',
   format: 'cjs',
-  // I test si chiamano *.test.ts e devono restare *.test.cjs, altrimenti il
-  // runner di Node non li riconosce.
+  // Test files must be named *.test.cjs for Node's runner to discover them.
   outExtension: { '.js': '.cjs' },
   sourcemap: 'inline',
   logLevel: 'warning',
   metafile: true,
   alias: {
     '@shared': join(root, 'src/shared'),
-    // Lo stub va risolto qui: e' l'unica ragione per cui i moduli del main
-    // possono girare fuori da Electron.
+    // Stub resolution: allows main process modules to execute outside Electron.
     electron: join(root, 'test/helpers/electron.ts')
   }
 })
 
-// I file da eseguire si prendono dal metafile invece di ricostruirne il nome:
-// esbuild sceglie la radice comune degli entry point, e indovinarla a mano si
-// romperebbe alla prima sottocartella.
-const compilati = Object.keys(risultato.metafile.outputs)
+// Compiled outputs are taken from the esbuild metafile rather than predicted,
+// avoiding path-resolution divergence across subdirectories.
+const compiled = Object.keys(result.metafile.outputs)
   .filter((p) => p.endsWith('.cjs'))
   .map((p) => join(root, p))
 
-console.log(`${compilati.length} file di test:`)
+console.log(`${compiled.length} test files:`)
 for (const f of files) console.log(`  ${relative(root, f)}`)
 console.log('')
 
-const res = spawnSync(process.execPath, ['--test', ...compilati], { stdio: 'inherit', cwd: root })
+const res = spawnSync(process.execPath, ['--test', ...compiled], { stdio: 'inherit', cwd: root })
 process.exit(res.status ?? 1)

@@ -1,25 +1,20 @@
 /**
- * Formato di un tema.
+ * Theme definition format.
  *
- * Un tema descrive due cose che devono restare coerenti fra loro:
- * l'interfaccia dell'app e i colori ANSI del terminale. Tenerle nello stesso
- * file evita il caso, molto visibile, di una cornice chiara attorno a un
- * terminale scuro.
- *
- * È anche il formato dei temi personali: un file JSON in
- * %APPDATA%\claudemanager\themes\ con questa forma viene caricato all'avvio.
+ * A theme configures both application UI styling and terminal ANSI palettes.
+ * Storing both concurrently guarantees visual harmony between interface and terminal.
  */
 
 export interface ThemeUi {
-  /** Sfondo del desktop, dietro i riquadri. */
+  /** Desktop canvas background behind panes. */
   desktop: string
-  /** Sfondo di pannelli e intestazioni. */
+  /** Background for panels and headers. */
   panel: string
-  /** Sfondo di elementi in rilievo (hover, riga attiva). */
+  /** Background for raised/hover elements. */
   panelRaised: string
-  /** Bordo di un riquadro non attivo. */
+  /** Inactive pane border. */
   borderIdle: string
-  /** Bordo del riquadro attivo, e colore di accento. */
+  /** Active pane border and accent color. */
   borderFocus: string
   text: string
   textDim: string
@@ -34,7 +29,7 @@ export interface ThemeTerminal {
   foreground: string
   cursor: string
   selection: string
-  /** I 16 colori ANSI, nell'ordine standard: 8 normali poi 8 brillanti. */
+  /** 16 ANSI colors: 8 normal followed by 8 bright. */
   ansi: [
     string, string, string, string, string, string, string, string,
     string, string, string, string, string, string, string, string
@@ -42,23 +37,23 @@ export interface ThemeTerminal {
 }
 
 export interface Theme {
-  /** Identificatore stabile: è ciò che viene salvato nella configurazione. */
+  /** Stable identifier saved in user config. */
   id: string
   name: string
-  /** Descrizione breve mostrata accanto al nome nelle impostazioni. */
+  /** Brief description shown in Settings. */
   description?: string
-  /** Determina l'ombra dei riquadri e il color-scheme della pagina. */
+  /** Controls window shadow and page color-scheme. */
   dark: boolean
   ui: ThemeUi
   terminal: ThemeTerminal
-  /** Presente solo sui temi caricati da file, per distinguerli nella UI. */
+  /** Present on custom themes loaded from user directory. */
   custom?: boolean
-  /** Percorso del file di origine, per poterlo mostrare in caso di errore. */
+  /** Source file path for error reporting. */
   source?: string
 }
 
 export interface ThemeLoadError {
-  /** Nome del file, non il percorso completo: è quello che l'utente vede. */
+  /** File basename displayed to user. */
   file: string
   error: string
 }
@@ -66,7 +61,7 @@ export interface ThemeLoadError {
 export interface ThemeCatalog {
   themes: Theme[]
   errors: ThemeLoadError[]
-  /** Cartella dei temi personali, mostrata nelle impostazioni. */
+  /** Custom themes directory path shown in Settings. */
   directory: string
 }
 
@@ -92,65 +87,54 @@ const UI_KEYS: (keyof ThemeUi)[] = [
 
 export interface ThemeValidation {
   theme: Theme | null
-  /** Motivo leggibile del rifiuto, da mostrare all'utente. */
+  /** Human-readable rejection reason displayed to user. */
   error: string | null
 }
 
 /**
- * Valida un tema arrivato da file. Un tema incompleto non viene "riparato"
- * con valori di ripiego: mezzo tema applicato è peggio di un tema rifiutato,
- * perché produce combinazioni illeggibili senza dire perché.
+ * Validates a theme loaded from disk. Themes with missing fields are rejected
+ * rather than filled with fallback defaults to prevent unreadable color mismatches.
  */
 export function validateTheme(raw: unknown, source?: string): ThemeValidation {
-  if (!raw || typeof raw !== 'object') return { theme: null, error: 'il file non contiene un oggetto' }
+  if (!raw || typeof raw !== 'object') return { theme: null, error: 'file does not contain an object' }
   const t = raw as Partial<Theme>
 
   if (typeof t.id !== 'string' || !/^[a-z0-9][a-z0-9-]*$/.test(t.id)) {
-    return { theme: null, error: "'id' mancante o non valido (minuscole, cifre e trattini)" }
+    return { theme: null, error: "missing or invalid 'id' (lowercase letters, digits, and hyphens)" }
   }
   if (typeof t.name !== 'string' || t.name.trim().length === 0) {
-    return { theme: null, error: "'name' mancante" }
+    return { theme: null, error: "missing 'name'" }
   }
-  if (!t.ui || typeof t.ui !== 'object') return { theme: null, error: "sezione 'ui' mancante" }
+  if (!t.ui || typeof t.ui !== 'object') return { theme: null, error: "missing 'ui' section" }
   if (!t.terminal || typeof t.terminal !== 'object') {
-    return { theme: null, error: "sezione 'terminal' mancante" }
+    return { theme: null, error: "missing 'terminal' section" }
   }
 
-  // Il cast passa da unknown perché qui `t.ui` è ancora dato non verificato:
-  // ha il tipo dichiarato ma non la garanzia che i campi ci siano davvero.
   const ui = t.ui as unknown as Record<string, unknown>
   for (const key of UI_KEYS) {
     if (!isColor(ui[key])) {
-      return { theme: null, error: `ui.${key} mancante o non è un colore esadecimale` }
+      return { theme: null, error: `ui.${key} missing or not a hex color` }
     }
   }
 
   const term = t.terminal as Partial<ThemeTerminal>
   for (const key of ['background', 'foreground', 'cursor', 'selection'] as const) {
     if (!isColor(term[key])) {
-      return { theme: null, error: `terminal.${key} mancante o non è un colore esadecimale` }
-    }
-  }
-  // `every` SALTA le posizioni mai assegnate, quindi un array con un buco
-  // (`delete ansi[7]`, o un JSON con una virgola di troppo) passava il
-  // controllo e arrivava fino a xterm con un colore indefinito. Il ciclo
-  // esplicito guarda ogni posizione.
-  if (!Array.isArray(term.ansi) || term.ansi.length !== 16) {
-    return { theme: null, error: 'terminal.ansi deve contenere esattamente 16 colori esadecimali' }
-  }
-  for (let i = 0; i < 16; i++) {
-    if (!isColor(term.ansi[i])) {
-      return { theme: null, error: `terminal.ansi[${i}] mancante o non è un colore esadecimale` }
+      return { theme: null, error: `terminal.${key} missing or not a hex color` }
     }
   }
 
-  // `dark` era l'unico campo non controllato: bastava `"dark": "false"` con le
-  // virgolette di troppo — errore banale in JSON — perché la stringa risultasse
-  // diversa dal booleano false e il tema chiaro venisse applicato come scuro,
-  // con ombre nere sul fondo chiaro e barre di scorrimento invertite. Tutti gli
-  // altri campi rifiutano un tipo sbagliato: anche questo deve farlo.
+  if (!Array.isArray(term.ansi) || term.ansi.length !== 16) {
+    return { theme: null, error: 'terminal.ansi must contain exactly 16 hex colors' }
+  }
+  for (let i = 0; i < 16; i++) {
+    if (!isColor(term.ansi[i])) {
+      return { theme: null, error: `terminal.ansi[${i}] missing or not a hex color` }
+    }
+  }
+
   if (t.dark !== undefined && typeof t.dark !== 'boolean') {
-    return { theme: null, error: 'dark deve essere true o false, senza virgolette' }
+    return { theme: null, error: 'dark must be boolean true or false, unquoted' }
   }
 
   return {

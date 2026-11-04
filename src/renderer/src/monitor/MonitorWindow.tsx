@@ -4,13 +4,11 @@ import { applyTheme } from '../theme/apply'
 import { MonitorPanel } from './MonitorPanel'
 
 /**
- * Radice della finestra staccata.
+ * Root of the detached window.
  *
- * Vive in un processo di rendering suo, quindi non eredita niente dalla
- * finestra principale: deve applicarsi il tema da sola, leggendolo dalla
- * stessa configurazione. Senza questo comparirebbe con i colori del foglio di
- * stile non ancora sovrascritti — cioè quelli di un tema che l'utente
- * potrebbe non usare.
+ * Runs in its own renderer process, so it inherits nothing from the
+ * main window: it must apply the theme itself, reading it from config.
+ * Without this, default fallback stylesheet colors would flash.
  */
 export default function MonitorWindow(): React.JSX.Element {
   const [state, setState] = useState<MonitorState | null>(null)
@@ -39,15 +37,14 @@ export default function MonitorWindow(): React.JSX.Element {
 
   return (
     <div className="cm-monitorwin">
-      {/* L'intestazione è l'unica zona trascinabile: il resto deve restare
-          cliccabile, e un'area di trascinamento troppo grande impedirebbe di
-          selezionare un riquadro. */}
+      {/* The header is the only draggable region: the rest must remain
+          clickable, and an overly large drag area would prevent selecting a pane. */}
       <header className="cm-monitorwin__head">
         <span className="cm-drawer__title">ClaudeManager</span>
         <span className="cm-usage__spacer" />
         <button
           className="cm-iconbtn cm-monitorwin__btn"
-          title="Riporta il pannello nella finestra principale"
+          title="Reattach panel to main window"
           onClick={() => void window.cm.monitor.attach()}
         >
           ⇤

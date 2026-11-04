@@ -3,11 +3,10 @@ import { allPanes, type Layout, type LayoutNode } from '../compositor/layout'
 import type { SessionMeta } from './types'
 
 /**
- * Conversione fra lo stato vivo del compositor e la sua forma su disco.
+ * Conversion between live compositor state and its on-disk representation.
  *
- * Il ripristino non è mai cieco: un layout.json scritto da una versione
- * precedente, o modificato a mano, non deve poter mandare l'app in uno stato
- * senza riquadri visibili.
+ * Restoration is never blind: a layout.json written by an earlier version
+ * or modified by hand must never strand the app in a state with no visible panes.
  */
 
 export function toPersisted(
@@ -33,9 +32,9 @@ export interface RestoreResult {
 }
 
 /**
- * Ricostruisce lo stato dal file salvato, scartando quello che non torna.
- * Ritorna null se non resta nulla di utilizzabile: chi chiama ricade
- * sull'apertura della sessione predefinita.
+ * Reconstructs state from the persisted file, discarding invalid entries.
+ * Returns null if nothing usable remains: the caller falls back
+ * to launching the default session.
  */
 export function fromPersisted(
   stored: PersistedLayout,
@@ -47,9 +46,9 @@ export function fromPersisted(
   for (const pane of stored.panes) {
     if (!pane.paneId || !pane.cwd) continue
 
-    // Riprendere la conversazione precedente è la lettura utile di
-    // "ripristina il layout": senza --resume si riaprirebbero riquadri vuoti
-    // sulle cartelle giuste, che è molto meno di quanto promesso.
+    // Resuming the previous conversation is the practical meaning of
+    // "restore layout": without --resume, empty panes would spawn in the
+    // target folders, which is much less than promised.
     const resume =
       config.restoreResumesSessions && pane.claudeSessionId ? pane.claudeSessionId : undefined
 
@@ -69,8 +68,8 @@ export function fromPersisted(
   const layout = sanitizeLayout(stored.tree, known)
   if (!layout) return null
 
-  // Un riquadro rimasto fuori dall'albero non sarebbe più raggiungibile:
-  // meglio scartarne i metadati che tenere una sessione invisibile.
+  // A pane omitted from the layout tree would become unreachable:
+  // better to discard its metadata than retain an invisible session.
   for (const paneId of Object.keys(sessions)) {
     if (!allPanes(layout).includes(paneId)) delete sessions[paneId]
   }
@@ -110,13 +109,13 @@ function sanitizeLayout(raw: unknown, known: Set<string>): Layout | null {
     root,
     floating,
     focused,
-    // Lo zoom non si ripristina: riaprire l'app con un riquadro che ne nasconde
-    // altri due sembrerebbe che le sessioni siano andate perse.
+    // Zoom state is not restored: reopening the app with one pane obscuring
+    // two others would give the false impression that sessions were lost.
     zoomed: null
   }
 }
 
-/** Pota i rami che puntano a riquadri non più esistenti, collassando gli split. */
+/** Prunes tree branches pointing to non-existent panes, collapsing splits. */
 function sanitizeNode(node: LayoutNode, known: Set<string>): LayoutNode | null {
   if (node?.kind === 'leaf') {
     return typeof node.id === 'string' && known.has(node.id) ? { kind: 'leaf', id: node.id } : null

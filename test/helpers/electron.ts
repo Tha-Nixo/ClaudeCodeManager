@@ -3,16 +3,15 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 /**
- * Finto modulo 'electron', sostituito al vero al momento del bundle.
+ * Mock 'electron' module, substituted for the real one at bundle time.
  *
- * Quasi tutti i moduli del processo principale chiamano
- * `app.getPath('userData')` per comporre un percorso. Senza questo stub non si
- * potrebbero provare in Node puro, e l'unica alternativa sarebbe avviare
- * Electron per ogni caso limite — molto piu' lento, e senza possibilita' di
- * isolare uno stato di partenza.
+ * Most main process modules call `app.getPath('userData')` to build paths.
+ * Without this stub, they couldn't be tested in pure Node, and the only
+ * alternative would be launching Electron for every edge case — much slower,
+ * and without the ability to cleanly isolate starting state.
  *
- * `userData` punta a una cartella temporanea NUOVA ad ogni esecuzione, cosi'
- * i test non toccano mai la configurazione reale di chi li lancia.
+ * `userData` points to a fresh temporary directory on each run, so tests
+ * never touch the host's actual configuration.
  */
 
 const userData = mkdtempSync(join(tmpdir(), 'cm-test-'))
@@ -29,7 +28,7 @@ export const app = {
   quit: (): void => {}
 }
 
-/** Radice temporanea di questa esecuzione, per ispezionare cio' che e' stato scritto. */
+/** Temporary root for this test run, to inspect what has been written. */
 export const __userData = userData
 
 export const ipcMain = {

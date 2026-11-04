@@ -2,16 +2,12 @@ import { useCallback, useEffect, useState } from 'react'
 import type { RemoteDirListing, RemoteEntry, RemoteProbe, SshConnection } from '@shared/types'
 
 /**
- * Parte remota del selettore: elenco delle connessioni salvate, modulo di
- * modifica ed esplorazione delle cartelle sul server.
- *
- * L'esplorazione remota costa un giro di rete per cartella, quindi non c'è
- * ricerca fuzzy: si naviga, e chi sa già dove andare scrive il percorso nel
- * campo in alto.
+ * Remote selector panel: saved connections list, editor form,
+ * and remote server directory browser.
  */
 
 interface RemotePanelProps {
-  /** Connessione attiva; null quando si sta ancora scegliendo. */
+  /** Active connection; null when selecting a server. */
   connection: SshConnection | null
   path: string
   cursor: number
@@ -19,12 +15,10 @@ interface RemotePanelProps {
   onSelect: (connection: SshConnection | null, path: string) => void
   onPathChange: (path: string) => void
   /**
-   * Cartelle mostrate, oppure null quando il pannello non sta esplorando
-   * (elenco dei server o modulo di modifica). Il selettore lo usa per sapere
-   * se le frecce e l'Invio devono navigare o restare ai campi di testo.
+   * Visible remote folders, or null when not exploring directories.
    */
   onBrowsing: (entries: RemoteEntry[] | null) => void
-  /** Doppio clic su una cartella remota: apre direttamente la sessione. */
+  /** Double-click on remote folder launches session. */
   onLaunch: () => void
 }
 
@@ -52,9 +46,7 @@ export function RemotePanel({
     void reload()
   }, [reload])
 
-  // Ogni cambio di cartella è una chiamata ssh: si annulla il risultato in
-  // arrivo se nel frattempo si è navigato altrove, altrimenti una risposta
-  // lenta sovrascriverebbe una più recente.
+  // Cancel in-flight SSH directory listings when navigating to another folder.
   useEffect(() => {
     if (!connection) {
       setListing(null)
@@ -66,8 +58,6 @@ export function RemotePanel({
       if (cancelled) return
       setListing(res)
       onCursor(0)
-      // Il server risolve '~' e i percorsi relativi: si adotta la sua risposta,
-      // così il percorso mostrato è quello vero.
       if (res.ok && res.path !== path) onPathChange(res.path)
     })
     return () => {
@@ -75,7 +65,6 @@ export function RemotePanel({
     }
   }, [connection, path, onPathChange, onCursor])
 
-  // Le frecce del selettore agiscono sulle cartelle solo mentre si esplora.
   const browsing = Boolean(connection) && !editing
   useEffect(() => {
     onBrowsing(browsing && listing?.ok ? listing.entries : browsing ? [] : null)
@@ -101,7 +90,7 @@ export function RemotePanel({
       <div className="cm-remote">
         {connections.length === 0 && (
           <div className="cm-selector__empty">
-            Nessun server salvato. Aggiungine uno per aprire Claude Code da remoto.
+            No saved servers. Add one to run Claude Code remotely.
           </div>
         )}
         {connections.map((c) => (
@@ -127,13 +116,13 @@ export function RemotePanel({
                   setEditing(c)
                 }}
               >
-                modifica
+                edit
               </button>
             </div>
           </div>
         ))}
         <button className="cm-remote__add" onClick={() => setEditing({ user: '', host: '' })}>
-          ＋ Nuovo server
+          ＋ New server
         </button>
       </div>
     )
@@ -143,28 +132,28 @@ export function RemotePanel({
     <div className="cm-remote">
       <div className="cm-remote__bar">
         <button className="cm-chip" onClick={() => onSelect(null, '')}>
-          ← server
+          ← servers
         </button>
         <span className="cm-remote__where">
           {connection.user}@{connection.host}
         </span>
         {listing?.parent && (
           <button className="cm-chip" onClick={() => onPathChange(listing.parent as string)}>
-            ↑ cartella superiore
+            ↑ parent directory
           </button>
         )}
         <button className="cm-chip" onClick={() => setEditing(connection)}>
-          impostazioni
+          settings
         </button>
       </div>
 
       {!listing ? (
-        <div className="cm-selector__empty">Lettura della cartella sul server…</div>
+        <div className="cm-selector__empty">Reading directory on remote server…</div>
       ) : !listing.ok ? (
         <div className="cm-selector__empty">{listing.error}</div>
       ) : listing.entries.length === 0 ? (
         <div className="cm-selector__empty">
-          Nessuna sottocartella. Invio apre una sessione qui.
+          No subdirectories. Press Enter to open a session here.
         </div>
       ) : (
         listing.entries.map((entry, i) => (
@@ -192,11 +181,10 @@ export function RemotePanel({
 }
 
 /**
- * Modulo di una connessione.
+ * Server connection configuration form.
  *
- * Non c'è campo password di proposito: l'autenticazione la gestisce ssh con le
- * chiavi già configurate sul sistema. Salvare una password qui vorrebbe dire
- * scriverla in chiaro in un file JSON.
+ * Password authentication is intentionally omitted: SSH key authentication is
+ * delegated to the system ssh agent.
  */
 function ConnectionForm({
   draft,
@@ -213,8 +201,6 @@ function ConnectionForm({
 
   const set = (patch: Partial<SshConnection>): void => {
     setForm((f) => ({ ...f, ...patch }))
-    // Un esito di prova riferito a parametri diversi da quelli a schermo
-    // sarebbe peggio di nessun esito.
     setResult(null)
   }
 
@@ -242,26 +228,26 @@ function ConnectionForm({
   return (
     <div className="cm-remote cm-remote__form">
       <div className="cm-remote__grid">
-        <Field label="Nome" value={form.name ?? ''} onChange={(v) => set({ name: v })} placeholder="il mio server" />
-        <Field label="Indirizzo" value={form.host ?? ''} onChange={(v) => set({ host: v })} placeholder="esempio.it" />
-        <Field label="Utente" value={form.user ?? ''} onChange={(v) => set({ user: v })} placeholder="nome" />
+        <Field label="Name" value={form.name ?? ''} onChange={(v) => set({ name: v })} placeholder="my-server" />
+        <Field label="Host" value={form.host ?? ''} onChange={(v) => set({ host: v })} placeholder="example.com" />
+        <Field label="User" value={form.user ?? ''} onChange={(v) => set({ user: v })} placeholder="username" />
         <Field
-          label="Porta"
+          label="Port"
           value={form.port ? String(form.port) : ''}
           onChange={(v) => set({ port: v ? Number(v) : undefined })}
           placeholder="22"
         />
         <Field
-          label="Cartella iniziale"
+          label="Initial directory"
           value={form.remotePath ?? ''}
           onChange={(v) => set({ remotePath: v })}
           placeholder="~"
         />
         <Field
-          label="Chiave privata"
+          label="Private key"
           value={form.identityFile ?? ''}
           onChange={(v) => set({ identityFile: v })}
-          placeholder="lascia vuoto per usare quelle predefinite"
+          placeholder="leave empty to use default keys"
         />
       </div>
 
@@ -270,13 +256,13 @@ function ConnectionForm({
           {result.ok ? (
             result.claudePath ? (
               <>
-                Connessione riuscita · {result.os} · home {result.home} · Claude Code{' '}
+                Connection successful · {result.os} · home {result.home} · Claude Code{' '}
                 {result.claudeVersion}
               </>
             ) : (
               <>
-                Connessione riuscita, ma Claude Code non risulta installato su questo server: le
-                sessioni si apriranno sulla shell remota.
+                Connection successful, but Claude Code is not installed on this server:
+                sessions will open a remote shell.
               </>
             )
           ) : (
@@ -287,7 +273,7 @@ function ConnectionForm({
 
       <div className="cm-remote__actions">
         <button className="cm-chip" onClick={onCancel}>
-          Annulla
+          Cancel
         </button>
         {form.id && (
           <button
@@ -297,15 +283,15 @@ function ConnectionForm({
               onCancel()
             }}
           >
-            Elimina
+            Delete
           </button>
         )}
         <span className="cm-remote__spacer" />
         <button className="cm-chip" disabled={!complete || testing} onClick={() => void test()}>
-          {testing ? 'Prova in corso…' : 'Prova la connessione'}
+          {testing ? 'Testing connection…' : 'Test connection'}
         </button>
         <button className="cm-selector__go" disabled={!complete} onClick={() => void save()}>
-          Salva
+          Save
         </button>
       </div>
     </div>

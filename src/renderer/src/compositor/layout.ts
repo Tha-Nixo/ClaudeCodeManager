@@ -1,13 +1,12 @@
 /**
- * Motore di layout: albero binario di split, come i3/sway.
+ * Layout engine: binary split tree, similar to i3/sway.
  *
- * Tutte le funzioni sono pure e restituiscono un nuovo albero: lo stato è
- * direttamente serializzabile, quindi questo stesso formato è anche quello
- * salvato in layout.json per il ripristino all'avvio.
+ * All functions are pure and return a new tree: state is directly serializable,
+ * so this exact format is also persisted in layout.json for startup restoration.
  *
- * Convenzione delle direzioni:
- *   'h' -> i due figli stanno affiancati   (a sinistra, b destra)
- *   'v' -> i due figli stanno impilati     (a sopra,    b sotto)
+ * Direction conventions:
+ *   'h' -> two children sit side-by-side (a left, b right)
+ *   'v' -> two children are stacked      (a top,  b bottom)
  */
 
 export type SplitDir = 'h' | 'v'
@@ -30,7 +29,7 @@ export interface Layout {
   root: LayoutNode | null
   floating: FloatingPane[]
   focused: string | null
-  /** Riquadro momentaneamente ingrandito a tutto lo stage (Alt+Z). */
+  /** Pane temporarily zoomed to the full stage (Alt+Z). */
   zoomed: string | null
 }
 
@@ -44,8 +43,8 @@ export function leaf(id: string): LayoutNode {
 }
 
 /**
- * Percorso di un nodo come stringa di 'a'/'b' dalla radice ('' = radice).
- * Stabile per la durata di un trascinamento, che è tutto ciò che serve.
+ * Path to a node as a string of 'a'/'b' steps from root ('' = root).
+ * Stable for the duration of a drag gesture, which is all that is required.
  */
 export function findPath(node: LayoutNode | null, id: string, prefix = ''): string | null {
   if (!node) return null
@@ -57,10 +56,9 @@ export function nodeAt(root: LayoutNode | null, path: string): LayoutNode | null
   let current = root
   for (const step of path) {
     if (!current || current.kind !== 'split') return null
-    // Qualunque carattere diverso da 'a' veniva seguito come se fosse 'b',
-    // quindi un percorso spazzatura non era un'operazione a vuoto: andava a
-    // ridimensionare uno split qualsiasi. I percorsi arrivano dal layout
-    // salvato su disco, che si puo' modificare a mano.
+    // Any character other than 'a' was previously followed as 'b',
+    // so garbage paths were not no-ops: they resized arbitrary splits.
+    // Paths come from saved layout on disk, which is hand-editable.
     if (step !== 'a' && step !== 'b') return null
     current = step === 'a' ? current.a : current.b
   }
@@ -82,7 +80,7 @@ export function collectLeaves(node: LayoutNode | null): string[] {
   return [...collectLeaves(node.a), ...collectLeaves(node.b)]
 }
 
-/** Tutti i riquadri, affiancati e flottanti, nell'ordine di creazione dell'albero. */
+/** All panes, tiled and floating, in tree creation order. */
 export function allPanes(layout: Layout): string[] {
   return [...collectLeaves(layout.root), ...layout.floating.map((f) => f.id)]
 }
@@ -91,19 +89,19 @@ export function hasPane(layout: Layout, id: string): boolean {
   return allPanes(layout).includes(id)
 }
 
-// --- Operazioni -------------------------------------------------------------
+// --- Operations -------------------------------------------------------------
 
 /**
- * Inserisce un riquadro dividendo quello attivo. Se il layout è vuoto il
- * nuovo riquadro diventa la radice.
+ * Inserts a pane by splitting the active one. If the layout is empty,
+ * the new pane becomes the root.
  */
 export function addPane(layout: Layout, id: string, dir: SplitDir): Layout {
   if (!layout.root) {
     return { ...layout, root: leaf(id), focused: id, zoomed: null }
   }
 
-  // Se il riquadro attivo è flottante non si può dividere: si aggiunge in coda
-  // all'albero affiancato dividendo il suo primo riquadro.
+  // If the active pane is floating it cannot be split: append to the
+  // tiled tree by splitting its first pane.
   const target =
     layout.focused && findPath(layout.root, layout.focused) !== null
       ? layout.focused
@@ -118,7 +116,7 @@ export function addPane(layout: Layout, id: string, dir: SplitDir): Layout {
   return { ...layout, root: replaceAt(layout.root, path, split), focused: id, zoomed: null }
 }
 
-/** Rimuove un riquadro e fa collassare il genitore sul fratello superstite. */
+/** Removes a pane and collapses the parent node onto the surviving sibling. */
 export function removePane(layout: Layout, id: string): Layout {
   const floatIndex = layout.floating.findIndex((f) => f.id === id)
   if (floatIndex >= 0) {
@@ -155,7 +153,7 @@ function fallbackFocus(layout: Layout, removed: string): string | null {
 
 export function setFocus(layout: Layout, id: string): Layout {
   if (!hasPane(layout, id)) return layout
-  // Il riquadro flottante che riceve il fuoco va anche portato in primo piano.
+  // The floating pane receiving focus must also be brought to the front.
   const floating = layout.floating.some((f) => f.id === id)
     ? raiseFloating(layout.floating, id)
     : layout.floating
@@ -171,17 +169,16 @@ export function setRatio(layout: Layout, path: string, ratio: number): Layout {
   if (!layout.root) return layout
   const node = nodeAt(layout.root, path)
   if (!node || node.kind !== 'split') return layout
-  // NaN attraversa indenne sia Math.min sia Math.max, e finisce memorizzato:
-  // la geometria calcola poi larghezze NaN e i due riquadri dello split
-  // spariscono entrambi dallo schermo, senza nessun errore. Infinito invece
-  // viene limitato correttamente e resta un valore utilizzabile, quindi si
-  // respinge solo NaN.
+  // NaN passes through both Math.min and Math.max intact and gets stored:
+  // geometry subsequently computes NaN widths and both split panes vanish
+  // without errors. Infinity, on the other hand, is clamped correctly to bounds.
+  // We explicitly reject NaN.
   if (Number.isNaN(ratio)) return layout
   const clamped = Math.min(MAX_RATIO, Math.max(MIN_RATIO, ratio))
   return { ...layout, root: replaceAt(layout.root, path, { ...node, ratio: clamped }) }
 }
 
-/** Scambia di posto due riquadri affiancati. */
+/** Swaps positions of two tiled panes. */
 export function swapPanes(layout: Layout, idA: string, idB: string): Layout {
   if (!layout.root || idA === idB) return layout
   const pathA = findPath(layout.root, idA)
@@ -194,9 +191,9 @@ export function swapPanes(layout: Layout, idA: string, idB: string): Layout {
 }
 
 /**
- * Sposta un riquadro fra albero affiancato e lista flottante.
- * `rect` è la geometria attuale del riquadro, così il passaggio a flottante
- * non fa saltare la finestra da un'altra parte.
+ * Moves a pane between the tiled tree and the floating list.
+ * `rect` is the pane's current geometry, ensuring conversion to floating
+ * does not cause the window to jump to an unexpected location.
  */
 export function toggleFloat(
   layout: Layout,
@@ -223,20 +220,19 @@ export function toggleFloat(
   }
 }
 
-/** Un riquadro largo si divide in verticale, uno alto in orizzontale. */
+/** Wide panes split horizontally, tall panes split vertically. */
 function defaultSplitDir(rect: { w: number; h: number }): SplitDir {
   return rect.w >= rect.h ? 'h' : 'v'
 }
 
-/** Dove rilasciare un riquadro rispetto a quello sotto il puntatore. */
+/** Drop target side relative to pane beneath pointer. */
 export type DropSide = 'left' | 'right' | 'top' | 'bottom' | 'center'
 
 /**
- * Sposta un riquadro accanto a un altro, trascinandolo.
+ * Moves a pane next to another via drag and drop.
  *
- * 'center' scambia i due; i lati inseriscono il riquadro trascinato dividendo
- * quello di destinazione. Il riquadro viene prima tolto da dov'era: senza
- * questo passaggio comparirebbe due volte nell'albero.
+ * 'center' swaps the two; edges insert the dragged pane by splitting
+ * the target pane. The pane is detached first to prevent duplicate entries.
  */
 export function movePaneTo(
   layout: Layout,
@@ -248,8 +244,8 @@ export function movePaneTo(
   if (!hasPane(layout, movingId) || !hasPane(layout, targetId)) return layout
 
   if (side === 'center') {
-    // Lo scambio ha senso solo fra riquadri del mosaico: un flottante non
-    // occupa una posizione nell'albero con cui scambiarsi.
+    // Swapping only makes sense between tiled panes: floating panes
+    // do not occupy a fixed slot in the tree to swap with.
     if (isFloating(layout, movingId) || isFloating(layout, targetId)) return layout
     return setFocus(swapPanes(layout, movingId, targetId), movingId)
   }

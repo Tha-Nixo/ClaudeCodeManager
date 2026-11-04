@@ -3,11 +3,11 @@ import type { Theme } from '@shared/theme'
 import { applyThemeToTerminals } from '../terminal/registry'
 
 /**
- * Applica un tema all'app.
+ * Applies a theme to the application.
  *
- * Due destinatari, che vanno tenuti in sincrono: le variabili CSS, da cui
- * dipende tutta l'interfaccia, e le istanze xterm già vive, che hanno il
- * proprio oggetto tema e non leggono il CSS.
+ * Synchronizes two targets: CSS custom properties, on which the entire
+ * UI depends, and active xterm instances, which maintain their own
+ * theme object and do not read CSS variables.
  */
 
 export function xtermThemeOf(theme: Theme): ITheme {
@@ -55,15 +55,15 @@ export function applyTheme(theme: Theme): void {
   root.style.setProperty('--cm-waiting', ui.waiting)
   root.style.setProperty('--cm-error', ui.error)
 
-  // Su un tema chiaro un'ombra nera pesante sporca invece di dare rilievo, e
-  // il testo su fondo scuro dei pulsanti pieni diventa illeggibile.
+  // On a light theme, a heavy black shadow adds muddy artifacts rather than relief,
+  // and text on dark backgrounds in solid buttons becomes illegible.
   root.style.setProperty('--cm-shadow', theme.dark ? 'rgb(0 0 0 / 55%)' : 'rgb(60 50 40 / 18%)')
   root.style.setProperty('--cm-shadow-strong', theme.dark ? 'rgb(0 0 0 / 60%)' : 'rgb(60 50 40 / 26%)')
   root.style.setProperty('--cm-on-accent', theme.dark ? ui.desktop : '#FFFFFF')
   root.style.setProperty('--cm-overlay-veil', theme.dark ? 'rgb(15 14 13 / 62%)' : 'rgb(120 112 100 / 38%)')
 
-  // Fa scegliere al sistema le barre di scorrimento e i controlli nativi
-  // coerenti col tema, invece di lasciarli sempre scuri.
+  // Instructs the browser engine to render scrollbars and native form controls
+  // consistent with the active theme color scheme.
   root.style.setProperty('color-scheme', theme.dark ? 'dark' : 'light')
   root.dataset.theme = theme.id
 

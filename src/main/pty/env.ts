@@ -1,20 +1,19 @@
 /**
- * Variabili con cui Claude Code marca il proprio processo. Se ClaudeManager
- * viene avviato DA DENTRO un terminale Claude Code, queste finiscono in
- * process.env e verrebbero ereditate da ogni sessione che apriamo.
+ * Variables with which Claude Code marks its own process. If ClaudeManager
+ * is started FROM WITHIN a Claude Code terminal, these end up in
+ * process.env and would be inherited by every session we spawn.
  *
- * Le conseguenze sono concrete e silenziose:
- * - CLAUDE_CODE_CHILD_SESSION fa considerare la sessione una figlia e
- *   DISATTIVA il salvataggio del transcript. Senza transcript non esistono
- *   né la ripresa delle sessioni né le statistiche di utilizzo.
- * - CLAUDE_CODE_SESSION_ID entrerebbe in conflitto con il --session-id che
- *   assegniamo noi.
- * - CLAUDECODE / CLAUDE_CODE_ENTRYPOINT / CLAUDE_PID falsano il rilevamento
- *   del contesto di avvio.
+ * The consequences are subtle and destructive:
+ * - CLAUDE_CODE_CHILD_SESSION treats the session as a child and
+ *   DISABLES transcript saving. Without transcripts, neither session
+ *   resumption nor usage analytics function.
+ * - CLAUDE_CODE_SESSION_ID would conflict with the --session-id we assign.
+ * - CLAUDECODE / CLAUDE_CODE_ENTRYPOINT / CLAUDE_PID distort detection
+ *   of the launch context.
  *
- * Ogni riquadro deve nascere come sessione di primo livello, quindi vanno
- * tolte. L'elenco è volutamente puntuale e non un prefisso: la configurazione
- * dell'utente (CLAUDE_CONFIG_DIR, ANTHROPIC_*, ...) deve passare intatta.
+ * Every pane must spawn as a top-level session, so these must be stripped.
+ * The list is intentionally exact rather than a prefix: user configuration
+ * (CLAUDE_CONFIG_DIR, ANTHROPIC_*, ...) must pass through intact.
  */
 const SESSION_MARKERS = [
   'CLAUDECODE',
@@ -22,12 +21,11 @@ const SESSION_MARKERS = [
   'CLAUDE_CODE_SESSION_ID',
   'CLAUDE_CODE_ENTRYPOINT',
   'CLAUDE_PID',
-  // Stesso problema, altro programma: l'eseguibile portabile prodotto da
-  // electron-builder marca il proprio ambiente con queste, ed e' cosi' che
-  // l'app riconosce di non potersi aggiornare da sola. Ereditate, farebbero
-  // credere "portabile" a qualunque programma avviato da un riquadro,
-  // compresa un'altra copia di ClaudeManager installata regolarmente, che
-  // spegnerebbe i propri aggiornamenti senza motivo.
+  // Same issue, different tool: portable executables produced by
+  // electron-builder mark their environment with these, which is how
+  // the app detects it cannot update itself. Inherited, they would make
+  // any process launched from a pane appear "portable", including
+  // another installed copy of ClaudeManager, disabling its updates needlessly.
   'PORTABLE_EXECUTABLE_DIR',
   'PORTABLE_EXECUTABLE_FILE',
   'PORTABLE_EXECUTABLE_APP_FILENAME'
@@ -35,15 +33,15 @@ const SESSION_MARKERS = [
 
 export interface PtyEnvOptions {
   cwd: string
-  /** Eseguibile avviato dal bootstrap: `claude` in locale, `ssh` da remoto. */
+  /** Executable launched by the bootstrap: `claude` locally, `ssh` remotely. */
   exe: string
-  /** Riga di comando gia' composta, senza l'eseguibile. */
+  /** Already-composed command line, without the executable. */
   commandLine: string
-  /** Riga mostrata prima dell'avvio, per dire dove si sta entrando. */
+  /** Header displayed before launch, indicating the target destination. */
   label?: string
 }
 
-/** process.env senza i marcatori di sessione Claude Code. */
+/** process.env stripped of Claude Code session markers. */
 export function ptyEnv(): Record<string, string | undefined> {
   const env: Record<string, string | undefined> = { ...process.env }
   for (const key of SESSION_MARKERS) delete env[key]
@@ -63,7 +61,7 @@ export function buildPtyEnv(opts: PtyEnvOptions): Record<string, string | undefi
   }
 }
 
-/** Usata dalla diagnostica per segnalare che l'app gira dentro Claude Code. */
+/** Used by diagnostics to detect whether the app runs inside Claude Code. */
 export function inheritedSessionMarkers(): string[] {
   return SESSION_MARKERS.filter((key) => process.env[key] !== undefined)
 }

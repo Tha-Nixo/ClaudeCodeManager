@@ -6,17 +6,16 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 /**
- * Prepara una release: alza la versione, scrive il changelog dai commit,
- * costruisce i pacchetti e crea il tag.
+ * Prepares a release: bumps version, writes changelog from commits,
+ * builds packages, and tags the git commit.
  *
- *   npm run release -- patch|minor|major|<versione>
- *   npm run release -- minor --dry      solo mostrare cosa farebbe
+ *   npm run release -- patch|minor|major|<version>
+ *   npm run release -- minor --dry      dry run: preview without writing
  *
- * La pubblicazione su GitHub avviene solo con GH_TOKEN nell'ambiente, e la
- * release nasce come BOZZA: va riletta e pubblicata a mano. Un aggiornamento
- * automatico arriva su tutte le installazioni, quindi il momento in cui
- * diventa visibile deve essere una decisione, non un effetto collaterale
- * dell'aver lanciato uno script.
+ * Publishing to GitHub requires GH_TOKEN in the environment, and the release
+ * is created as a DRAFT: it must be reviewed and published manually. An auto-update
+ * reaches all active installations, so making it live must be an intentional
+ * decision, not a side-effect of running a script.
  */
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
@@ -29,12 +28,10 @@ function git(...params) {
 }
 
 /**
- * Esegue un comando mostrandolo.
+ * Executes a command while printing it.
  *
- * `shell` serve solo per npm e npx, che su Windows sono file .cmd e non si
- * possono avviare direttamente. Va acceso il meno possibile: con la shell di
- * mezzo gli argomenti vengono concatenati invece che passati uno per uno, e un
- * messaggio di commit con dentro un apice basterebbe a rompere il comando.
+ * `shell` is only needed for npm and npx on Windows (.cmd wrappers).
+ * It is enabled only when strictly necessary to prevent argument mangling.
  */
 function run(command, params, needsShell = false) {
   console.log(`  $ ${command} ${params.join(' ')}`)
@@ -48,22 +45,20 @@ function nextVersion(current, kind) {
   if (kind === 'major') return `${major + 1}.0.0`
   if (kind === 'minor') return `${major}.${minor + 1}.0`
   if (kind === 'patch') return `${major}.${minor}.${patch + 1}`
-  throw new Error(`Incremento non riconosciuto: ${kind}`)
+  throw new Error(`Unrecognized increment: ${kind}`)
 }
 
 /**
- * Righe di changelog dai commit dopo l'ultimo tag.
+ * Changelog entries extracted from commits since last tag.
  *
- * Si prende solo la prima riga di ogni commit: il corpo di questo progetto
- * contiene il ragionamento, che sta bene nella cronologia ma non in un elenco
- * di novità.
+ * Uses only the first line of each commit message.
  */
 function changesSinceLastTag() {
   let range = ''
   try {
     range = `${git('describe', '--tags', '--abbrev=0')}..HEAD`
   } catch {
-    // Nessun tag ancora: si prende tutta la cronologia.
+    // No tags yet: take whole commit history.
   }
 
   const log = git('log', '--no-merges', '--format=%s', ...(range ? [range] : []))
@@ -74,37 +69,37 @@ function changesSinceLastTag() {
     .map((line) => `- ${line}`)
 }
 
-/** Sezione del changelog di una versione, per riusarla come note di release. */
+/** Changelog section for a given version to reuse as release notes. */
 function changelogEntryFor(version) {
   const md = readFileSync(join(root, 'CHANGELOG.md'), 'utf8')
-  const righe = md.split('\n')
-  const inizio = righe.findIndex((l) => l.startsWith(`## ${version} `))
-  if (inizio === -1) return ''
-  const resto = righe.slice(inizio + 1)
-  const fine = resto.findIndex((l) => l.startsWith('## '))
-  return [righe[inizio], ...(fine === -1 ? resto : resto.slice(0, fine))].join('\n').trim()
+  const lines = md.split('\n')
+  const start = lines.findIndex((l) => l.startsWith(`## ${version} `))
+  if (start === -1) return ''
+  const rest = lines.slice(start + 1)
+  const end = rest.findIndex((l) => l.startsWith('## '))
+  return [lines[start], ...(end === -1 ? rest : rest.slice(0, end))].join('\n').trim()
 }
 
-// Riordina soltanto, senza toccare versione né tag: serve dopo un
-// `npm run dist` fatto a mano, o per rigenerare le istruzioni.
+// Reorganize release folder without modifying version or tags:
+// useful after a manual `npm run dist` or to regenerate upload instructions.
 if (args.includes('--tidy')) {
   const version = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version
-  const esito = riordina(join(root, 'release', `v${version}`), version, changelogEntryFor(version))
-  if (!esito) {
-    console.error(`Nessuna cartella release/v${version}: prima costruisci i pacchetti.`)
+  const result = reorganize(join(root, 'release', `v${version}`), version, changelogEntryFor(version))
+  if (!result) {
+    console.error(`No folder release/v${version}: build packages first.`)
     process.exit(1)
   }
-  console.log(`release/v${version} — ${esito.coerenza}`)
-  for (const f of esito.daPubblicare) console.log(`  ${f}`)
-  console.log(`  (istruzioni: release/v${version}/DA-CARICARE.md)`)
+  console.log(`release/v${version} — ${result.status}`)
+  for (const f of result.toPublish) console.log(`  ${f}`)
+  console.log(`  (instructions: release/v${version}/TO-UPLOAD.md)`)
   process.exit(0)
 }
 
-// --- Controlli preliminari ---------------------------------------------------
+// --- Pre-flight checks -------------------------------------------------------
 
 const status = git('status', '--porcelain')
 if (status && !dryRun) {
-  console.error('Ci sono modifiche non committate. Chiudile prima di fare una release:\n' + status)
+  console.error('Working directory has uncommitted changes. Please commit or stash before releasing:\n' + status)
   process.exit(1)
 }
 
@@ -115,17 +110,17 @@ const tag = `v${version}`
 
 const existing = git('tag', '--list', tag)
 if (existing) {
-  console.error(`Il tag ${tag} esiste già.`)
+  console.error(`Tag ${tag} already exists.`)
   process.exit(1)
 }
 
-console.log(`\n${pkg.version} → ${version}${dryRun ? '  (prova a vuoto)' : ''}\n`)
+console.log(`\n${pkg.version} → ${version}${dryRun ? '  (dry run)' : ''}\n`)
 
 // --- Changelog ---------------------------------------------------------------
 
 const changes = changesSinceLastTag()
 if (changes.length === 0) {
-  console.error('Nessun commit dopo l’ultimo tag: non c’è niente da rilasciare.')
+  console.error('No commits since last tag: nothing to release.')
   process.exit(1)
 }
 
@@ -134,8 +129,8 @@ const entry = `## ${version} — ${today}\n\n${changes.join('\n')}\n`
 
 const changelogPath = join(root, 'CHANGELOG.md')
 const changelog = readFileSync(changelogPath, 'utf8')
-// La voce nuova va sotto l'intestazione, non in fondo: si legge dall'alto.
-const marker = '<!-- nuove versioni qui sotto -->'
+// New entry goes right below the header marker.
+const marker = '<!-- new versions below -->'
 const updated = changelog.includes(marker)
   ? changelog.replace(`${marker}\n`, `${marker}\n\n${entry}`)
   : `${changelog}\n${entry}`
@@ -149,18 +144,15 @@ if (!dryRun) {
 }
 
 /**
- * Riordina la cartella della versione appena costruita.
+ * Reorganizes the newly built release directory.
  *
- * electron-builder mette nella stessa cartella i file da pubblicare e quelli
- * di lavorazione — `win-unpacked` da trecento megabyte, il registro di
- * diagnostica. Al momento di trascinare gli allegati su GitHub bisogna
- * riconoscere gli uni dagli altri leggendo i nomi, ed è esattamente lì che si
- * sbaglia file. Gli intermedi finiscono in una sottocartella, e accanto ai
- * quattro che restano si scrive l'elenco di cosa fare.
+ * electron-builder outputs both publishable artifacts and intermediate files
+ * (such as 300MB win-unpacked and logs) into the same output directory.
+ * Intermediate files are moved to `intermediate/` so only uploadable files remain.
  */
 
-/** Estensioni e nomi che vanno pubblicati; tutto il resto è lavorazione. */
-function isPubblicabile(name) {
+/** File names and extensions intended for public release. */
+function isPublishable(name) {
   return name.endsWith('.exe') || name.endsWith('.blockmap') || name === 'latest.yml'
 }
 
@@ -168,66 +160,63 @@ function sha512Base64(file) {
   return createHash('sha512').update(readFileSync(file)).digest('base64')
 }
 
-function riordina(outDir, version, entry) {
+function reorganize(outDir, version, entry) {
   if (!existsSync(outDir)) return null
 
-  const intermedi = join(outDir, 'intermedi')
-  const daPubblicare = []
+  const intermediate = join(outDir, 'intermediate')
+  const toPublish = []
 
   for (const name of readdirSync(outDir)) {
-    if (name === 'intermedi' || name === 'DA-CARICARE.md') continue
-    if (isPubblicabile(name)) {
-      daPubblicare.push(name)
+    if (name === 'intermediate' || name === 'intermedi' || name === 'TO-UPLOAD.md' || name === 'DA-CARICARE.md') continue
+    if (isPublishable(name)) {
+      toPublish.push(name)
       continue
     }
-    mkdirSync(intermedi, { recursive: true })
+    mkdirSync(intermediate, { recursive: true })
     try {
-      renameSync(join(outDir, name), join(intermedi, name))
+      renameSync(join(outDir, name), join(intermediate, name))
     } catch {
-      // Un file ancora in uso (l'eseguibile portabile in esecuzione) resta
-      // dov'è: spostarlo non vale il rischio di rompere la build.
+      // File currently in use (e.g. running portable exe) stays in place.
     }
   }
 
-  daPubblicare.sort()
+  toPublish.sort()
 
-  // Il controllo che romperebbe gli aggiornamenti in silenzio: se lo sha512
-  // dentro latest.yml non è quello dell'installer, electron-updater scarica e
-  // scarta, senza dire perché.
-  let coerenza = 'latest.yml assente'
+  // Guard against broken auto-updates: if sha512 inside latest.yml does not match installer,
+  // electron-updater silently discards the downloaded update.
+  let status = 'latest.yml missing'
   const latest = join(outDir, 'latest.yml')
   if (existsSync(latest)) {
-    const atteso = (readFileSync(latest, 'utf8').match(/^sha512: (.+)$/m) ?? [])[1]?.trim()
-    const installer = daPubblicare.find((f) => f.includes('Setup'))
-    if (atteso && installer) {
-      const vero = sha512Base64(join(outDir, installer))
-      coerenza = atteso === vero ? 'sha512 coerente con l’installer' : '⚠ SHA512 NON COERENTE'
+    const expected = (readFileSync(latest, 'utf8').match(/^sha512: (.+)$/m) ?? [])[1]?.trim()
+    const installer = toPublish.find((f) => f.includes('Setup'))
+    if (expected && installer) {
+      const actual = sha512Base64(join(outDir, installer))
+      status = expected === actual ? 'sha512 matches installer' : '⚠ SHA512 MISMATCH'
     }
   }
 
-  const elenco = daPubblicare.map((f) => `- \`${f}\``).join('\n')
+  const list = toPublish.map((f) => `- \`${f}\``).join('\n')
   writeFileSync(
-    join(outDir, 'DA-CARICARE.md'),
+    join(outDir, 'TO-UPLOAD.md'),
     `# Release ${version}
 
-Su https://github.com/Tha-Nixo/ClaudeCodeManager/releases/new
+On https://github.com/Tha-Nixo/ClaudeCodeManager/releases/new:
 
-1. In *Choose a tag* scegli **\`v${version}\`** (esiste già, non crearne uno nuovo).
-2. Titolo: \`ClaudeManager ${version}\`
-3. Descrizione: il testo qui sotto.
-4. Trascina questi file — sono tutti e soli quelli in questa cartella:
+1. Under *Choose a tag*, select **\`v${version}\`** (already created).
+2. Title: \`ClaudeManager ${version}\`
+3. Description: paste the text below.
+4. Drag and drop these files (all and only files in this directory):
 
-${elenco}
+${list}
 
-   \`latest.yml\` è indispensabile: senza, l'aggiornamento automatico non
-   funziona. Il \`.blockmap\` fa scaricare solo le parti cambiate agli
-   aggiornamenti futuri.
+   \`latest.yml\` is required: auto-updates will not function without it.
+   The \`.blockmap\` file enables delta downloads for subsequent updates.
 
-5. **Publish release.**
+5. Click **Publish release**.
 
-Controllo automatico: ${coerenza}
+Verification check: ${status}
 
-La sottocartella \`intermedi/\` non va caricata: è materiale di lavorazione.
+The \`intermediate/\` subfolder should not be uploaded.
 
 ---
 
@@ -235,39 +224,38 @@ ${entry}`,
     'utf8'
   )
 
-  return { outDir, daPubblicare, coerenza }
+  return { outDir, toPublish, status }
 }
 
-// --- Build e tag -------------------------------------------------------------
+// --- Build and tag -----------------------------------------------------------
 
 const publish = process.env.GH_TOKEN ? 'always' : 'never'
 if (publish === 'never') {
-  console.log('\nGH_TOKEN assente: i pacchetti vengono costruiti ma non caricati su GitHub.\n')
+  console.log('\nGH_TOKEN not set: packages built locally without uploading to GitHub.\n')
 }
 
 run('npm', ['run', 'typecheck'], true)
 run('npx', ['electron-vite', 'build'], true)
 run('npx', ['electron-builder', '--publish', publish], true)
 
-// Deve combaciare con directories.output in electron-builder.yml.
+// Matches directories.output in electron-builder.yml.
 const outDir = join(root, 'release', tag)
-const riordinato = dryRun ? null : riordina(outDir, version, entry)
+const reorganized = dryRun ? null : reorganize(outDir, version, entry)
 
-// git si avvia direttamente: niente shell, quindi niente virgolette a mano.
 run('git', ['add', 'package.json', 'CHANGELOG.md'])
 run('git', ['commit', '-m', tag])
 run('git', ['tag', '-a', tag, '-m', tag])
 
-if (riordinato) {
-  console.log(`\nArtefatti in release/${tag}/ — ${riordinato.coerenza}`)
-  for (const f of riordinato.daPubblicare) console.log(`  ${f}`)
-  console.log(`  (istruzioni e testo della release: release/${tag}/DA-CARICARE.md)`)
+if (reorganized) {
+  console.log(`\nArtifacts in release/${tag}/ — ${reorganized.status}`)
+  for (const f of reorganized.toPublish) console.log(`  ${f}`)
+  console.log(`  (release instructions: release/${tag}/TO-UPLOAD.md)`)
 }
 
-console.log(`\nFatto. Restano da fare a mano:`)
+console.log(`\nDone. Remaining manual steps:`)
 console.log(`  git push && git push origin ${tag}`)
 if (publish === 'always') {
-  console.log('  pubblicare la bozza di release su GitHub (finché è bozza, nessuno la riceve)')
+  console.log('  publish draft release on GitHub (no clients receive it while in draft)')
 } else {
-  console.log(`  caricare i file da release/${tag}/ sulla release di GitHub`)
+  console.log(`  upload files from release/${tag}/ to GitHub release`)
 }

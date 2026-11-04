@@ -5,20 +5,19 @@ import type { LiveSession } from '@shared/types'
 import { claudeHome } from './paths'
 
 /**
- * Stato in tempo reale delle sessioni Claude Code.
+ * Real-time status of Claude Code sessions.
  *
- * Claude Code scrive un file per processo attivo in ~/.claude/sessions/<pid>.json
- * e lo aggiorna a ogni cambio di stato. È la fonte autorevole: leggendola non
- * serve interpretare l'output del terminale, che sarebbe fragile e dipendente
- * dalla versione.
+ * Claude Code writes one file per active process to ~/.claude/sessions/<pid>.json
+ * and updates it on every state change. It is the authoritative source: reading it avoids
+ * parsing terminal output, which would be fragile and version-dependent.
  *
- * `claude agents --json` espone gli stessi dati ma in forma ridotta (mancano
- * waitingFor, updatedAt e procStart) e costa uno spawn di processo per ogni
- * lettura: qui invece si osserva la cartella e si reagisce agli eventi.
+ * `claude agents --json` exposes the same data in reduced form (missing
+ * waitingFor, updatedAt, and procStart) and costs a process spawn for each
+ * read: instead, we watch the directory and react to filesystem events.
  */
 
 const DEBOUNCE_MS = 120
-/** Cadenza con cui si riprova a installare il watcher quando non è possibile. */
+/** Interval to retry installing the watcher when not yet possible. */
 const RETRY_MS = 5_000
 
 export interface LiveEvents {
@@ -52,11 +51,11 @@ export class LiveSessions extends EventEmitter<LiveEvents> {
   }
 
   /**
-   * Installa il watcher, e se non è possibile riprova.
+   * Installs the watcher, retrying if not currently possible.
    *
-   * La cartella non esiste finché Claude Code non avvia la prima sessione: al
-   * primo avvio dell'app, quindi, spesso non c'è. Senza il ritentativo lo
-   * stato dei riquadri resterebbe congelato per tutta la vita dell'app.
+   * The directory does not exist until Claude Code launches its first session:
+   * on initial app start, it is often absent. Without retrying,
+   * pane status would remain frozen for the lifetime of the app.
    */
   private arm(): void {
     if (this.stopped || this.watcher) return
@@ -69,9 +68,9 @@ export class LiveSessions extends EventEmitter<LiveEvents> {
 
     try {
       const watcher = watch(dir, () => this.schedule())
-      // Un evento 'error' senza ascoltatore su un FSWatcher viene rilanciato e
-      // abbatte il main, portandosi dietro tutti i PTY. Qui invece si chiude
-      // il watcher e si riprova.
+      // An unhandled 'error' event on an FSWatcher is re-thrown and
+      // crashes the main process, terminating all PTYs. Instead, we close
+      // the watcher and retry.
       watcher.on('error', () => {
         watcher.close()
         if (this.watcher === watcher) this.watcher = null
@@ -95,7 +94,7 @@ export class LiveSessions extends EventEmitter<LiveEvents> {
     }, RETRY_MS)
   }
 
-  /** Più scritture ravvicinate producono un solo aggiornamento. */
+  /** Debounces closely-spaced writes into a single update. */
   private schedule(): void {
     if (this.timer) return
     this.timer = setTimeout(() => {
@@ -133,26 +132,23 @@ function readSessions(): LiveSession[] {
       const raw = readFileSync(join(dir, file), 'utf8')
       const rec = JSON.parse(raw) as LiveSession
       if (!rec?.sessionId || typeof rec.pid !== 'number') continue
-      // I file restano indietro dopo un crash: si tiene solo ciò che ha
-      // ancora un processo vivo.
+      // Files can be left behind after a crash: keep only those with an active process.
       if (!processAlive(rec.pid)) continue
       out.push(rec)
     } catch {
-      // File scritto a metà proprio mentre lo leggiamo: al prossimo evento
-      // sarà completo.
+      // File half-written while reading: it will be complete on the next event.
     }
   }
   return out
 }
 
 /**
- * Il segnale 0 non invia nulla: verifica solo l'esistenza del processo.
+ * Signal 0 does not send a signal: it only checks process existence.
  *
- * Un PID può essere riusato da un processo qualunque, e senza codice nativo
- * non possiamo confrontare `procStart`. Non è però un problema di
- * attribuzione: i riquadri sono correlati per sessionId, che assegniamo noi
- * con --session-id, quindi al peggio una sessione morta resta indicata come
- * viva finché il suo file non sparisce.
+ * A PID can be reused by an arbitrary process, and without native code
+ * we cannot compare `procStart`. However, this is not an attribution issue:
+ * panes are correlated by sessionId, which we assign via --session-id,
+ * so at worst a dead session remains marked alive until its file is removed.
  */
 function processAlive(pid: number): boolean {
   try {

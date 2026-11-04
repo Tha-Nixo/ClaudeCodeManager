@@ -8,20 +8,19 @@ import { foldersFor } from './diskIndex'
 import { rankBy } from './fuzzy'
 
 /**
- * Indice delle cartelle proposte dal selettore.
+ * Folder candidate index proposed by the selector.
  *
- * In M3 le sorgenti attive sono le piu' economiche e le piu' pertinenti:
- * preferiti, recenti dell'app e cartelle in cui Claude Code e' gia' stato
- * usato. Le sorgenti che richiedono una scansione del disco arrivano in M6 e
- * si innestano qui, perche' l'unione e la deduplica sono gia' centralizzate.
+ * Combines active sources: favorites, recent app folders, and directories
+ * where Claude Code has previously run, plus disk indexer sources (git, roots, drive).
+ * Unification and deduplication are centralized here.
  */
 
 const CACHE_TTL_MS = 5_000
 let cache: { at: number; items: FolderCandidate[] } | null = null
 
 /**
- * Ordine di pertinenza a parità di percorso: un preferito resta un preferito
- * anche se compare pure fra i recenti o nella scansione del disco.
+ * Relevance precedence when paths collide: a favorite remains a favorite
+ * even if it also appears among recents or disk scans.
  */
 const SOURCE_RANK: Record<CandidateSource, number> = {
   favorite: 0,
@@ -46,8 +45,8 @@ function collect(): FolderCandidate[] {
   const add = (path: string, source: CandidateSource, lastUsed: number): void => {
     const key = normalizePath(path)
     const existing = byPath.get(key)
-    // A parita' di percorso vince la sorgente piu' significativa: un preferito
-    // resta un preferito anche se compare pure fra i recenti.
+    // When paths collide, the most significant source wins:
+    // a favorite remains a favorite even if it also appears in recents.
     if (!existing || SOURCE_RANK[source] < SOURCE_RANK[existing.source]) {
       byPath.set(key, { path, source, lastUsed: Math.max(lastUsed, existing?.lastUsed ?? 0) })
     } else if (lastUsed > existing.lastUsed) {
@@ -57,8 +56,8 @@ function collect(): FolderCandidate[] {
 
   const sources = getConfig().indexSources
 
-  // Preferiti e recenti sono sempre attivi: sono scelte esplicite dell'utente,
-  // non il risultato di una scansione.
+  // Favorites and recents are always active: they are explicit user actions,
+  // not scan results.
   for (const path of getFavorites()) add(path, 'favorite', Date.now())
   for (const r of getRecents()) add(r.path, 'recent', r.lastUsed)
 
@@ -73,10 +72,10 @@ function collect(): FolderCandidate[] {
 }
 
 /**
- * Risultati per una query. Con query vuota si mostra l'elenco per pertinenza
- * (preferiti, poi recenti, poi il resto); altrimenti si applica il punteggio
- * fuzzy. Le informazioni per i badge si calcolano solo sulle righe mostrate,
- * cosi' non si tocca il disco per l'intero indice ad ogni tasto premuto.
+ * Results for a query. An empty query returns candidates by relevance
+ * (favorites, then recents, then others); otherwise fuzzy scoring is applied.
+ * Badge metadata is calculated only for visible items, avoiding disk I/O
+ * across the entire index on every keystroke.
  */
 export function searchFolders(query: string, limit = 40): FolderCandidate[] {
   const all = collect()
@@ -95,8 +94,8 @@ export function searchFolders(query: string, limit = 40): FolderCandidate[] {
     }))
   }
 
-  // Un percorso scritto per intero deve comparire in cima anche se non e'
-  // ancora nell'indice: e' la via piu' rapida per aprire una cartella nuova.
+  // A path typed in full should appear at the top even if not yet in the index:
+  // this is the fastest way to open a new folder.
   if (looksLikePath(trimmed)) {
     const key = normalizePath(trimmed)
     if (!results.some((r) => normalizePath(r.path) === key)) {

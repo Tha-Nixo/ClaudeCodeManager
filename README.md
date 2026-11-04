@@ -162,9 +162,9 @@ git push; git push origin v1.1.0
 ```
 
 Build artifacts land in **`release/v<version>/`**, one directory per release.
-Only files intended for publication stay in the root; `intermedi/` holds
-`win-unpacked` and intermediate build artifacts. Alongside sits `DA-CARICARE.md`,
-listing exactly what to drag into GitHub and pre-filled with release notes
+Only files intended for publication stay in the root; `intermediate/` holds
+`win-unpacked` and intermediate build artifacts. Alongside sits `TO-UPLOAD.md`,
+listing exactly what to upload to GitHub and pre-filled with release notes
 extracted from the changelog.
 
 `npm run release -- --tidy` cleans up and organizes the current version directory

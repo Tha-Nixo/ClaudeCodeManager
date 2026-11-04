@@ -3,18 +3,15 @@ import type { MonitorState } from '@shared/types'
 import { MonitorPanel } from './MonitorPanel'
 
 /**
- * Cassetto agganciato al bordo destro.
+ * Side drawer anchored to right window edge.
  *
- * La linguetta resta sempre visibile e ne comanda l'apertura. Il cassetto non
- * copre i riquadri: restringe il palco, così niente resta nascosto dietro.
- * È il motivo per cui il `ResizeObserver` del compositor basta da solo a
- * rifare le geometrie — non serve toccare il motore di layout.
+ * Toggling the drawer resizes the stage rather than covering panes.
  */
 
 interface DrawerProps {
   open: boolean
   onToggle: () => void
-  /** Il pannello è staccato in una finestra propria: il cassetto resta vuoto. */
+  /** True when detached into its own window. */
   detached: boolean
   onDetach: () => void
   onAttach: () => void
@@ -31,8 +28,6 @@ export function Drawer({
 }: DrawerProps): React.JSX.Element {
   const [state, setState] = useState<MonitorState | null>(null)
 
-  // Ci si iscrive solo quando il cassetto è aperto: a cassetto chiuso il main
-  // non deve rileggere i transcript ogni due secondi per nessuno.
   useEffect(() => {
     if (!open || detached) return
     let alive = true
@@ -52,7 +47,7 @@ export function Drawer({
       <button
         className={`cm-drawer__tab ${open ? 'cm-drawer__tab--open' : ''}`}
         onClick={toggle}
-        title={open ? 'Chiudi il pannello' : 'Apri il pannello di monitoraggio'}
+        title={open ? 'Close monitoring drawer' : 'Open monitoring drawer'}
         aria-expanded={open}
       >
         {open ? '›' : '‹'}
@@ -60,14 +55,14 @@ export function Drawer({
 
       <aside className={`cm-drawer ${open ? 'cm-drawer--open' : ''}`} aria-hidden={!open}>
         <header className="cm-drawer__head">
-          <span className="cm-drawer__title">Monitoraggio</span>
+          <span className="cm-drawer__title">Monitoring</span>
           <span className="cm-usage__spacer" />
           <button
             className="cm-iconbtn"
             title={
               detached
-                ? 'Riporta il pannello dentro la finestra'
-                : 'Stacca in una finestra sempre in primo piano'
+                ? 'Dock monitoring panel back to window'
+                : 'Detach into always-on-top window'
             }
             onClick={detached ? onAttach : onDetach}
           >
@@ -77,10 +72,10 @@ export function Drawer({
 
         {detached ? (
           <div className="cm-monitor__empty">
-            Il pannello è in una finestra separata.
+            Monitoring panel is running in a separate window.
             <br />
             <button className="cm-chip" onClick={onAttach}>
-              Riportalo qui
+              Dock here
             </button>
           </div>
         ) : (

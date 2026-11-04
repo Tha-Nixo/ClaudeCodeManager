@@ -5,11 +5,11 @@ import type { SshConnection } from '@shared/types'
 import { readJson, writeJsonAtomic } from './config'
 
 /**
- * Connessioni ssh salvate.
+ * Saved ssh connections.
  *
- * Qui non finisce mai una password: l'autenticazione è delegata interamente a
- * ssh, che usa le chiavi e l'agent già configurati sul sistema. Al massimo si
- * memorizza il PERCORSO di una chiave, mai il suo contenuto.
+ * Passwords never end up here: authentication is delegated entirely to
+ * ssh, using the keys and agent already configured on the system. At most,
+ * we store the PATH to a key file, never its contents.
  */
 
 interface ConnectionsState {
@@ -22,16 +22,16 @@ function file(): string {
   return join(app.getPath('userData'), 'connections.json')
 }
 
-/** Scarta i record incompleti: un host vuoto produrrebbe un comando ssh senza senso. */
+/** Discards incomplete records: an empty host would yield a meaningless ssh command. */
 function sanitize(raw: unknown): SshConnection | null {
   if (!raw || typeof raw !== 'object') return null
   const c = raw as Partial<SshConnection>
   if (typeof c.host !== 'string' || !c.host.trim()) return null
   if (typeof c.user !== 'string') return null
 
-  // Deve essere un intero: 22.7 passava il controllo precedente e veniva
-  // salvato, poi ssh rifiutava la sessione con «Bad port '22.7'» ad ogni
-  // tentativo, lasciando la porta sbagliata memorizzata.
+  // Must be an integer: 22.7 passed previous validation and was saved,
+  // causing ssh to reject sessions with "Bad port '22.7'" on every attempt,
+  // leaving the invalid port persisted.
   const port =
     typeof c.port === 'number' && Number.isInteger(c.port) && c.port >= 1 && c.port <= 65535
       ? c.port
@@ -62,7 +62,7 @@ function persist(): void {
   if (cached) writeJsonAtomic(file(), cached)
 }
 
-/** Connessioni ordinate per utilizzo recente, poi per nome. */
+/** Connections sorted by recent usage, then by name. */
 export function listConnections(): SshConnection[] {
   return [...load().connections].sort(
     (a, b) => b.lastUsed - a.lastUsed || a.name.localeCompare(b.name)
@@ -73,7 +73,7 @@ export function getConnection(id: string): SshConnection | null {
   return load().connections.find((c) => c.id === id) ?? null
 }
 
-/** Crea o aggiorna una connessione; ritorna la versione normalizzata. */
+/** Creates or updates a connection; returns the normalized version. */
 export function saveConnection(input: Partial<SshConnection>): SshConnection | null {
   const state = load()
   const existing = input.id ? state.connections.find((c) => c.id === input.id) : undefined
@@ -93,7 +93,7 @@ export function deleteConnection(id: string): void {
   persist()
 }
 
-/** Segna l'uso e memorizza l'ultima cartella remota aperta, che è quasi sempre la prossima. */
+/** Marks usage and stores the last remote directory opened, which is almost always the next one. */
 export function touchConnection(id: string, remotePath?: string): void {
   const state = load()
   const found = state.connections.find((c) => c.id === id)

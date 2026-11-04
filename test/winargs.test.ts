@@ -7,42 +7,42 @@ import { describe, it } from 'node:test'
 import { buildCommandLine, quoteNativeArg } from '../src/main/pty/winargs'
 
 /**
- * Regressione della issue #1.
+ * Regression test for issue #1.
  *
- * PowerShell 5.1 costruiva male la riga di comando degli eseguibili nativi:
- * cancellava i doppi apici e spezzava l'argomento sullo spazio successivo, in
- * silenzio. Un prompt come `crea il file "README.md"` arrivava a Claude
- * troncato e con un argomento posizionale in piu'.
+ * PowerShell 5.1 incorrectly formatted native executable command lines:
+ * it stripped double quotes and split arguments on the following whitespace
+ * silently. A prompt like `create file "README.md"` arrived at Claude
+ * truncated with an unintended extra positional argument.
  */
 
-/** Casi che hanno rotto qualcosa almeno una volta, piu' i loro vicini. */
+/** Cases that caused breakage at least once, plus neighboring variations. */
 const CORPUS = [
-  'semplice',
-  'con spazi normali',
-  'crea il file "README.md"',
-  'scrivi una funzione "ciao mondo"',
+  'simple',
+  'with standard spaces',
+  'create file "README.md"',
+  'write function "hello world"',
   'a"b',
   '"',
   '""',
-  'fine"',
-  '"inizio',
-  "apostrofo l'altro",
+  'end"',
+  '"start',
+  "apostrophe the'other",
   'backslash C:\\dir\\file',
   'C:\\dir\\',
-  'C:\\mia cartella\\',
+  'C:\\my folder\\',
   'C:\\\\',
-  'backslash poi apice C:\\dir\\"x"',
-  '\\"gia protetto\\"',
-  'punto e virgola; pipe | ampersand &&',
-  'dollaro $HOME backtick `whoami`',
-  'parentesi $(id) graffe ${x}',
+  'backslash then quote C:\\dir\\"x"',
+  '\\"already escaped\\"',
+  'semicolon; pipe | ampersand &&',
+  'dollar $HOME backtick `whoami`',
+  'parentheses $(id) braces ${x}',
   'unicode 日本語 emoji 🚀',
-  'percentuale %PATH% caret ^',
-  'newline\nin mezzo',
-  'tab\tin mezzo',
-  '   spazi ai bordi   ',
-  '-inizia-con-trattino',
-  '--sembra-un-flag',
+  'percent %PATH% caret ^',
+  'newline\nin middle',
+  'tab\tin middle',
+  '   surrounding spaces   ',
+  '-starts-with-hyphen',
+  '--looks-like-flag',
   '',
   'a'.repeat(500),
   '"'.repeat(10),
@@ -52,45 +52,44 @@ const CORPUS = [
   ' '
 ]
 
-describe('winargs: composizione della riga di comando', () => {
-  it('lascia intatto un argomento senza caratteri speciali', () => {
-    assert.equal(quoteNativeArg('semplice'), 'semplice')
+describe('winargs: command line composition', () => {
+  it('leaves an argument without special characters untouched', () => {
+    assert.equal(quoteNativeArg('simple'), 'simple')
     assert.equal(quoteNativeArg('--flag'), '--flag')
   })
 
-  it('avvolge fra apici quando ci sono spazi', () => {
-    assert.equal(quoteNativeArg('con spazi'), '"con spazi"')
+  it('wraps with quotes when spaces are present', () => {
+    assert.equal(quoteNativeArg('with spaces'), '"with spaces"')
   })
 
-  it('protegge i doppi apici', () => {
-    assert.equal(quoteNativeArg('dice "ciao"'), '"dice \\"ciao\\""')
+  it('escapes double quotes', () => {
+    assert.equal(quoteNativeArg('says "hello"'), '"says \\"hello\\""')
   })
 
-  it('raddoppia i backslash finali solo quando segue un apice di chiusura', () => {
-    // Senza spazi non viene avvolto: il backslash finale non precede nulla.
+  it('doubles trailing backslashes only when followed by a closing quote', () => {
+    // Without spaces it is not wrapped: trailing backslash precedes nothing.
     assert.equal(quoteNativeArg('C:\\dir\\'), 'C:\\dir\\')
-    // Con spazi viene avvolto, e il backslash proteggerebbe l'apice.
-    assert.equal(quoteNativeArg('C:\\mia dir\\'), '"C:\\mia dir\\\\"')
+    // With spaces it is wrapped, so backslash would escape the quote if not doubled.
+    assert.equal(quoteNativeArg('C:\\my dir\\'), '"C:\\my dir\\\\"')
   })
 
-  it('la stringa vuota diventa una coppia di apici', () => {
+  it('empty string becomes a pair of quotes', () => {
     assert.equal(quoteNativeArg(''), '""')
   })
 
-  it('unisce gli argomenti con uno spazio', () => {
-    assert.equal(buildCommandLine(['-n', 'due parole']), '-n "due parole"')
+  it('joins arguments with a space', () => {
+    assert.equal(buildCommandLine(['-n', 'two words']), '-n "two words"')
   })
 })
 
 /**
- * La prova che conta: la riga passa davvero per PowerShell e .NET, e il
- * processo figlio riceve esattamente quello che si voleva mandare.
+ * End-to-end check: line passes through PowerShell and .NET,
+ * ensuring the child process receives the exact arguments intended.
  *
- * Solo su Windows: altrove non c'e' ne' PowerShell 5.1 ne' il runtime C con
- * queste regole, e il difetto non puo' presentarsi.
+ * Windows only: PowerShell 5.1 and C runtime rules only exist on Windows.
  */
-describe('winargs: giro completo attraverso PowerShell e .NET', { skip: process.platform !== 'win32' }, () => {
-  it('consegna ogni argomento identico al processo figlio', () => {
+describe('winargs: roundtrip through PowerShell and .NET', { skip: process.platform !== 'win32' }, () => {
+  it('delivers every argument identically to child process', () => {
     const dir = mkdtempSync(join(tmpdir(), 'cm-args-'))
 
     const echo = join(dir, 'echo.cjs')
@@ -99,8 +98,8 @@ describe('winargs: giro completo attraverso PowerShell e .NET', { skip: process.
     const cmdline = join(dir, 'cmdline.txt')
     writeFileSync(cmdline, buildCommandLine([echo, ...CORPUS]), 'utf8')
 
-    // Stesso percorso del bootstrap: la riga arriva da una variabile, e viene
-    // consegnata a ProcessStartInfo senza che PowerShell la rielabori.
+    // Same path as bootstrap: string comes from a variable and is delivered
+    // to ProcessStartInfo without PowerShell re-parsing it.
     const ps1 = join(dir, 'run.ps1')
     writeFileSync(
       ps1,
@@ -125,18 +124,18 @@ describe('winargs: giro completo attraverso PowerShell e .NET', { skip: process.
       { encoding: 'utf8', timeout: 60_000 }
     )
 
-    const ricevuti = JSON.parse(stdout.trim().replace(/^\uFEFF/, '')) as string[]
+    const received = JSON.parse(stdout.trim().replace(/^\uFEFF/, '')) as string[]
 
     assert.equal(
-      ricevuti.length,
+      received.length,
       CORPUS.length,
-      `numero di argomenti diverso: attesi ${CORPUS.length}, ricevuti ${ricevuti.length}`
+      `different argument count: expected ${CORPUS.length}, received ${received.length}`
     )
     for (let i = 0; i < CORPUS.length; i++) {
       assert.equal(
-        ricevuti[i],
+        received[i],
         CORPUS[i],
-        `argomento ${i} deformato: inviato ${JSON.stringify(CORPUS[i])}, ricevuto ${JSON.stringify(ricevuti[i])}`
+        `argument ${i} deformed: sent ${JSON.stringify(CORPUS[i])}, received ${JSON.stringify(received[i])}`
       )
     }
   })

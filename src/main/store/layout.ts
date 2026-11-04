@@ -4,11 +4,11 @@ import type { PersistedLayout } from '@shared/types'
 import { readJson, writeJsonAtomic } from './config'
 
 /**
- * Layout salvato fra un avvio e l'altro.
+ * Persisted layout across app launches.
  *
- * Il renderer invia lo stato ad ogni cambiamento; qui si accumula e si scrive
- * al più una volta ogni SAVE_DEBOUNCE_MS. Senza il ritardo, trascinare un
- * canale produrrebbe decine di scritture al secondo.
+ * The renderer sends state on every change; here it is debounced and written
+ * at most once every SAVE_DEBOUNCE_MS. Without debouncing, dragging a gutter
+ * would produce dozens of disk writes per second.
  */
 
 const SAVE_DEBOUNCE_MS = 800
@@ -31,10 +31,10 @@ export function saveLayout(layout: PersistedLayout): void {
 }
 
 /**
- * Il file su disco è stato scritto dal renderer, può essere di una versione
- * precedente o modificato a mano: ogni riquadro viene validato prima di
- * restituirlo. Un `cwd` mancante farebbe fallire l'intero avvio più a valle,
- * lasciando l'app su uno stage vuoto.
+ * The file on disk was written by the renderer, may belong to an earlier
+ * version, or may have been edited by hand: each pane is validated before
+ * returning. A missing `cwd` would crash app launch downstream,
+ * leaving an empty stage.
  */
 export function loadLayout(): PersistedLayout | null {
   const stored = readJson<PersistedLayout>(file())
@@ -56,7 +56,7 @@ export function loadLayout(): PersistedLayout | null {
   return { ...stored, panes }
 }
 
-/** Scrittura immediata: da usare alla chiusura, quando non c'è più tempo. */
+/** Immediate write: use on app shutdown when time has run out. */
 export function flushLayout(): void {
   if (timer) {
     clearTimeout(timer)

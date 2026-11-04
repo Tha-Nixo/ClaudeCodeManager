@@ -26,13 +26,11 @@ import type {
 } from '@shared/types'
 
 /**
- * Superficie esposta al renderer. Volutamente ristretta: nessun accesso al
- * filesystem né a node-pty, solo questi canali. Il preload gira in sandbox,
- * quindi qui dentro si può importare soltanto da 'electron'.
+ * Surface exposed to the renderer. Intentionally restricted: no direct filesystem
+ * or node-pty access. The preload script runs in a sandbox, importing only from 'electron'.
  *
- * L'annotazione `: CmApi` fa sì che una divergenza fra contratto e
- * implementazione diventi un errore di compilazione invece di un `undefined`
- * a runtime dentro il renderer.
+ * Annotating with `: CmApi` ensures any divergence between contract and implementation
+ * is caught as a compile-time TypeScript error.
  */
 const api: CmApi = {
   pty: {

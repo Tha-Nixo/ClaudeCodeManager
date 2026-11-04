@@ -40,10 +40,10 @@ import {
 } from './terminal/registry'
 import { Drawer } from './monitor/Drawer'
 
-/** Stati che meritano una pastiglia nella barra: gli altri non chiedono nulla. */
+/** Statuses that warrant a status bar badge: others require no user action. */
 const UPDATE_VISIBLE = new Set(['available', 'downloading', 'ready'])
 
-/** Deve combaciare con la transizione di .cm-drawer nel foglio di stile. */
+/** Must match the transition duration of .cm-drawer in stylesheet. */
 const DRAWER_MS = 220
 
 export default function App(): React.JSX.Element {
@@ -57,21 +57,19 @@ export default function App(): React.JSX.Element {
   const [update, setUpdate] = useState<UpdateState | null>(null)
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [detached, setDetached] = useState(false)
-  /** Riquadro con la barra di ricerca aperta, se ce n'è uno. */
+  /** Pane with open search bar, if any. */
   const [searchPaneId, setSearchPaneId] = useState<string | null>(null)
 
-  // Un overlay aperto disattiva le scorciatoie del compositor. Il ref serve
-  // perché il gestore tastiera è registrato una volta sola e non vedrebbe
-  // i valori aggiornati dello stato.
+  // An open overlay disables compositor shortcuts. Ref is needed because
+  // keyboard handler is registered once and would otherwise close over stale state.
   const overlayOpenRef = useRef(false)
-  // La barra di ricerca conta come overlay: il suo campo di testo deve
-  // ricevere i tasti, e il gestore del compositor è in fase di capture su
-  // window, quindi arriverebbe comunque prima dell'input.
+  // Search bar counts as an overlay: its text input must receive keystrokes,
+  // and compositor handler runs in capture phase on window, so it would
+  // otherwise intercept input beforehand.
   overlayOpenRef.current = selectorOpen || usageOpen || settingsOpen || searchPaneId !== null
 
-  // Geometrie correnti dei riquadri. Sono un ref e non uno stato: servono solo
-  // dentro i gestori (focus direzionale, passaggio a flottante) e non devono
-  // provocare render.
+  // Current pane geometries. Stored in a ref rather than state: only needed
+  // inside event handlers (directional focus, float toggling) without triggering renders.
   const rectsRef = useRef<Record<string, Rect>>({})
   const layoutRef = useRef(layout)
   const sessionsRef = useRef(sessions)
@@ -79,14 +77,14 @@ export default function App(): React.JSX.Element {
   sessionsRef.current = sessions
 
   const bootstrapped = useRef(false)
-  /** Alzato quando il ripristino ha finito: da lì in poi si può salvare. */
+  /** Set to true when restoration finishes: saving is enabled from this point forward. */
   const restoreDone = useRef(false)
 
   const patchSession = useCallback((paneId: string, patch: Partial<SessionMeta>) => {
     setSessions((prev) => (prev[paneId] ? { ...prev, [paneId]: { ...prev[paneId], ...patch } } : prev))
   }, [])
 
-  // --- Creazione e chiusura sessioni ----------------------------------------
+  // --- Session creation and cleanup -----------------------------------------
 
   const newSession = useCallback((opts: LaunchOptions, dir: SplitDir) => {
     const paneId = crypto.randomUUID()
@@ -98,14 +96,13 @@ export default function App(): React.JSX.Element {
     setLayout((prev) => {
       const next = addPane(prev, paneId, dir)
 
-      // Dividere all'infinito produceva riquadri da 4 px e poi da 0: il
-      // processo partiva e consumava token, ma il terminale non era né
-      // visibile né raggiungibile. Quando lo spazio è finito la sessione nasce
-      // flottante — piccola ma utilizzabile — invece di nascere invisibile.
+      // Unbounded splitting produced 4px and then 0px panes: processes launched
+      // and consumed tokens, but terminal was neither visible nor reachable.
+      // When space is exhausted, the session spawns floating—small but usable—rather than invisible.
       const rect = prev.focused ? rectsRef.current[prev.focused] : null
       if (!rect || canSplit(rect, dir)) return next
 
-      // Scostata rispetto al riquadro di partenza, così non ci finisce sopra.
+      // Offset from origin pane so it does not directly overlap it.
       return toggleFloat(next, paneId, {
         x: Math.max(0, rect.x + 40),
         y: Math.max(0, rect.y + 40),
@@ -115,7 +112,7 @@ export default function App(): React.JSX.Element {
     })
   }, [])
 
-  /** Un riquadro largo si divide in verticale, uno alto in orizzontale. */
+  /** A wide pane splits vertically, a tall pane splits horizontally. */
   const naturalSplit = useCallback((paneId: string | null): SplitDir => {
     const rect = paneId ? rectsRef.current[paneId] : null
     if (!rect) return 'h'
@@ -133,8 +130,8 @@ export default function App(): React.JSX.Element {
           model: config?.launchDefaults.model,
           effort: config?.launchDefaults.effort,
           permissionMode: config?.launchDefaults.permissionMode,
-          // Il nome compare nel prompt box di Claude e in
-          // ~/.claude/sessions/<pid>.json: serve a riconoscere la sessione.
+          // Name appears in Claude prompt box and ~/.claude/sessions/<pid>.json:
+          // helps identify the session.
           name: basename(cwd)
         },
         dir ?? naturalSplit(focused)
@@ -163,7 +160,7 @@ export default function App(): React.JSX.Element {
         .then((result) =>
           patchSession(paneId, {
             status: 'running',
-            // Serve a correlare il riquadro col registro delle sessioni vive.
+            // Correlates pane with live session registry.
             claudeSessionId: result?.claudeSessionId || null
           })
         )
@@ -177,15 +174,15 @@ export default function App(): React.JSX.Element {
     [patchSession]
   )
 
-  // --- Azioni da tastiera ---------------------------------------------------
+  // --- Keyboard actions -----------------------------------------------------
 
   /**
-   * Riquadri con la geometria corrente, per il calcolo del vicino.
+   * Panes with current geometry, for neighbor calculation.
    *
-   * Il flag `hidden` deve riflettere lo zoom: sotto zoom gli altri riquadri
-   * conservano il proprio rettangolo (per non innescare un resize del PTY),
-   * quindi senza questo il fuoco si sposterebbe su un riquadro invisibile e
-   * un Alt+W successivo chiuderebbe una sessione che l'utente non vede.
+   * The `hidden` flag must reflect zoom: under zoom other panes retain
+   * their bounds (to prevent triggering a PTY resize), so without this
+   * focus would shift to an invisible pane and a subsequent Alt+W would
+   * close a session the user cannot see.
    */
   const paneRects = useCallback(() => {
     const layout = layoutRef.current
@@ -216,8 +213,8 @@ export default function App(): React.JSX.Element {
       if (!current) return
       const tiled = collectLeaves(layout.root)
       if (!tiled.includes(current)) return
-      // Scambiare di posto due riquadri mentre uno zoom nasconde tutto non
-      // produce nulla di visibile: si rimanderebbe l'effetto all'uscita.
+      // Swapping two panes while zoom obscures everything produces no visible change:
+      // it would defer the effect until exiting zoom.
       if (layout.zoomed !== null) return
 
       const target = paneInDirection(
@@ -254,8 +251,8 @@ export default function App(): React.JSX.Element {
           if (!focused) return
           const rect = rectsRef.current[focused]
           if (!rect) return
-          // Passando a flottante si rimpicciolisce un po', così si vede subito
-          // che il riquadro si è staccato dal mosaico.
+          // Slightly shrink when converting to floating so it is immediately obvious
+          // that the pane has detached from the tiling layout.
           const target = isFloating(layoutRef.current, focused)
             ? rect
             : { x: rect.x + 24, y: rect.y + 24, w: Math.max(320, rect.w * 0.7), h: Math.max(200, rect.h * 0.7) }
@@ -299,8 +296,8 @@ export default function App(): React.JSX.Element {
           window.cm.win.quit()
           return
         case 'search-pane':
-          // La ricerca riguarda un terminale preciso: senza riquadro attivo
-          // non c'è niente in cui cercare.
+          // Search targets a specific terminal: without an active pane,
+          // there is nothing to search.
           setSearchPaneId((current) => (current ? null : layoutRef.current.focused))
           return
         case 'toggle-usage':
@@ -315,8 +312,8 @@ export default function App(): React.JSX.Element {
             const target = allPanes(layoutRef.current)[Number(match[1]) - 1]
             if (!target) return
             setLayout((prev) =>
-              // Saltare a un riquadro nascosto dallo zoom non mostrerebbe
-              // nulla: si esce dallo zoom, che è ciò che l'utente intende.
+              // Jumping to a pane hidden by zoom would display nothing:
+              // exit zoom mode first, matching user intent.
               setFocus(prev.zoomed !== null && prev.zoomed !== target ? { ...prev, zoomed: null } : prev, target)
             )
           }
@@ -326,11 +323,11 @@ export default function App(): React.JSX.Element {
     [closePane, focusDir, movePane, newSessionHere]
   )
 
-  // --- Effetti --------------------------------------------------------------
+  // --- Effects ---------------------------------------------------------------
 
-  // Il tema si applica appena la configurazione arriva e a ogni cambio.
-  // Il catalogo viene riletto ogni volta perché un tema personale può essere
-  // stato modificato sul disco mentre l'app era aperta.
+  // Theme applies as soon as config arrives and on every change.
+  // Catalog is re-read each time because a custom theme may have been modified
+  // on disk while the app remained running.
   useEffect(() => {
     if (!config) return
     void window.cm.theme.catalog().then((catalog) => {
@@ -352,11 +349,10 @@ export default function App(): React.JSX.Element {
   }, [patchSession])
 
   /**
-   * Lo stato dei riquadri viene dal registro che Claude Code stesso mantiene
-   * in ~/.claude/sessions/: è autorevole e non richiede di interpretare
-   * l'output del terminale. Una sessione ancora assente dal registro (Claude
-   * sta partendo, o è fermo al dialogo di fiducia) resta 'running': assente
-   * non vuol dire morta.
+   * Pane status originates from the registry Claude Code maintains in
+   * ~/.claude/sessions/: authoritative without parsing terminal stdout.
+   * A session not yet present in the registry (Claude is starting, or waiting
+   * at the trust prompt) remains 'running': absent does not mean exited.
    */
   const applyLive = useCallback(
     (liveSessions: LiveSession[]) => {
@@ -366,18 +362,16 @@ export default function App(): React.JSX.Element {
         const next: Record<string, SessionMeta> = {}
 
         for (const [paneId, meta] of Object.entries(prev)) {
-          // Un riquadro la cui shell è morta non torna vivo per un record
-          // rimasto indietro nel registro.
+          // A pane whose shell has exited does not revive from a stale registry record.
           if (meta.status === 'exited' || meta.status === 'error' || !meta.claudeSessionId) {
             next[paneId] = meta
             continue
           }
 
           const live = byId.get(meta.claudeSessionId)
-          // Sparita dal registro significa che quel processo claude è finito
-          // (tipicamente con /exit, lasciando viva la shell). Conservare
-          // l'ultimo stato lascerebbe il riquadro "al lavoro" per sempre:
-          // la shell c'è ancora, quindi lo stato giusto è "pronta".
+          // Disappeared from registry means that claude process ended
+          // (typically via /exit, leaving the shell alive). Keeping last state
+          // would leave the pane "working" forever: shell is still alive, so 'running' is correct.
           const status = live ? paneStatusFromLive(live.status) : 'running'
           const waitingFor = live?.waitingFor ?? null
 
@@ -400,16 +394,15 @@ export default function App(): React.JSX.Element {
     return window.cm.claude.onLiveChange(applyLive)
   }, [applyLive])
 
-  // Le personalizzazioni si sovrappongono alla mappa predefinita. Ricalcolata
-  // solo quando cambiano davvero: reinstallare l'ascoltatore ad ogni render
-  // non serve a niente.
+  // Custom bindings overlay the default map. Recomputed only when changed:
+  // reinstalling the event listener on every render is wasteful.
   const { keymap, problems: keymapProblems } = useMemo(
     () => resolveKeymap(config?.keymap),
     [config?.keymap]
   )
 
-  // Con un overlay aperto il compositor non intercetta nulla: le frecce e
-  // l'Invio devono restare all'overlay.
+  // When an overlay is open, compositor intercepts nothing: arrow keys and Enter
+  // belong to the overlay.
   useEffect(
     () =>
       installKeyHandler({
@@ -420,8 +413,8 @@ export default function App(): React.JSX.Element {
     [runAction, keymap]
   )
 
-  // Esc chiude gli overlay. Il selettore lo gestisce da sé perché ha il fuoco
-  // sul proprio campo di ricerca; gli altri pannelli no, quindi serve qui.
+  // Esc closes overlays. The selector manages this itself because it focuses its input;
+  // other panels do not, so it is handled here.
   useEffect(() => {
     if (!usageOpen && !settingsOpen) return
     const onKey = (e: KeyboardEvent): void => {
@@ -434,14 +427,13 @@ export default function App(): React.JSX.Element {
     return () => window.removeEventListener('keydown', onKey, { capture: true })
   }, [usageOpen, settingsOpen])
 
-  // Il fuoco della tastiera segue il riquadro attivo, ma non glielo si ruba
-  // mentre il selettore è aperto: scriverebbe nel terminale sottostante.
+  // Keyboard focus follows active pane, but is not stolen while selector is open:
+  // otherwise keystrokes would route to the underlying terminal.
   useEffect(() => {
     if (layout.focused && !selectorOpen) focusPane(layout.focused)
   }, [layout.focused, selectorOpen])
 
-  // Avvio: si prova a ripristinare il layout precedente, altrimenti si apre
-  // una sessione sulla cartella predefinita.
+  // Startup: attempts to restore previous layout, otherwise spawns a session in default directory.
   useEffect(() => {
     if (bootstrapped.current) return
     bootstrapped.current = true
@@ -461,9 +453,9 @@ export default function App(): React.JSX.Element {
           return
         }
       } catch (err) {
-        // Un layout.json corrotto o un canale che fallisce non devono lasciare
-        // l'app su uno stage vuoto: si ricade sulla sessione predefinita.
-        console.error('ripristino fallito, avvio sulla cartella predefinita', err)
+        // A corrupt layout.json or failing channel must not leave the app
+        // with an empty stage: fall back to default session.
+        console.error('restore failed, starting with default directory', err)
       } finally {
         restoreDone.current = true
       }
@@ -484,19 +476,17 @@ export default function App(): React.JSX.Element {
     })()
   }, [newSession])
 
-  // Salvataggio del layout ad ogni cambiamento. Il main accorpa le scritture,
-  // quindi trascinare un canale non produce decine di scritture su disco.
+  // Saves layout on every change. Main process debounces writes,
+  // so dragging a gutter does not spam disk writes.
   useEffect(() => {
-    // La guardia vale solo finché il ripristino non è concluso: un salvataggio
-    // durante quella finestra cancellerebbe il file che si sta leggendo. Dopo,
-    // anche "nessun riquadro" è uno stato legittimo da persistere, altrimenti
-    // chiudere tutti i riquadri e uscire riaprirebbe quelli di prima.
+    // Guard applies only while restore is in progress: saving during that window
+    // would overwrite the file being read. Afterwards, "no panes" is a valid state
+    // to persist, otherwise closing all panes and exiting would resurrect them on next launch.
     if (!restoreDone.current) return
     window.cm.layout.save(toPersisted(layout, sessions))
   }, [layout, sessions])
 
-  // Costo di oggi nella barra superiore. La scansione è incrementale, quindi
-  // un aggiornamento al minuto costa quasi nulla.
+  // Today's cost in top bar. Scanning is incremental, so updating once per minute is cheap.
   useEffect(() => {
     const refresh = (): void => {
       void window.cm.usage
@@ -508,7 +498,7 @@ export default function App(): React.JSX.Element {
     return () => clearInterval(id)
   }, [])
 
-  // Lo stato degli aggiornamenti arriva dal main, che possiede il controllo.
+  // Update state comes from main process, which manages checks.
   useEffect(() => {
     void window.cm.update.state().then(setUpdate)
     return window.cm.update.onChange(setUpdate)
@@ -519,9 +509,8 @@ export default function App(): React.JSX.Element {
     return window.cm.monitor.onDetachedChange(setDetached)
   }, [])
 
-  // Il clic su una notifica deve atterrare sulla sessione che ha chiesto
-  // qualcosa, non genericamente sull'app: il fuoco va anche al terminale, così
-  // si può rispondere subito senza un clic in più.
+  // Clicking a notification lands on the session requesting input, not generically on app:
+  // focus shifts to terminal so user can respond immediately without an extra click.
   useEffect(
     () =>
       window.cm.notify.onFocusPane((paneId) => {
@@ -531,16 +520,14 @@ export default function App(): React.JSX.Element {
     []
   )
 
-  // Memorizzato: `allPanes` crea un array nuovo ad ogni chiamata, e usato
-  // come dipendenza di un effetto lo farebbe scattare ad ogni render.
+  // Memoized: `allPanes` allocates a new array each call, which would re-trigger effects on every render.
   const paneOrder = useMemo(() => allPanes(layout), [layout])
   const paneCount = paneOrder.length
 
   /**
-   * I riquadri vivono qui, ma il pannello di monitoraggio può stare in
-   * un'altra finestra che non vede questo stato: si pubblica al main, che li
-   * ritrasmette a chiunque guardi. Si manda solo quello che serve al pannello,
-   * non l'intero SessionMeta.
+   * Panes live here, but monitoring panel can live in another window
+   * without direct access to this state: published to main, which broadcasts to subscribers.
+   * Sends only what monitor panel requires, not full SessionMeta.
    */
   useEffect(() => {
     window.cm.monitor.publish(
@@ -552,8 +539,8 @@ export default function App(): React.JSX.Element {
           index: i + 1,
           label: meta?.title ?? basename(remote ? remote.path : (meta?.cwd ?? '')),
           where: remote ? `${remote.user}@${remote.host}:${remote.path}` : (meta?.cwd ?? ''),
-          // Una sessione remota scrive il proprio stato sul server: dire
-          // "pronta" sarebbe inventare, come nell'intestazione del riquadro.
+          // A remote session writes state on the server: reporting "ready"
+          // would be guesswork, as in the pane header.
           status: remote && meta?.status === 'running' ? 'remote' : (meta?.status ?? 'starting'),
           waitingFor: meta?.waitingFor ?? null,
           remote: Boolean(remote),
@@ -564,11 +551,10 @@ export default function App(): React.JSX.Element {
   }, [paneOrder, sessions])
 
   /**
-   * Aprire e chiudere il cassetto restringe il palco, e il ResizeObserver del
-   * compositor scatterebbe ad ogni fotogramma dell'animazione: sarebbe una
-   * dozzina di pty.resize per gesto, con Claude Code che ridisegna ogni volta.
-   * Si congela la misurazione per la durata della transizione, esattamente
-   * come per le animazioni di layout.
+   * Opening and closing drawer resizes stage, which would trigger compositor
+   * ResizeObserver on every frame: causing a dozen pty.resize calls per gesture,
+   * with Claude Code redrawing each time. Freeze measurement during transition,
+   * matching layout animations.
    */
   useEffect(() => {
     setFitSuspendedAll(true)
@@ -581,15 +567,15 @@ export default function App(): React.JSX.Element {
       <header className="cm-topbar">
         <span className="cm-topbar__brand">ClaudeManager</span>
         <span className="cm-topbar__count">
-          {paneCount} {paneCount === 1 ? 'sessione' : 'sessioni'}
+          {paneCount} {paneCount === 1 ? 'session' : 'sessions'}
         </span>
         {usageBadge && (
           <button
             className="cm-topbar__usage"
-            title="Utilizzo di oggi · Alt+U per il dettaglio"
+            title="Today's usage · Alt+U for details"
             onClick={() => setUsageOpen(true)}
           >
-            {formatCost(usageBadge.cost)} oggi · {formatTokens(usageBadge.tokens)} tok
+            {formatCost(usageBadge.cost)} today · {formatTokens(usageBadge.tokens)} tok
           </button>
         )}
         {update && UPDATE_VISIBLE.has(update.status) && (
@@ -597,50 +583,49 @@ export default function App(): React.JSX.Element {
             className={`cm-topbar__update ${update.status === 'downloading' ? '' : 'cm-topbar__update--ready'}`}
             title={
               update.status === 'ready'
-                ? `La versione ${update.version} è pronta. Verrà installata alla chiusura, oppure apri le impostazioni per riavviare adesso.`
+                ? `Version ${update.version} is ready. It will be installed on exit, or open Settings to restart now.`
                 : update.status === 'available'
-                  ? `La versione ${update.version} è uscita. Questa copia va aggiornata a mano.`
-                  : 'Scaricamento della versione nuova in corso'
+                  ? `Version ${update.version} is available. This portable build must be updated manually.`
+                  : 'Downloading update...'
             }
-            // Nessuna azione irreversibile da qui: riavviare chiude tutte le
-            // sessioni, quindi la pastiglia porta alle impostazioni e la
-            // decisione si prende là.
+            // No irreversible actions here: restarting terminates all sessions,
+            // so clicking the badge opens Settings where the user can choose.
             onClick={() => update.status !== 'downloading' && setSettingsOpen(true)}
           >
             {update.status === 'downloading'
               ? `↓ ${update.percent ?? 0}%`
-              : `↑ ${update.version} ${update.status === 'ready' ? 'pronta' : 'disponibile'}`}
+              : `↑ ${update.version} ${update.status === 'ready' ? 'ready' : 'available'}`}
           </button>
         )}
         <span className="cm-topbar__hint">
-          <span className="cm-kbd">Alt+N</span> nuova ·{' '}
-          <span className="cm-kbd">Alt+←→↑↓</span> fuoco ·{' '}
-          <span className="cm-kbd">Alt+F</span> flottante ·{' '}
+          <span className="cm-kbd">Alt+N</span> new ·{' '}
+          <span className="cm-kbd">Alt+←→↑↓</span> focus ·{' '}
+          <span className="cm-kbd">Alt+F</span> float ·{' '}
           <span className="cm-kbd">Alt+Z</span> zoom ·{' '}
-          <span className="cm-kbd">Alt+W</span> chiudi
+          <span className="cm-kbd">Alt+W</span> close
         </span>
         <div className="cm-topbar__spacer" />
         <div className="cm-topbar__buttons">
           <button
             className="cm-iconbtn"
-            title="Impostazioni (Alt+,)"
+            title="Settings (Alt+,)"
             onClick={() => setSettingsOpen(true)}
           >
             ⚙
           </button>
-          <button className="cm-iconbtn" title="Riduci a icona" onClick={() => window.cm.win.minimize()}>
+          <button className="cm-iconbtn" title="Minimize" onClick={() => window.cm.win.minimize()}>
             ─
           </button>
           <button
             className="cm-iconbtn"
-            title="Schermo intero (F11)"
+            title="Fullscreen (F11)"
             onClick={() => window.cm.win.toggleFullscreen()}
           >
             ▢
           </button>
           <button
             className="cm-iconbtn cm-iconbtn--danger"
-            title="Esci (Ctrl+Shift+Q)"
+            title="Quit (Ctrl+Shift+Q)"
             onClick={() => window.cm.win.quit()}
           >
             ✕

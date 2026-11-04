@@ -42,8 +42,8 @@ import { check, currentState, installNow, releaseUrl } from './update/updater'
 import { summarize } from './usage/scanner'
 
 /**
- * Unico punto di contatto fra renderer e main. Ogni canale è registrato qui
- * e ha una controparte tipizzata in src/preload/index.ts.
+ * Single point of contact between renderer and main. Every channel is registered here
+ * and has a typed counterpart in src/preload/index.ts.
  */
 export function registerIpc(
   ptys: PtyManager,
@@ -55,18 +55,18 @@ export function registerIpc(
   ipcMain.handle('pty:create', (_e, opts: LaunchOptions) => {
     const result = ptys.create(opts)
     if (opts.remote) {
-      // Per un riquadro remoto la cartella locale non significa niente: quello
-      // che vale la pena ricordare e' la connessione con la sua ultima cartella.
+      // For a remote pane, local folder has no meaning: what is worth
+      // remembering is the connection with its last remote path.
       touchConnection(opts.remote.connectionId, opts.remote.path)
     } else {
-      // La cartella entra fra i recenti solo se il processo e' davvero partito.
+      // The folder only enters recents if the process actually launched.
       touchRecent(result.cwd)
       invalidateIndex()
     }
     return result
   })
 
-  // write e resize sono ad alta frequenza: fire-and-forget, niente round trip.
+  // write and resize are high frequency: fire-and-forget, no round trip.
   ipcMain.on('pty:write', (_e, id: string, data: string) => ptys.write(id, data))
   ipcMain.on('pty:resize', (_e, id: string, cols: number, rows: number) =>
     ptys.resize(id, cols, rows)
@@ -77,7 +77,7 @@ export function registerIpc(
   })
   ipcMain.handle('pty:scrollback', (_e, id: string) => ptys.scrollback(id))
 
-  // Inoltro degli eventi del PTY verso il renderer.
+  // Forward PTY events to the renderer.
   ptys.on('data', (id, data) => {
     getWindow()?.webContents.send('pty:data', { id, data })
   })
@@ -85,16 +85,16 @@ export function registerIpc(
     getWindow()?.webContents.send('pty:exit', { id, exitCode, signal })
   })
 
-  // --- Temi -----------------------------------------------------------------
+  // --- Themes -----------------------------------------------------------------
 
   ipcMain.handle('theme:catalog', () => loadThemes())
   ipcMain.handle('theme:openDir', async () => {
-    // Aprire la cartella e' il modo piu' diretto per far capire dove vanno i
-    // file dei temi, molto piu' che scriverne il percorso.
+    // Opening the folder is the most direct way to show where theme files go,
+    // far clearer than just printing the path.
     await shell.openPath(ensureThemesDir())
   })
 
-  // --- Indici su disco ------------------------------------------------------
+  // --- Disk indices ------------------------------------------------------
 
   ipcMain.handle('index:status', () => allStatuses())
 
@@ -102,8 +102,8 @@ export function registerIpc(
     const result = await rescan({
       kind,
       roots: getConfig().scanRoots,
-      // Lo stato viaggia mentre la scansione procede: una scansione dell'intero
-      // disco dura minuti e senza avanzamento sembrerebbe bloccata.
+      // Status is streamed as the scan proceeds: scanning the full disk takes
+      // minutes and without progress would appear frozen.
       onUpdate: (s) => getWindow()?.webContents.send('index:progress', s)
     })
     invalidateIndex()
@@ -112,7 +112,7 @@ export function registerIpc(
 
   ipcMain.on('index:cancel', (_e, kind: IndexKind) => cancelIndex(kind))
 
-  // --- Utilizzo -------------------------------------------------------------
+  // --- Usage -------------------------------------------------------------
 
   ipcMain.handle('usage:summary', () => summarize())
 
@@ -122,13 +122,13 @@ export function registerIpc(
     try {
       const stored = loadLayout()
       if (!stored) return null
-      // Un id salvato non basta: il transcript deve esistere davvero, altrimenti
-      // il ripristino avvierebbe claude --resume su una sessione che Claude Code
-      // non conosce e il riquadro nascerebbe con un errore invece che pronto.
+      // A stored id is not enough: the transcript must actually exist, otherwise
+      // resuming would launch claude --resume on a session Claude Code does not know,
+      // starting the pane with an error instead of ready.
       //
-      // Per i riquadri remoti il transcript sta sul server, quindi il controllo
-      // e' una chiamata ssh: si fanno in parallelo e con un tetto di tempo, cosi'
-      // un server spento ritarda l'avvio di qualche secondo invece di impedirlo.
+      // For remote panes, the transcript is on the server, so checking requires
+      // an ssh call: these run in parallel with a timeout, so an offline server
+      // delays startup by a few seconds instead of blocking it entirely.
       const panes = await Promise.all(
         stored.panes.map(async (pane) => {
           const id = typeof pane.claudeSessionId === 'string' ? pane.claudeSessionId : null
@@ -144,14 +144,14 @@ export function registerIpc(
       )
       return { ...stored, panes }
     } catch (err) {
-      // Meglio partire sulla cartella predefinita che non partire affatto.
-      console.error('lettura del layout fallita', err)
+      // Better to start in the default folder than fail to launch entirely.
+      console.error('Failed to read layout', err)
       return null
     }
   })
   ipcMain.on('layout:save', (_e, layout: PersistedLayout) => saveLayout(layout))
 
-  // --- Sessioni Claude ------------------------------------------------------
+  // --- Claude sessions ------------------------------------------------------
 
   ipcMain.handle('claude:live', () => live.sessions)
   ipcMain.handle('claude:sessionsFor', (_e, folder: string) => sessionsForFolder(folder))
@@ -161,12 +161,11 @@ export function registerIpc(
     onLiveChange(sessions, getWindow)
   })
 
-  // --- Pannello di monitoraggio ---------------------------------------------
+  // --- Monitoring panel ---------------------------------------------
 
   ipcMain.on('monitor:panes', (_e, panes: MonitorPane[]) => {
     publishPanes(panes)
-    // Le notifiche nominano il riquadro e vi portano al clic: hanno bisogno
-    // dello stesso elenco.
+    // Notifications name the pane and navigate on click: they need the same list.
     setKnownPanes(panes)
   })
   ipcMain.handle('monitor:subscribe', (e) => subscribe(e.sender))
@@ -175,14 +174,13 @@ export function registerIpc(
   ipcMain.handle('monitor:detach', () => openMonitorWindow(!app.isPackaged))
   ipcMain.handle('monitor:attach', () => closeMonitorWindow())
 
-  // L'annuncio parte dalla finestra stessa, non dai due comandi: cosi' vale
-  // anche per la chiusura diretta con la X, che prima non diceva niente e
-  // lasciava il cassetto convinto che il pannello fosse ancora altrove.
+  // The announcement originates from the window itself, not just the two commands:
+  // this covers direct closing with the X button as well.
   setDetachedListener((detached) =>
     getWindow()?.webContents.send('monitor:detached-change', detached)
   )
 
-  // --- Aggiornamenti --------------------------------------------------------
+  // --- Updates --------------------------------------------------------
 
   ipcMain.handle('update:state', () => currentState())
   ipcMain.handle('update:check', () => check())
@@ -194,7 +192,7 @@ export function registerIpc(
     await shell.openExternal(releaseUrl())
   })
 
-  // --- Connessioni remote ---------------------------------------------------
+  // --- Remote connections ---------------------------------------------------
 
   ipcMain.handle('ssh:list', () => listConnections())
   ipcMain.handle('ssh:save', (_e, input: Partial<SshConnection>) => saveConnection(input))
@@ -209,7 +207,7 @@ export function registerIpc(
     listRemoteSessions(target, path)
   )
 
-  // --- Cartelle -------------------------------------------------------------
+  // --- Folders -------------------------------------------------------------
 
   ipcMain.handle('folders:search', (_e, query: string) => searchFolders(query))
   ipcMain.handle('folders:list', (_e, path: string) => listDir(path))
@@ -231,10 +229,10 @@ export function registerIpc(
     return next
   })
 
-  // Lo stato iniziale va allineato subito: la preferenza è già su disco.
+  // Align initial state immediately: the preference is already on disk.
   setNotificationsEnabled(getConfig().notifyOnWaiting)
 
-  // --- Finestra -------------------------------------------------------------
+  // --- Window -------------------------------------------------------------
 
   ipcMain.on('win:toggle-fullscreen', () => {
     const win = getWindow()

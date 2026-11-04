@@ -1,11 +1,10 @@
 /**
- * Corrispondenza approssimata in stile fzf, tarata sui percorsi.
+ * Approximate fzf-style matching tuned for file paths.
  *
- * Il criterio non e' "quanti caratteri combaciano" ma DOVE combaciano: un
- * riscontro sul nome della cartella vale piu' di uno sepolto a meta' del
- * percorso, e caratteri consecutivi valgono piu' di caratteri sparsi. Senza
- * questi pesi, cercando "man" verrebbe prima C:\Users\...\Documents\manuali
- * di ClaudeManager.
+ * The heuristic is not just "how many characters match", but WHERE they match:
+ * a hit in the basename is worth more than one buried mid-path, and consecutive
+ * characters score higher than scattered ones. Without this weighting, searching "man"
+ * would rank C:\Users\...\Documents\manuals above ClaudeManager.
  */
 
 const BOUNDARY = /[\\/\-_. ]/
@@ -16,11 +15,10 @@ const BONUS_CAMEL = 20
 const BONUS_CONSECUTIVE = 22
 const BONUS_BASENAME = 12
 /**
- * Premio quando TUTTA la ricerca sta dentro il nome finale della cartella.
+ * Bonus when the ENTIRE search pattern matches inside the final directory basename.
  *
- * Deve pesare piu' del confine di parola che la lettera di unita' regala per
- * caso, altrimenti `C:\...\Modelli` continuerebbe a battere `ClaudeManager`
- * su 'cm'.
+ * Must outweigh arbitrary word boundary hits on drive letters (e.g. `C:`),
+ * otherwise `C:\...\Models` would continue to beat `ClaudeManager` for query 'cm'.
  */
 const BONUS_BASENAME_FULL = 45
 const PENALTY_GAP = 3
@@ -29,7 +27,7 @@ const MAX_LEADING_PENALTY = 20
 
 export interface FuzzyResult {
   score: number
-  /** Indici dei caratteri corrispondenti, per l'evidenziazione nella UI. */
+  /** Indices of matched characters, used for UI highlighting. */
   positions: number[]
 }
 
@@ -38,18 +36,17 @@ export function fuzzyMatch(pattern: string, text: string): FuzzyResult | null {
   if (pattern.length > text.length) return null
 
   const lowerPattern = pattern.toLowerCase()
-  // toLowerCase() può ALLUNGARE la stringa (es. 'İ' diventa due unità), e in
-  // quel caso gli indici trovati su lowerText non sarebbero validi su text.
-  // Quando le lunghezze divergono si rinuncia alla ricerca senza distinzione
-  // fra maiuscole e minuscole invece di leggere fuori dai limiti.
+  // toLowerCase() can LENGTHEN strings (e.g. 'İ' becomes two code units),
+  // in which case indices found in lowerText would be invalid on text.
+  // When lengths diverge, fall back to case-sensitive matching rather than reading out of bounds.
   const lowered = text.toLowerCase()
   const lowerText = lowered.length === text.length ? lowered : text
 
-  // Inizio del nome finale: i riscontri da qui in poi valgono di piu'.
+  // Basename start: matches from this index onwards receive a bonus.
   const lastSep = Math.max(text.lastIndexOf('\\'), text.lastIndexOf('/'))
   const baseStart = lastSep + 1
 
-  /** Scorre il pattern cercando ogni carattere a partire da `from`. */
+  /** Scans the pattern matching each character starting from `from`. */
   const scan = (from: number): FuzzyResult | null => {
     const positions: number[] = []
     let score = 0
@@ -87,32 +84,30 @@ export function fuzzyMatch(pattern: string, text: string): FuzzyResult | null {
       textIndex = found + 1
     }
 
-    // A parita' di riscontri si preferisce il percorso piu' corto: e' quasi
-    // sempre quello piu' vicino a cio' che si cercava.
+    // On equal matches, prefer shorter paths: almost always closer to what was intended.
     score -= Math.floor(text.length / 12)
     return { score, positions }
   }
 
-  const intero = scan(0)
+  const whole = scan(0)
 
-  // Secondo tentativo confinato al nome finale.
+  // Second pass restricted to the basename.
   //
-  // La ricerca dal primo carattere e' avida e irrevocabile: cercando 'cm', la
-  // 'c' si aggancia alla lettera di unita' (`C:`), che conta come confine di
-  // parola, e da li' in poi qualunque 'm' piu' avanti va bene. Il risultato
-  // era che `C:\Users\Chiara\Modelli` e `C:\Users\Carlo\Musica` battevano
-  // `C:\dev\ClaudeManager` — cioe' esattamente il caso d'uso per cui questo
-  // modulo esiste.
+  // Greedy prefix matching from index 0 can latch the first character
+  // onto the drive letter (`C:`), which counts as a word boundary, after
+  // which any random later character matches. This caused
+  // `C:\Users\Claire\Models` and `C:\Users\Carl\Music` to rank above
+  // `C:\dev\ClaudeManager` — the exact scenario this matcher is designed for.
   //
-  // Cercare anche dentro il solo nome finale risolve il caso alla radice:
-  // 'cm' non ha riscontro dentro `Modelli` o `Musica`, mentre in
-  // `ClaudeManager` corrisponde a due iniziali di parola.
-  const soloNome = baseStart > 0 ? scan(baseStart) : null
-  if (soloNome) soloNome.score += BONUS_BASENAME_FULL
+  // Searching also within the basename alone resolves this:
+  // 'cm' has no match inside `Models` or `Music`, whereas in
+  // `ClaudeManager` it matches two word initials.
+  const basenameOnly = baseStart > 0 ? scan(baseStart) : null
+  if (basenameOnly) basenameOnly.score += BONUS_BASENAME_FULL
 
-  if (!intero) return soloNome
-  if (!soloNome) return intero
-  return soloNome.score >= intero.score ? soloNome : intero
+  if (!whole) return basenameOnly
+  if (!basenameOnly) return whole
+  return basenameOnly.score >= whole.score ? basenameOnly : whole
 }
 
 export interface Scored<T> {

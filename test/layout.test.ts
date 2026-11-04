@@ -21,159 +21,148 @@ import {
 import type { DropSide, Layout, LayoutNode, SplitDir } from '../src/renderer/src/compositor/layout'
 
 /**
- * Invarianti dell'albero di layout.
+ * Layout tree invariants.
  *
- * L'albero e' l'unica cosa che tiene insieme le sessioni aperte: se un id
- * compare due volte lo stesso terminale viene disegnato in due punti e i due
- * riquadri si contendono lo stesso PTY; se il fuoco punta a un riquadro che non
- * esiste piu' la tastiera smette di arrivare da qualche parte; se un ratio
- * diventa non finito i due figli dello split spariscono entrambi dallo schermo
- * (geometry.ts calcola le larghezze con Math.round(usable * ratio)).
+ * The tree manages open sessions: if an id appears twice the same terminal
+ * renders in two places competing for one PTY; if focus points to a deleted pane
+ * keystrokes are lost; if a ratio becomes non-finite both split children disappear
+ * (geometry.ts calculates widths with Math.round(usable * ratio)).
  *
- * Nessuna di queste rotture da' errore: l'app resta viva e sbagliata. Per
- * questo si controlla la forma dell'albero dopo OGNI operazione, non solo alla
- * fine.
+ * Tree invariants are checked after EVERY operation.
  */
 
-/** Limiti documentati in layout.ts; non sono esportati, quindi si ripetono qui. */
 const MIN_RATIO = 0.1
 const MAX_RATIO = 0.9
 
 /**
- * Controlla insieme tutti gli invarianti di un layout.
- * Lancia con un messaggio che dice quale operazione ha rotto cosa.
+ * Checks all invariants of a layout tree.
+ * Throws with an informative message indicating failure context.
  */
-function verificaAlbero(layout: Layout, contesto = ''): void {
-  const dove = contesto ? ` [${contesto}]` : ''
+function verifyTree(layout: Layout, context = ''): void {
+  const where = context ? ` [${context}]` : ''
 
-  assert.ok(layout && typeof layout === 'object', `layout assente${dove}`)
-  assert.ok(Array.isArray(layout.floating), `floating non e' un elenco${dove}`)
+  assert.ok(layout && typeof layout === 'object', `missing layout${where}`)
+  assert.ok(Array.isArray(layout.floating), `floating is not an array${where}`)
 
-  const nelMosaico: string[] = []
+  const inTiling: string[] = []
 
-  const visita = (nodo: LayoutNode | null | undefined, percorso: string): void => {
-    assert.ok(nodo, `nodo nullo in '${percorso}'${dove}`)
-    if (nodo.kind === 'leaf') {
-      assert.equal(typeof nodo.id, 'string', `foglia senza id in '${percorso}'${dove}`)
-      nelMosaico.push(nodo.id)
+  const visit = (node: LayoutNode | null | undefined, path: string): void => {
+    assert.ok(node, `null node at '${path}'${where}`)
+    if (node.kind === 'leaf') {
+      assert.equal(typeof node.id, 'string', `leaf without id at '${path}'${where}`)
+      inTiling.push(node.id)
       return
     }
-    assert.equal(nodo.kind, 'split', `tipo di nodo sconosciuto in '${percorso}'${dove}`)
-    // Uno split monco e' il modo tipico in cui una rimozione sbagliata si
-    // manifesta: meta' schermo resta vuota e i riquadri sotto sono irraggiungibili.
-    assert.ok(nodo.a != null, `split senza figlio a in '${percorso}'${dove}`)
-    assert.ok(nodo.b != null, `split senza figlio b in '${percorso}'${dove}`)
+    assert.equal(node.kind, 'split', `unknown node kind at '${path}'${where}`)
+    assert.ok(node.a != null, `split missing child a at '${path}'${where}`)
+    assert.ok(node.b != null, `split missing child b at '${path}'${where}`)
     assert.ok(
-      Number.isFinite(nodo.ratio),
-      `ratio non finito (${String(nodo.ratio)}) in '${percorso}'${dove}`
+      Number.isFinite(node.ratio),
+      `non-finite ratio (${String(node.ratio)}) at '${path}'${where}`
     )
     assert.ok(
-      nodo.ratio >= MIN_RATIO && nodo.ratio <= MAX_RATIO,
-      `ratio fuori dai limiti (${nodo.ratio}) in '${percorso}'${dove}`
+      node.ratio >= MIN_RATIO && node.ratio <= MAX_RATIO,
+      `ratio out of bounds (${node.ratio}) at '${path}'${where}`
     )
-    visita(nodo.a, `${percorso}a`)
-    visita(nodo.b, `${percorso}b`)
+    visit(node.a, `${path}a`)
+    visit(node.b, `${path}b`)
   }
 
-  if (layout.root !== null) visita(layout.root, '')
+  if (layout.root !== null) visit(layout.root, '')
 
-  const flottanti = layout.floating.map((f) => f.id)
-  const tutti = [...nelMosaico, ...flottanti]
+  const floating = layout.floating.map((f) => f.id)
+  const all = [...inTiling, ...floating]
 
-  // Un id ripetuto significa due riquadri sullo stesso terminale.
+  // Duplicate id check
   assert.equal(
-    new Set(tutti).size,
-    tutti.length,
-    `id ripetuto fra ${JSON.stringify(tutti)}${dove}`
+    new Set(all).size,
+    all.length,
+    `duplicate id among ${JSON.stringify(all)}${where}`
   )
 
-  // Il fuoco deve essere raggiungibile, altrimenti la tastiera va nel vuoto.
+  // Focused pane must exist
   if (layout.focused !== null) {
     assert.ok(
-      tutti.includes(layout.focused),
-      `focused punta a '${layout.focused}' che non esiste${dove}`
+      all.includes(layout.focused),
+      `focused points to non-existent '${layout.focused}'${where}`
     )
   }
 
-  // Un ingrandimento fantasma nasconde tutti i riquadri e non ne mostra nessuno.
+  // Zoomed pane must exist
   if (layout.zoomed !== null) {
     assert.ok(
-      tutti.includes(layout.zoomed),
-      `zoomed punta a '${layout.zoomed}' che non esiste${dove}`
+      all.includes(layout.zoomed),
+      `zoomed points to non-existent '${layout.zoomed}'${where}`
     )
   }
 
-  // findPath e collectLeaves devono raccontare la stessa storia: il
-  // trascinamento e il ridimensionamento si fidano dei percorsi.
-  for (const id of nelMosaico) {
-    const percorso = findPath(layout.root, id)
-    assert.notEqual(percorso, null, `findPath non trova '${id}' che pero' e' nell'albero${dove}`)
-    const nodo = nodeAt(layout.root, percorso as string)
-    assert.deepEqual(nodo, { kind: 'leaf', id }, `il percorso di '${id}' porta altrove${dove}`)
+  // findPath and collectLeaves consistency
+  for (const id of inTiling) {
+    const path = findPath(layout.root, id)
+    assert.notEqual(path, null, `findPath did not find '${id}' present in tree${where}`)
+    const node = nodeAt(layout.root, path as string)
+    assert.deepEqual(node, { kind: 'leaf', id }, `path for '${id}' points elsewhere${where}`)
   }
 
   for (const f of layout.floating) {
-    for (const [campo, valore] of Object.entries({ x: f.x, y: f.y, w: f.w, h: f.h, z: f.z })) {
+    for (const [field, val] of Object.entries({ x: f.x, y: f.y, w: f.w, h: f.h, z: f.z })) {
       assert.ok(
-        Number.isFinite(valore),
-        `flottante '${f.id}' con ${campo} non finito (${String(valore)})${dove}`
+        Number.isFinite(val),
+        `floating pane '${f.id}' has non-finite ${field} (${String(val)})${where}`
       )
     }
   }
 }
 
-const RETTANGOLO = { x: 100, y: 60, w: 800, h: 400 }
+const RECTANGLE = { x: 100, y: 60, w: 800, h: 400 }
 
-/** Costruisce un mosaico aggiungendo i riquadri uno dopo l'altro, come fa l'app. */
-function costruisci(ids: string[], dir: SplitDir = 'h'): Layout {
+/** Builds a tiling adding panes sequentially as the app does. */
+function buildTiling(ids: string[], dir: SplitDir = 'h'): Layout {
   let layout: Layout = EMPTY_LAYOUT
   for (const id of ids) layout = addPane(layout, id, dir)
   return layout
 }
 
-const LATI: DropSide[] = ['left', 'right', 'top', 'bottom', 'center']
+const SIDES: DropSide[] = ['left', 'right', 'top', 'bottom', 'center']
 
-describe('layout: il controllo degli invarianti riconosce un albero rotto', () => {
-  // Se verificaAlbero passasse su qualunque cosa, tutto il resto del file
-  // sarebbe verde per finta.
-  it('boccia un id ripetuto, uno split monco, un fuoco fantasma e un ratio NaN', () => {
-    const dueVolteA: Layout = {
+describe('layout: invariant verification detects corrupted tree', () => {
+  it('rejects duplicate id, broken split, phantom focus, and NaN ratio', () => {
+    const duplicateA: Layout = {
       root: { kind: 'split', dir: 'h', ratio: 0.5, a: { kind: 'leaf', id: 'a' }, b: { kind: 'leaf', id: 'a' } },
       floating: [],
       focused: 'a',
       zoomed: null
     }
-    assert.throws(() => verificaAlbero(dueVolteA), /id ripetuto/)
+    assert.throws(() => verifyTree(duplicateA), /duplicate id/)
 
-    const monco = {
+    const brokenSplit = {
       root: { kind: 'split', dir: 'h', ratio: 0.5, a: { kind: 'leaf', id: 'a' }, b: null },
       floating: [],
       focused: 'a',
       zoomed: null
     } as unknown as Layout
-    assert.throws(() => verificaAlbero(monco), /senza figlio b/)
+    assert.throws(() => verifyTree(brokenSplit), /missing child b/)
 
-    const fuocoFantasma: Layout = { root: { kind: 'leaf', id: 'a' }, floating: [], focused: 'b', zoomed: null }
-    assert.throws(() => verificaAlbero(fuocoFantasma), /focused punta/)
+    const phantomFocus: Layout = { root: { kind: 'leaf', id: 'a' }, floating: [], focused: 'b', zoomed: null }
+    assert.throws(() => verifyTree(phantomFocus), /focused points/)
 
-    const ratioRotto = {
+    const brokenRatio = {
       root: { kind: 'split', dir: 'h', ratio: NaN, a: { kind: 'leaf', id: 'a' }, b: { kind: 'leaf', id: 'b' } },
       floating: [],
       focused: 'a',
       zoomed: null
     } as unknown as Layout
-    assert.throws(() => verificaAlbero(ratioRotto), /ratio non finito/)
+    assert.throws(() => verifyTree(brokenRatio), /non-finite ratio/)
 
-    // E un albero sano non deve dare falsi allarmi.
-    verificaAlbero(costruisci(['a', 'b', 'c']))
+    verifyTree(buildTiling(['a', 'b', 'c']))
   })
 })
 
-// --- Sequenza lunga e mista -------------------------------------------------
+// --- Randomized sequences ---------------------------------------------------
 
-/** Generatore pseudocasuale con seme: la sequenza e' sempre la stessa. */
-function generatore(seme: number): () => number {
-  let s = seme >>> 0
+/** Seeded PRNG for reproducible sequences. */
+function prng(seed: number): () => number {
+  let s = seed >>> 0
   return () => {
     s = (s + 0x6d2b79f5) >>> 0
     let t = Math.imul(s ^ (s >>> 15), 1 | s)
@@ -182,16 +171,10 @@ function generatore(seme: number): () => number {
   }
 }
 
-/** Id che non esistono: ogni operazione deve ignorarli senza toccare niente. */
-const ID_FANTASMA = ['fantasma', '', 'undefined', 'null', '../../altro', 'r999']
-/**
- * Percorsi plausibili e percorsi spazzatura, come quelli che possono arrivare
- * da un trascinamento iniziato prima di una modifica dell'albero.
- */
-const PERCORSI = ['', 'a', 'b', 'ab', 'ba', 'aaa', 'bbbb', 'zz', 'a b', '../..']
-/** Compresi i valori che il trascinamento del canale produce fuori dai bordi. */
+const PHANTOM_IDS = ['phantom', '', 'undefined', 'null', '../../other', 'r999']
+const PATHS = ['', 'a', 'b', 'ab', 'ba', 'aaa', 'bbbb', 'zz', 'a b', '../..']
 const RATIOS = [0, 0.05, 0.25, 0.5, 0.75, 1, 1.5, -3, Infinity, -Infinity]
-const OPERAZIONI = [
+const OPERATIONS = [
   'addPane',
   'removePane',
   'setFocus',
@@ -203,209 +186,195 @@ const OPERAZIONI = [
   'updateFloating'
 ] as const
 
-interface Esito {
-  cambi: Map<string, number>
-  massimoRiquadri: number
+interface Outcome {
+  changes: Map<string, number>
+  maxPanes: number
 }
 
-function sequenzaMista(seme: number, passi: number, esito: Esito): void {
-  const caso = generatore(seme)
-  const scegli = <T,>(elenco: readonly T[]): T => elenco[Math.floor(caso() * elenco.length)]
-  const numero = (max: number): number => Math.floor(caso() * max)
+function mixedSequence(seed: number, steps: number, outcome: Outcome): void {
+  const rand = prng(seed)
+  const pick = <T,>(list: readonly T[]): T => list[Math.floor(rand() * list.length)]
+  const intRange = (max: number): number => Math.floor(rand() * max)
 
   let layout: Layout = EMPTY_LAYOUT
-  let prossimo = 0
+  let nextId = 0
 
-  for (let passo = 0; passo < passi; passo++) {
-    const presenti = allPanes(layout)
-    esito.massimoRiquadri = Math.max(esito.massimoRiquadri, presenti.length)
+  for (let step = 0; step < steps; step++) {
+    const present = allPanes(layout)
+    outcome.maxPanes = Math.max(outcome.maxPanes, present.length)
 
-    // Un id noto quasi sempre, ogni tanto uno inventato.
-    const bersaglio = (): string =>
-      presenti.length > 0 && caso() < 0.85 ? scegli(presenti) : scegli(ID_FANTASMA)
+    const target = (): string =>
+      present.length > 0 && rand() < 0.85 ? pick(present) : pick(PHANTOM_IDS)
 
     const op =
-      presenti.length === 0 || caso() < 0.22 ? 'addPane' : scegli(OPERAZIONI.filter((o) => o !== 'addPane'))
+      present.length === 0 || rand() < 0.22 ? 'addPane' : pick(OPERATIONS.filter((o) => o !== 'addPane'))
 
-    const precedente = layout
-    const istantanea = structuredClone(precedente)
-    let idUsati: string[] = []
+    const previous = layout
+    const snapshot = structuredClone(previous)
+    let usedIds: string[] = []
 
     switch (op) {
       case 'addPane':
-        layout = addPane(layout, `r${prossimo++}`, scegli(['h', 'v'] as SplitDir[]))
+        layout = addPane(layout, `r${nextId++}`, pick(['h', 'v'] as SplitDir[]))
         break
       case 'removePane': {
-        const id = bersaglio()
-        idUsati = [id]
+        const id = target()
+        usedIds = [id]
         layout = removePane(layout, id)
         break
       }
       case 'setFocus': {
-        const id = bersaglio()
-        idUsati = [id]
+        const id = target()
+        usedIds = [id]
         layout = setFocus(layout, id)
         break
       }
       case 'setRatio':
-        layout = setRatio(layout, scegli(PERCORSI), scegli(RATIOS))
+        layout = setRatio(layout, pick(PATHS), pick(RATIOS))
         break
       case 'swapPanes': {
-        const a = bersaglio()
-        const b = bersaglio()
-        idUsati = [a, b]
+        const a = target()
+        const b = target()
+        usedIds = [a, b]
         layout = swapPanes(layout, a, b)
         break
       }
       case 'toggleFloat': {
-        const id = bersaglio()
-        idUsati = [id]
+        const id = target()
+        usedIds = [id]
         layout = toggleFloat(layout, id, {
-          x: numero(1200),
-          y: numero(700),
-          w: 200 + numero(600),
-          h: 150 + numero(400)
+          x: intRange(1200),
+          y: intRange(700),
+          w: 200 + intRange(600),
+          h: 150 + intRange(400)
         })
         break
       }
       case 'toggleZoom': {
-        const id = bersaglio()
-        idUsati = [id]
+        const id = target()
+        usedIds = [id]
         layout = toggleZoom(layout, id)
         break
       }
       case 'movePaneTo': {
-        const a = bersaglio()
-        const b = bersaglio()
-        idUsati = [a, b]
-        layout = movePaneTo(layout, a, b, scegli(LATI))
+        const a = target()
+        const b = target()
+        usedIds = [a, b]
+        layout = movePaneTo(layout, a, b, pick(SIDES))
         break
       }
       case 'updateFloating': {
-        const id = bersaglio()
-        idUsati = [id]
-        layout = updateFloating(layout, id, { x: numero(1200), y: numero(700), z: numero(20) })
+        const id = target()
+        usedIds = [id]
+        layout = updateFloating(layout, id, { x: intRange(1200), y: intRange(700), z: intRange(20) })
         break
       }
     }
 
-    const dove = `seme ${seme}, passo ${passo}, ${op}(${idUsati.join(', ')})`
-    verificaAlbero(layout, dove)
+    const where = `seed ${seed}, step ${step}, ${op}(${usedIds.join(', ')})`
+    verifyTree(layout, where)
 
-    // Le funzioni sono dichiarate pure e il layout finisce in layout.json e in
-    // uno stato React: una modifica sul posto non farebbe ridisegnare niente.
-    assert.deepEqual(precedente, istantanea, `${op} ha modificato il layout in ingresso [${dove}]`)
+    assert.deepEqual(previous, snapshot, `${op} mutated input layout [${where}]`)
 
-    // Un id che non esiste non deve poter cambiare niente: e' il caso di una
-    // sessione chiusa mentre il menu contestuale era ancora aperto.
-    if (idUsati.length > 0 && idUsati.some((id) => !hasPane(precedente, id))) {
-      assert.deepEqual(layout, istantanea, `${op} su un id inesistente ha cambiato il layout [${dove}]`)
+    if (usedIds.length > 0 && usedIds.some((id) => !hasPane(previous, id))) {
+      assert.deepEqual(layout, snapshot, `${op} on non-existent id modified layout [${where}]`)
     }
 
-    if (JSON.stringify(layout) !== JSON.stringify(istantanea)) {
-      esito.cambi.set(op, (esito.cambi.get(op) ?? 0) + 1)
+    if (JSON.stringify(layout) !== JSON.stringify(snapshot)) {
+      outcome.changes.set(op, (outcome.changes.get(op) ?? 0) + 1)
     }
   }
 
-  // Chiusura a tappeto: alla fine non deve restare niente, e nessun passaggio
-  // deve lanciare.
-  let sicurezza = 0
+  let safety = 0
   while (allPanes(layout).length > 0) {
     layout = removePane(layout, allPanes(layout)[0])
-    verificaAlbero(layout, `seme ${seme}, chiusura ${sicurezza}`)
-    assert.ok(sicurezza++ < 1000, 'removePane non riduce il numero di riquadri')
+    verifyTree(layout, `seed ${seed}, teardown ${safety}`)
+    assert.ok(safety++ < 1000, 'removePane failed to decrease pane count')
   }
-  assert.equal(layout.root, null, `seme ${seme}: la radice non e' tornata nulla`)
-  assert.equal(layout.focused, null, `seme ${seme}: fuoco su un riquadro chiuso`)
-  assert.equal(layout.zoomed, null, `seme ${seme}: ingrandimento su un riquadro chiuso`)
-  assert.deepEqual(layout.floating, [], `seme ${seme}: flottanti rimasti`)
+  assert.equal(layout.root, null, `seed ${seed}: root did not return to null`)
+  assert.equal(layout.focused, null, `seed ${seed}: focus remained on closed pane`)
+  assert.equal(layout.zoomed, null, `seed ${seed}: zoom remained on closed pane`)
+  assert.deepEqual(layout.floating, [], `seed ${seed}: floating panes remained`)
 }
 
-describe('layout: sequenze lunghe e miste', () => {
-  it('mantiene gli invarianti dopo ogni operazione, su piu semi', () => {
-    const esito: Esito = { cambi: new Map(), massimoRiquadri: 0 }
-    for (const seme of [1, 7, 12345, 987654321, 42]) sequenzaMista(seme, 400, esito)
+describe('layout: randomized mixed sequences', () => {
+  it('maintains invariants after every operation across multiple seeds', () => {
+    const outcome: Outcome = { changes: new Map(), maxPanes: 0 }
+    for (const seed of [1, 7, 12345, 987654321, 42]) mixedSequence(seed, 400, outcome)
 
-    // La sequenza deve aver davvero fatto lavorare l'albero: senza questi due
-    // controlli un cambio di pesi renderebbe il test verde senza provare nulla.
-    assert.ok(esito.massimoRiquadri >= 6, `mosaico troppo piccolo: ${esito.massimoRiquadri} riquadri`)
-    for (const op of OPERAZIONI) {
-      assert.ok((esito.cambi.get(op) ?? 0) > 0, `l'operazione ${op} non ha mai cambiato niente`)
+    assert.ok(outcome.maxPanes >= 6, `tiling too small: ${outcome.maxPanes} panes`)
+    for (const op of OPERATIONS) {
+      assert.ok((outcome.changes.get(op) ?? 0) > 0, `operation ${op} never produced changes`)
     }
   })
 })
 
-// --- Chiusura dell'ultimo riquadro ------------------------------------------
+// --- Pane closing -----------------------------------------------------------
 
-describe('layout: chiusura dei riquadri', () => {
-  it('chiudere l ultimo riquadro lascia la radice nulla senza lanciare', () => {
-    let layout = costruisci(['a'])
+describe('layout: pane removal', () => {
+  it('closing the last pane leaves null root without throwing', () => {
+    let layout = buildTiling(['a'])
     layout = removePane(layout, 'a')
-    verificaAlbero(layout, 'dopo l ultima chiusura')
+    verifyTree(layout, 'after closing last pane')
     assert.equal(layout.root, null)
     assert.equal(layout.focused, null)
   })
 
-  it('chiude i riquadri in ordine inverso e in ordine sparso senza lasciare split monchi', () => {
-    for (const ordine of [
+  it('closes panes in reverse and arbitrary orders without leaving orphaned splits', () => {
+    for (const order of [
       ['a', 'b', 'c', 'd'],
       ['d', 'c', 'b', 'a'],
       ['b', 'd', 'a', 'c'],
       ['c', 'a', 'd', 'b']
     ]) {
-      let layout = costruisci(['a', 'b', 'c', 'd'])
-      for (const id of ordine) {
+      let layout = buildTiling(['a', 'b', 'c', 'd'])
+      for (const id of order) {
         layout = removePane(layout, id)
-        verificaAlbero(layout, `chiusura ordine ${ordine.join('')} dopo ${id}`)
-        assert.equal(hasPane(layout, id), false, `${id} risulta ancora aperto`)
+        verifyTree(layout, `closing order ${order.join('')} after ${id}`)
+        assert.equal(hasPane(layout, id), false, `${id} still reported present`)
       }
-      assert.equal(layout.root, null, `ordine ${ordine.join('')}: radice non nulla`)
-      assert.equal(layout.focused, null, `ordine ${ordine.join('')}: fuoco rimasto`)
+      assert.equal(layout.root, null, `order ${order.join('')}: non-null root`)
+      assert.equal(layout.focused, null, `order ${order.join('')}: lingering focus`)
     }
   })
 
-  it('chiudere l ultimo riquadro del mosaico non tocca i flottanti', () => {
-    let layout = costruisci(['a', 'b'])
-    layout = toggleFloat(layout, 'b', RETTANGOLO)
+  it('closing last tiled pane does not affect floating panes', () => {
+    let layout = buildTiling(['a', 'b'])
+    layout = toggleFloat(layout, 'b', RECTANGLE)
     layout = removePane(layout, 'a')
-    verificaAlbero(layout, 'mosaico vuoto ma flottante vivo')
+    verifyTree(layout, 'empty tiling with floating pane alive')
     assert.equal(layout.root, null)
-    // Il fuoco deve ricadere sull'unico riquadro rimasto, non finire nel vuoto.
     assert.equal(layout.focused, 'b')
     assert.equal(allPanes(layout).length, 1)
   })
 
-  it('dopo aver chiuso tutto si puo ricominciare', () => {
-    let layout = costruisci(['a', 'b'])
+  it('can resume adding panes after closing all', () => {
+    let layout = buildTiling(['a', 'b'])
     layout = removePane(layout, 'a')
     layout = removePane(layout, 'b')
     layout = addPane(layout, 'c', 'h')
-    verificaAlbero(layout, 'riapertura')
+    verifyTree(layout, 'reopening')
     assert.deepEqual(collectLeaves(layout.root), ['c'])
     assert.equal(layout.focused, 'c')
   })
 
-  it('chiudere un riquadro ingrandito toglie anche l ingrandimento', () => {
-    let layout = costruisci(['a', 'b'])
+  it('closing zoomed pane also dismisses zoom', () => {
+    let layout = buildTiling(['a', 'b'])
     layout = toggleZoom(layout, 'b')
     assert.equal(layout.zoomed, 'b')
     layout = removePane(layout, 'b')
-    // Con zoomed su un riquadro chiuso lo stage resterebbe nero: geometry.ts
-    // nasconde tutti i riquadri tranne quello ingrandito, che non c'e' piu'.
-    verificaAlbero(layout, 'chiusura del riquadro ingrandito')
+    verifyTree(layout, 'closing zoomed pane')
     assert.equal(layout.zoomed, null)
   })
 })
 
 // --- setRatio ---------------------------------------------------------------
 
-describe('layout: setRatio ai limiti', () => {
-  const conSplit = (): Layout => costruisci(['a', 'b'])
+describe('layout: setRatio boundaries', () => {
+  const withSplit = (): Layout => buildTiling(['a', 'b'])
 
-  it('tiene il rapporto dentro i limiti utilizzabili', () => {
-    // Fuori da questi limiti uno dei due riquadri diventa una striscia inutile:
-    // il trascinamento del canale oltre il bordo deve semplicemente fermarsi.
-    for (const [dato, atteso] of [
+  it('clamps ratio within usable bounds', () => {
+    for (const [input, expected] of [
       [0, MIN_RATIO],
       [-0.5, MIN_RATIO],
       [-1000, MIN_RATIO],
@@ -415,330 +384,306 @@ describe('layout: setRatio ai limiti', () => {
       [Infinity, MAX_RATIO],
       [0.42, 0.42]
     ] as [number, number][]) {
-      const dopo = setRatio(conSplit(), '', dato)
-      const radice = dopo.root as Extract<LayoutNode, { kind: 'split' }>
-      assert.equal(radice.ratio, atteso, `setRatio(${dato}) ha dato ${radice.ratio}`)
-      verificaAlbero(dopo, `setRatio(${dato})`)
+      const after = setRatio(withSplit(), '', input)
+      const root = after.root as Extract<LayoutNode, { kind: 'split' }>
+      assert.equal(root.ratio, expected, `setRatio(${input}) returned ${root.ratio}`)
+      verifyTree(after, `setRatio(${input})`)
     }
   })
 
-  it('setRatio con NaN non deve far sparire i due riquadri', () => {
-    // DIFETTO OSSERVATO: il clamp e' Math.min(0.9, Math.max(0.1, ratio)) e con
-    // NaN restituisce NaN. Il ratio salvato diventa NaN, e geometry.ts calcola
-    // Math.round(usable * NaN) => NaN: entrambi i figli dello split spariscono
-    // dallo schermo, e il valore finisce cosi' anche in layout.json.
-    const dopo = setRatio(conSplit(), '', NaN)
-    const radice = dopo.root as Extract<LayoutNode, { kind: 'split' }>
-    assert.ok(Number.isFinite(radice.ratio), `ratio diventato ${radice.ratio}`)
+  it('setRatio with NaN does not break split', () => {
+    const after = setRatio(withSplit(), '', NaN)
+    const root = after.root as Extract<LayoutNode, { kind: 'split' }>
+    assert.ok(Number.isFinite(root.ratio), `ratio became ${root.ratio}`)
   })
 
-  it('ignora i percorsi che non portano a uno split', () => {
-    const solaFoglia = costruisci(['a'])
-    assert.deepEqual(setRatio(solaFoglia, '', 0.3), solaFoglia)
+  it('ignores paths that do not lead to a split', () => {
+    const singleLeaf = buildTiling(['a'])
+    assert.deepEqual(setRatio(singleLeaf, '', 0.3), singleLeaf)
     assert.deepEqual(setRatio(EMPTY_LAYOUT, '', 0.3), EMPTY_LAYOUT)
 
-    const due = conSplit()
-    // Percorso piu' profondo dell'albero: capita quando il trascinamento di un
-    // canale continua dopo che il riquadro sotto e' stato chiuso.
-    for (const percorso of ['a', 'b', 'aaa', 'bbbbbb']) {
-      assert.deepEqual(setRatio(due, percorso, 0.3), due, `percorso '${percorso}'`)
+    const two = withSplit()
+    for (const path of ['a', 'b', 'aaa', 'bbbbbb']) {
+      assert.deepEqual(setRatio(two, path, 0.3), two, `path '${path}'`)
     }
   })
 
-  it('un percorso spazzatura non deve ridimensionare un altro split', () => {
-    // DIFETTO OSSERVATO: nodeAt e replaceAt trattano ogni carattere diverso da
-    // 'a' come se fosse 'b' (step === 'a' ? a : b). Un percorso mai emesso
-    // dall'app, come 'z', viene quindi seguito fino al figlio b e ne cambia il
-    // rapporto: la richiesta non viene respinta, ridimensiona un altro split.
-    // Osservato: setRatio(layout, 'z', 0.3) porta a 0.3 il rapporto del nodo 'b'.
-    const layout = costruisci(['a', 'b', 'c'])
+  it('invalid path does not resize another split', () => {
+    const layout = buildTiling(['a', 'b', 'c'])
     assert.deepEqual(setRatio(layout, 'z', 0.3), layout)
   })
 
-  it('cambia solo lo split indicato', () => {
-    const layout = costruisci(['a', 'b', 'c'])
-    const dopo = setRatio(layout, 'b', 0.25)
-    const radice = dopo.root as Extract<LayoutNode, { kind: 'split' }>
-    assert.equal(radice.ratio, 0.5, 'lo split della radice non doveva muoversi')
-    assert.equal((radice.b as Extract<LayoutNode, { kind: 'split' }>).ratio, 0.25)
-    verificaAlbero(dopo, 'setRatio mirato')
+  it('modifies only targeted split', () => {
+    const layout = buildTiling(['a', 'b', 'c'])
+    const after = setRatio(layout, 'b', 0.25)
+    const root = after.root as Extract<LayoutNode, { kind: 'split' }>
+    assert.equal(root.ratio, 0.5, 'root split should remain unchanged')
+    assert.equal((root.b as Extract<LayoutNode, { kind: 'split' }>).ratio, 0.25)
+    verifyTree(after, 'targeted setRatio')
   })
 })
 
 // --- movePaneTo -------------------------------------------------------------
 
-describe('layout: movePaneTo (trascinamento)', () => {
-  it('inserisce il riquadro dal lato giusto, e una volta sola', () => {
-    // L'ordine delle foglie e' l'ordine sullo schermo: sbagliarlo significa
-    // rilasciare a sinistra e vedere il riquadro comparire a destra.
-    const casi: [DropSide, string[], SplitDir][] = [
+describe('layout: movePaneTo (drag & drop)', () => {
+  it('inserts pane at correct side without duplication', () => {
+    const cases: [DropSide, string[], SplitDir][] = [
       ['left', ['c', 'a', 'b'], 'h'],
       ['right', ['a', 'c', 'b'], 'h'],
       ['top', ['c', 'a', 'b'], 'v'],
       ['bottom', ['a', 'c', 'b'], 'v']
     ]
-    for (const [lato, atteso, dir] of casi) {
-      const dopo = movePaneTo(costruisci(['a', 'b', 'c']), 'c', 'a', lato)
-      verificaAlbero(dopo, `movePaneTo ${lato}`)
-      assert.deepEqual(collectLeaves(dopo.root), atteso, `lato ${lato}`)
-      const nuovo = nodeAt(dopo.root, 'a') as Extract<LayoutNode, { kind: 'split' }>
-      assert.equal(nuovo.kind, 'split', `lato ${lato}: nessuno split creato`)
-      assert.equal(nuovo.dir, dir, `lato ${lato}: direzione sbagliata`)
-      assert.equal(dopo.focused, 'c', `lato ${lato}: il fuoco deve seguire il riquadro trascinato`)
+    for (const [side, expected, dir] of cases) {
+      const after = movePaneTo(buildTiling(['a', 'b', 'c']), 'c', 'a', side)
+      verifyTree(after, `movePaneTo ${side}`)
+      assert.deepEqual(collectLeaves(after.root), expected, `side ${side}`)
+      const newNode = nodeAt(after.root, 'a') as Extract<LayoutNode, { kind: 'split' }>
+      assert.equal(newNode.kind, 'split', `side ${side}: no split created`)
+      assert.equal(newNode.dir, dir, `side ${side}: wrong direction`)
+      assert.equal(after.focused, 'c', `side ${side}: focus should follow dragged pane`)
     }
   })
 
-  it('al centro scambia i due riquadri senza duplicarli', () => {
-    const dopo = movePaneTo(costruisci(['a', 'b', 'c']), 'a', 'c', 'center')
-    verificaAlbero(dopo, 'movePaneTo center')
-    assert.deepEqual(collectLeaves(dopo.root), ['c', 'b', 'a'])
-    assert.equal(dopo.focused, 'a')
+  it('center drop side swaps the two panes without duplicating', () => {
+    const after = movePaneTo(buildTiling(['a', 'b', 'c']), 'a', 'c', 'center')
+    verifyTree(after, 'movePaneTo center')
+    assert.deepEqual(collectLeaves(after.root), ['c', 'b', 'a'])
+    assert.equal(after.focused, 'a')
   })
 
-  it('rilasciare un riquadro su se stesso non cambia niente', () => {
-    const layout = costruisci(['a', 'b', 'c'])
-    for (const lato of LATI) {
-      assert.deepEqual(movePaneTo(layout, 'b', 'b', lato), layout, `lato ${lato}`)
+  it('dropping a pane onto itself does nothing', () => {
+    const layout = buildTiling(['a', 'b', 'c'])
+    for (const side of SIDES) {
+      assert.deepEqual(movePaneTo(layout, 'b', 'b', side), layout, `side ${side}`)
     }
   })
 
-  it('ignora gli id inesistenti da entrambe le parti', () => {
-    const layout = costruisci(['a', 'b'])
-    for (const lato of LATI) {
-      assert.deepEqual(movePaneTo(layout, 'fantasma', 'a', lato), layout, `origine ignota, ${lato}`)
-      assert.deepEqual(movePaneTo(layout, 'a', 'fantasma', lato), layout, `destinazione ignota, ${lato}`)
-      assert.deepEqual(movePaneTo(layout, 'x', 'y', lato), layout, `entrambi ignoti, ${lato}`)
+  it('ignores non-existent ids on either side', () => {
+    const layout = buildTiling(['a', 'b'])
+    for (const side of SIDES) {
+      assert.deepEqual(movePaneTo(layout, 'phantom', 'a', side), layout, `unknown source, ${side}`)
+      assert.deepEqual(movePaneTo(layout, 'a', 'phantom', side), layout, `unknown target, ${side}`)
+      assert.deepEqual(movePaneTo(layout, 'x', 'y', side), layout, `both unknown, ${side}`)
     }
   })
 
-  it('con un solo riquadro non c e niente da trascinare', () => {
-    const layout = costruisci(['a'])
-    for (const lato of LATI) {
-      assert.deepEqual(movePaneTo(layout, 'a', 'a', lato), layout, `lato ${lato}`)
-      assert.deepEqual(movePaneTo(layout, 'a', 'b', lato), layout, `lato ${lato}, destinazione assente`)
-      verificaAlbero(movePaneTo(layout, 'a', 'a', lato), `un solo riquadro, ${lato}`)
+  it('with single pane move does nothing', () => {
+    const layout = buildTiling(['a'])
+    for (const side of SIDES) {
+      assert.deepEqual(movePaneTo(layout, 'a', 'a', side), layout, `side ${side}`)
+      assert.deepEqual(movePaneTo(layout, 'a', 'b', side), layout, `side ${side}, missing target`)
+      verifyTree(movePaneTo(layout, 'a', 'a', side), `single pane, ${side}`)
     }
   })
 
-  it('trascinare l unico riquadro del mosaico su un flottante non lo fa sparire', () => {
-    // Senza il controllo su detached.root il mosaico resterebbe vuoto e il
-    // riquadro trascinato non finirebbe da nessuna parte: sessione persa.
-    let layout = costruisci(['a', 'b'])
-    layout = toggleFloat(layout, 'b', RETTANGOLO)
-    const dopo = movePaneTo(layout, 'a', 'b', 'left')
-    verificaAlbero(dopo, 'unico riquadro verso un flottante')
-    assert.equal(hasPane(dopo, 'a'), true)
-    assert.equal(hasPane(dopo, 'b'), true)
+  it('dragging only tiled pane onto floating pane does not lose it', () => {
+    let layout = buildTiling(['a', 'b'])
+    layout = toggleFloat(layout, 'b', RECTANGLE)
+    const after = movePaneTo(layout, 'a', 'b', 'left')
+    verifyTree(after, 'only pane toward floating')
+    assert.equal(hasPane(after, 'a'), true)
+    assert.equal(hasPane(after, 'b'), true)
   })
 
-  it('trascinare un flottante nel mosaico lo riaggancia una volta sola', () => {
-    let layout = costruisci(['a', 'b', 'c'])
-    layout = toggleFloat(layout, 'c', RETTANGOLO)
-    const dopo = movePaneTo(layout, 'c', 'a', 'right')
-    verificaAlbero(dopo, 'flottante riagganciato per trascinamento')
-    assert.equal(isFloating(dopo, 'c'), false)
-    assert.deepEqual(dopo.floating, [])
-    assert.deepEqual(collectLeaves(dopo.root), ['a', 'c', 'b'])
-    assert.equal(dopo.focused, 'c')
+  it('dragging floating pane into tiling docks it cleanly', () => {
+    let layout = buildTiling(['a', 'b', 'c'])
+    layout = toggleFloat(layout, 'c', RECTANGLE)
+    const after = movePaneTo(layout, 'c', 'a', 'right')
+    verifyTree(after, 'floating redocked by drag')
+    assert.equal(isFloating(after, 'c'), false)
+    assert.deepEqual(after.floating, [])
+    assert.deepEqual(collectLeaves(after.root), ['a', 'c', 'b'])
+    assert.equal(after.focused, 'c')
   })
 
-  it('lo scambio al centro non vale per i flottanti', () => {
-    // Un flottante non occupa una posizione nell'albero: scambiarlo lo
-    // duplicherebbe o lo farebbe sparire.
-    let layout = costruisci(['a', 'b'])
-    layout = toggleFloat(layout, 'b', RETTANGOLO)
+  it('center swap is disabled for floating panes', () => {
+    let layout = buildTiling(['a', 'b'])
+    layout = toggleFloat(layout, 'b', RECTANGLE)
     assert.deepEqual(movePaneTo(layout, 'b', 'a', 'center'), layout)
     assert.deepEqual(movePaneTo(layout, 'a', 'b', 'center'), layout)
   })
 
-  it('trascinamenti ripetuti non moltiplicano ne perdono riquadri', () => {
-    let layout = costruisci(['a', 'b', 'c', 'd'])
-    const attesi = ['a', 'b', 'c', 'd']
+  it('repeated drags neither multiply nor lose panes', () => {
+    let layout = buildTiling(['a', 'b', 'c', 'd'])
+    const expected = ['a', 'b', 'c', 'd']
     let i = 0
-    for (const origine of attesi) {
-      for (const destinazione of attesi) {
-        const lato = LATI[i++ % LATI.length]
-        layout = movePaneTo(layout, origine, destinazione, lato)
-        verificaAlbero(layout, `${origine} -> ${destinazione} (${lato})`)
-        assert.deepEqual([...allPanes(layout)].sort(), attesi, `dopo ${origine} -> ${destinazione}`)
+    for (const src of expected) {
+      for (const dst of expected) {
+        const side = SIDES[i++ % SIDES.length]
+        layout = movePaneTo(layout, src, dst, side)
+        verifyTree(layout, `${src} -> ${dst} (${side})`)
+        assert.deepEqual([...allPanes(layout)].sort(), expected, `after ${src} -> ${dst}`)
       }
     }
   })
 })
 
-// --- Flottanti --------------------------------------------------------------
+// --- Floating panes ---------------------------------------------------------
 
-describe('layout: flottanti', () => {
-  it('sganciare e riagganciare molte volte non altera l insieme dei riquadri', () => {
-    let layout = costruisci(['a', 'b', 'c'])
-    const attesi = ['a', 'b', 'c']
+describe('layout: floating panes', () => {
+  it('repeatedly detaching and docking preserves pane set', () => {
+    let layout = buildTiling(['a', 'b', 'c'])
+    const expected = ['a', 'b', 'c']
 
-    for (let giro = 0; giro < 40; giro++) {
-      layout = toggleFloat(layout, 'c', RETTANGOLO)
-      verificaAlbero(layout, `giro ${giro}, sganciato`)
-      assert.equal(isFloating(layout, 'c'), true, `giro ${giro}: doveva essere flottante`)
+    for (let round = 0; round < 40; round++) {
+      layout = toggleFloat(layout, 'c', RECTANGLE)
+      verifyTree(layout, `round ${round}, detached`)
+      assert.equal(isFloating(layout, 'c'), true, `round ${round}: should be floating`)
       assert.equal(layout.focused, 'c')
-      assert.deepEqual([...allPanes(layout)].sort(), attesi, `giro ${giro}, sganciato`)
+      assert.deepEqual([...allPanes(layout)].sort(), expected, `round ${round}, detached`)
 
-      layout = toggleFloat(layout, 'c', RETTANGOLO)
-      verificaAlbero(layout, `giro ${giro}, riagganciato`)
-      assert.equal(isFloating(layout, 'c'), false, `giro ${giro}: doveva tornare nel mosaico`)
+      layout = toggleFloat(layout, 'c', RECTANGLE)
+      verifyTree(layout, `round ${round}, redocked`)
+      assert.equal(isFloating(layout, 'c'), false, `round ${round}: should return to tiling`)
       assert.equal(layout.focused, 'c')
-      assert.deepEqual([...allPanes(layout)].sort(), attesi, `giro ${giro}, riagganciato`)
+      assert.deepEqual([...allPanes(layout)].sort(), expected, `round ${round}, redocked`)
     }
   })
 
-  it('sganciare l unico riquadro svuota il mosaico ma non perde la sessione', () => {
-    let layout = costruisci(['a'])
-    layout = toggleFloat(layout, 'a', RETTANGOLO)
-    verificaAlbero(layout, 'unico riquadro sganciato')
+  it('detaching only pane empties tiling without losing session', () => {
+    let layout = buildTiling(['a'])
+    layout = toggleFloat(layout, 'a', RECTANGLE)
+    verifyTree(layout, 'single pane detached')
     assert.equal(layout.root, null)
     assert.deepEqual(allPanes(layout), ['a'])
     assert.equal(layout.focused, 'a')
 
-    layout = toggleFloat(layout, 'a', RETTANGOLO)
-    verificaAlbero(layout, 'unico riquadro riagganciato')
+    layout = toggleFloat(layout, 'a', RECTANGLE)
+    verifyTree(layout, 'single pane redocked')
     assert.deepEqual(collectLeaves(layout.root), ['a'])
     assert.deepEqual(layout.floating, [])
   })
 
-  it('il flottante che riceve il fuoco passa davanti agli altri', () => {
-    let layout = costruisci(['a', 'b', 'c'])
-    layout = toggleFloat(layout, 'b', RETTANGOLO)
-    layout = toggleFloat(layout, 'c', RETTANGOLO)
+  it('focused floating pane raises to top z-index', () => {
+    let layout = buildTiling(['a', 'b', 'c'])
+    layout = toggleFloat(layout, 'b', RECTANGLE)
+    layout = toggleFloat(layout, 'c', RECTANGLE)
 
-    const z = (l: Layout, id: string): number => l.floating.find((f) => f.id === id)!.z
-    assert.ok(z(layout, 'c') > z(layout, 'b'), 'l ultimo sganciato deve stare sopra')
+    const zIndex = (l: Layout, id: string): number => l.floating.find((f) => f.id === id)!.z
+    assert.ok(zIndex(layout, 'c') > zIndex(layout, 'b'), 'last detached pane should be on top')
 
     layout = setFocus(layout, 'b')
-    verificaAlbero(layout, 'fuoco su un flottante')
-    // Senza il rialzo il riquadro attivo resterebbe coperto e si scriverebbe
-    // alla cieca in un terminale non visibile.
-    assert.ok(z(layout, 'b') > z(layout, 'c'), 'il flottante attivo deve venire in primo piano')
+    verifyTree(layout, 'focus on floating pane')
+    assert.ok(zIndex(layout, 'b') > zIndex(layout, 'c'), 'active floating pane should raise to top')
   })
 
-  it('sganciare un riquadro ingrandito toglie l ingrandimento', () => {
-    let layout = costruisci(['a', 'b'])
+  it('detaching zoomed pane dismisses zoom', () => {
+    let layout = buildTiling(['a', 'b'])
     layout = toggleZoom(layout, 'a')
-    layout = toggleFloat(layout, 'a', RETTANGOLO)
-    verificaAlbero(layout, 'sganciato mentre era ingrandito')
+    layout = toggleFloat(layout, 'a', RECTANGLE)
+    verifyTree(layout, 'detached while zoomed')
     assert.equal(layout.zoomed, null)
   })
 
-  it('updateFloating tocca solo il riquadro indicato e ignora gli sconosciuti', () => {
-    let layout = costruisci(['a', 'b'])
-    layout = toggleFloat(layout, 'a', RETTANGOLO)
-    layout = toggleFloat(layout, 'b', RETTANGOLO)
+  it('updateFloating touches only targeted pane and ignores unknown ids', () => {
+    let layout = buildTiling(['a', 'b'])
+    layout = toggleFloat(layout, 'a', RECTANGLE)
+    layout = toggleFloat(layout, 'b', RECTANGLE)
 
-    const spostato = updateFloating(layout, 'a', { x: 12, y: 34 })
-    verificaAlbero(spostato, 'updateFloating')
+    const moved = updateFloating(layout, 'a', { x: 12, y: 34 })
+    verifyTree(moved, 'updateFloating')
     assert.deepEqual(
-      spostato.floating.find((f) => f.id === 'a'),
+      moved.floating.find((f) => f.id === 'a'),
       { ...layout.floating.find((f) => f.id === 'a')!, x: 12, y: 34 }
     )
-    assert.deepEqual(spostato.floating.find((f) => f.id === 'b'), layout.floating.find((f) => f.id === 'b'))
-    assert.deepEqual(updateFloating(layout, 'fantasma', { x: 1 }), layout)
+    assert.deepEqual(moved.floating.find((f) => f.id === 'b'), layout.floating.find((f) => f.id === 'b'))
+    assert.deepEqual(updateFloating(layout, 'phantom', { x: 1 }), layout)
   })
 })
 
-// --- Fuoco e ingrandimento --------------------------------------------------
+// --- Focus & Zoom -----------------------------------------------------------
 
-describe('layout: fuoco e ingrandimento', () => {
-  it('il fuoco non si sposta mai su un riquadro che non esiste', () => {
-    const layout = costruisci(['a', 'b'])
-    for (const id of ['fantasma', '', 'A', 'aa']) {
-      const dopo = setFocus(layout, id)
-      assert.deepEqual(dopo, layout, `setFocus('${id}')`)
-      verificaAlbero(dopo, `setFocus('${id}')`)
+describe('layout: focus and zoom', () => {
+  it('focus never shifts to a non-existent pane', () => {
+    const layout = buildTiling(['a', 'b'])
+    for (const id of ['phantom', '', 'A', 'aa']) {
+      const after = setFocus(layout, id)
+      assert.deepEqual(after, layout, `setFocus('${id}')`)
+      verifyTree(after, `setFocus('${id}')`)
     }
   })
 
-  it('chiudendo il riquadro attivo il fuoco passa a uno che esiste', () => {
-    let layout = costruisci(['a', 'b', 'c'])
+  it('closing active pane shifts focus to an existing pane', () => {
+    let layout = buildTiling(['a', 'b', 'c'])
     layout = setFocus(layout, 'b')
     layout = removePane(layout, 'b')
-    verificaAlbero(layout, 'chiusura del riquadro attivo')
+    verifyTree(layout, 'closing active pane')
     assert.notEqual(layout.focused, null)
     assert.equal(hasPane(layout, layout.focused as string), true)
   })
 
-  it('chiudendo un riquadro qualsiasi il fuoco resta dov era', () => {
-    let layout = costruisci(['a', 'b', 'c'])
+  it('closing non-active pane preserves focus', () => {
+    let layout = buildTiling(['a', 'b', 'c'])
     layout = setFocus(layout, 'a')
     layout = removePane(layout, 'c')
     assert.equal(layout.focused, 'a')
-    verificaAlbero(layout, 'chiusura di un riquadro non attivo')
+    verifyTree(layout, 'closing inactive pane')
   })
 
-  it('toggleZoom ignora gli sconosciuti e si spegne al secondo colpo', () => {
-    const layout = costruisci(['a', 'b'])
-    assert.deepEqual(toggleZoom(layout, 'fantasma'), layout)
-    const acceso = toggleZoom(layout, 'a')
-    assert.equal(acceso.zoomed, 'a')
-    assert.equal(toggleZoom(acceso, 'a').zoomed, null)
-    // Ingrandire un altro riquadro sostituisce l'ingrandimento, non ne aggiunge.
-    assert.equal(toggleZoom(acceso, 'b').zoomed, 'b')
+  it('toggleZoom ignores unknown ids and toggles off on repeat', () => {
+    const layout = buildTiling(['a', 'b'])
+    assert.deepEqual(toggleZoom(layout, 'phantom'), layout)
+    const on = toggleZoom(layout, 'a')
+    assert.equal(on.zoomed, 'a')
+    assert.equal(toggleZoom(on, 'a').zoomed, null)
+    assert.equal(toggleZoom(on, 'b').zoomed, 'b')
   })
 })
 
 // --- swapPanes --------------------------------------------------------------
 
 describe('layout: swapPanes', () => {
-  it('scambia le posizioni senza toccare l insieme dei riquadri', () => {
-    const layout = costruisci(['a', 'b', 'c'])
-    const dopo = swapPanes(layout, 'a', 'c')
-    verificaAlbero(dopo, 'swapPanes')
-    assert.deepEqual(collectLeaves(dopo.root), ['c', 'b', 'a'])
-    // Due scambi riportano allo stato di partenza: la posizione e' l'unica cosa
-    // che cambia.
-    assert.deepEqual(swapPanes(dopo, 'a', 'c'), layout)
+  it('swaps positions without modifying pane set', () => {
+    const layout = buildTiling(['a', 'b', 'c'])
+    const after = swapPanes(layout, 'a', 'c')
+    verifyTree(after, 'swapPanes')
+    assert.deepEqual(collectLeaves(after.root), ['c', 'b', 'a'])
+    assert.deepEqual(swapPanes(after, 'a', 'c'), layout)
   })
 
-  it('non fa niente con se stesso, con gli sconosciuti o con un flottante', () => {
-    let layout = costruisci(['a', 'b', 'c'])
+  it('does nothing on self, unknown ids, or floating pane', () => {
+    let layout = buildTiling(['a', 'b', 'c'])
     assert.deepEqual(swapPanes(layout, 'a', 'a'), layout)
-    assert.deepEqual(swapPanes(layout, 'a', 'fantasma'), layout)
-    assert.deepEqual(swapPanes(layout, 'fantasma', 'a'), layout)
-    layout = toggleFloat(layout, 'c', RETTANGOLO)
+    assert.deepEqual(swapPanes(layout, 'a', 'phantom'), layout)
+    assert.deepEqual(swapPanes(layout, 'phantom', 'a'), layout)
+    layout = toggleFloat(layout, 'c', RECTANGLE)
     assert.deepEqual(swapPanes(layout, 'a', 'c'), layout)
   })
 })
 
 // --- EMPTY_LAYOUT -----------------------------------------------------------
 
-describe('layout: operazioni sul layout vuoto', () => {
-  const VUOTO = { root: null, floating: [], focused: null, zoomed: null }
+describe('layout: operations on empty layout', () => {
+  const EMPTY = { root: null, floating: [], focused: null, zoomed: null }
 
-  it('nessuna operazione lancia o inventa riquadri', () => {
-    const risultati: Layout[] = [
+  it('no operation throws or manufactures panes', () => {
+    const results: Layout[] = [
       removePane(EMPTY_LAYOUT, 'a'),
       setFocus(EMPTY_LAYOUT, 'a'),
       setRatio(EMPTY_LAYOUT, '', 0.5),
       setRatio(EMPTY_LAYOUT, 'ab', NaN),
       swapPanes(EMPTY_LAYOUT, 'a', 'b'),
-      toggleFloat(EMPTY_LAYOUT, 'a', RETTANGOLO),
+      toggleFloat(EMPTY_LAYOUT, 'a', RECTANGLE),
       toggleZoom(EMPTY_LAYOUT, 'a'),
       updateFloating(EMPTY_LAYOUT, 'a', { x: 1 })
     ]
-    for (const lato of LATI) risultati.push(movePaneTo(EMPTY_LAYOUT, 'a', 'b', lato))
+    for (const side of SIDES) results.push(movePaneTo(EMPTY_LAYOUT, 'a', 'b', side))
 
-    for (const [i, r] of risultati.entries()) {
-      verificaAlbero(r, `layout vuoto, risultato ${i}`)
-      assert.deepEqual(r, VUOTO, `risultato ${i}`)
-      assert.deepEqual(allPanes(r), [], `risultato ${i}`)
+    for (const [i, r] of results.entries()) {
+      verifyTree(r, `empty layout, result ${i}`)
+      assert.deepEqual(r, EMPTY, `result ${i}`)
+      assert.deepEqual(allPanes(r), [], `result ${i}`)
     }
   })
 
-  it('il primo riquadro diventa la radice ed e attivo', () => {
-    const dopo = addPane(EMPTY_LAYOUT, 'a', 'h')
-    verificaAlbero(dopo, 'primo riquadro')
-    assert.deepEqual(dopo.root, { kind: 'leaf', id: 'a' })
-    assert.equal(dopo.focused, 'a')
+  it('first pane becomes root and is focused', () => {
+    const after = addPane(EMPTY_LAYOUT, 'a', 'h')
+    verifyTree(after, 'first pane')
+    assert.deepEqual(after.root, { kind: 'leaf', id: 'a' })
+    assert.equal(after.focused, 'a')
   })
 
-  it('EMPTY_LAYOUT resta vuoto: e condiviso da tutte le finestre', () => {
-    // E' una costante esportata: se una funzione la modificasse sul posto, ogni
-    // avvio successivo partirebbe con i riquadri della sessione precedente.
-    assert.deepEqual(EMPTY_LAYOUT, VUOTO)
+  it('EMPTY_LAYOUT remains empty and immutable', () => {
+    assert.deepEqual(EMPTY_LAYOUT, EMPTY)
   })
 })

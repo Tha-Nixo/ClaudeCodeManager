@@ -1,13 +1,12 @@
 /**
- * Scorciatoie del compositor.
+ * Compositor keybindings.
  *
- * Regola d'oro: il compositor intercetta SOLO le combinazioni presenti nella
- * mappa. Tutto il resto arriva intatto al terminale, e quindi a Claude Code.
+ * Golden rule: the compositor intercepts ONLY combinations registered in the
+ * active keymap. Everything else passes directly to the terminal, and thus to Claude Code.
  *
- * Su tastiera italiana AltGr genera ctrlKey E altKey insieme (serve per @, #,
- * [, ], {, }). Dato che la firma include sempre tutti i modificatori, un
- * AltGr+ù produce 'ctrl+alt+…' che non è in mappa e passa oltre: nessun
- * carattere viene mai sottratto a chi scrive.
+ * On international keyboards (e.g. Italian), AltGr generates both ctrlKey and altKey
+ * (needed for @, #, [, ], {, }). Since signatures always include all modifiers,
+ * AltGr combinations produce 'ctrl+alt+…' which are omitted from the keymap and pass through.
  */
 
 export type Action =
@@ -48,7 +47,7 @@ export const DEFAULT_KEYMAP: Readonly<Record<string, Action>> = {
   'alt+w': 'close-pane',
   'alt+f': 'toggle-float',
   'alt+z': 'toggle-zoom',
-  // 'b' = affiancati (blocchi a fianco), 'v' = impilati (uno sotto l'altro)
+  // 'b' = side-by-side (horizontal split), 'v' = stacked (vertical split)
   'alt+b': 'split-h',
   'alt+v': 'split-v',
 
@@ -72,8 +71,7 @@ export const DEFAULT_KEYMAP: Readonly<Record<string, Action>> = {
   'alt+8': 'focus-8',
   'alt+9': 'focus-9',
 
-  // 's' = cerca. Come le altre di Alt, e' rimappabile: chi usa Alt+S in
-  // readline puo' spostarla o liberarla dalle impostazioni.
+  // 's' = search. Remappable: users who use Alt+S in readline can rebind or unbind in settings.
   'alt+s': 'search-pane',
 
   'alt+u': 'toggle-usage',
@@ -84,50 +82,44 @@ export const DEFAULT_KEYMAP: Readonly<Record<string, Action>> = {
 }
 
 /**
- * Azioni in ordine di presentazione, con la loro etichetta.
+ * Actions in presentation order, paired with user-facing labels.
  *
- * L'ordine è quello dell'elenco nelle impostazioni: raggruppato per
- * argomento, non alfabetico, perché chi cerca "sposta il fuoco" si aspetta di
- * trovarlo accanto agli altri movimenti.
+ * Grouped logically rather than alphabetically for Settings display.
  */
 export const ACTION_LABELS: { action: Action; label: string }[] = [
-  { action: 'new-session', label: 'Nuova sessione (selettore)' },
-  { action: 'new-session-here', label: 'Nuova sessione nella stessa cartella' },
-  { action: 'split-h', label: 'Nuova sessione affiancata' },
-  { action: 'split-v', label: 'Nuova sessione impilata' },
-  { action: 'close-pane', label: 'Chiudi il riquadro' },
-  { action: 'toggle-float', label: 'Stacca o riaggancia il riquadro' },
-  { action: 'toggle-zoom', label: 'Ingrandisci il riquadro' },
-  { action: 'focus-left', label: 'Fuoco a sinistra' },
-  { action: 'focus-right', label: 'Fuoco a destra' },
-  { action: 'focus-up', label: 'Fuoco in alto' },
-  { action: 'focus-down', label: 'Fuoco in basso' },
-  { action: 'move-left', label: 'Sposta il riquadro a sinistra' },
-  { action: 'move-right', label: 'Sposta il riquadro a destra' },
-  { action: 'move-up', label: 'Sposta il riquadro in alto' },
-  { action: 'move-down', label: 'Sposta il riquadro in basso' },
-  // Le nove scorciatoie numeriche mancavano dall'elenco: non comparivano nel
-  // pannello, quindi non erano né scopribili né rimappabili né liberabili, e
-  // riassegnando Alt+1 il fuoco sul primo riquadro restava senza tasto senza
-  // che nessuna riga lo rivelasse.
-  { action: 'focus-1', label: 'Fuoco sul riquadro 1' },
-  { action: 'focus-2', label: 'Fuoco sul riquadro 2' },
-  { action: 'focus-3', label: 'Fuoco sul riquadro 3' },
-  { action: 'focus-4', label: 'Fuoco sul riquadro 4' },
-  { action: 'focus-5', label: 'Fuoco sul riquadro 5' },
-  { action: 'focus-6', label: 'Fuoco sul riquadro 6' },
-  { action: 'focus-7', label: 'Fuoco sul riquadro 7' },
-  { action: 'focus-8', label: 'Fuoco sul riquadro 8' },
-  { action: 'focus-9', label: 'Fuoco sul riquadro 9' },
-  { action: 'search-pane', label: 'Cerca nel terminale' },
-  { action: 'toggle-usage', label: 'Statistiche di utilizzo' },
-  { action: 'toggle-settings', label: 'Impostazioni' },
-  { action: 'toggle-fullscreen', label: 'Schermo intero' },
-  { action: 'toggle-devtools', label: 'Strumenti di sviluppo' },
-  { action: 'quit', label: 'Esci' }
+  { action: 'new-session', label: 'New session (picker)' },
+  { action: 'new-session-here', label: 'New session in current directory' },
+  { action: 'split-h', label: 'New split session (horizontal)' },
+  { action: 'split-v', label: 'New split session (vertical)' },
+  { action: 'close-pane', label: 'Close pane' },
+  { action: 'toggle-float', label: 'Toggle float / dock pane' },
+  { action: 'toggle-zoom', label: 'Toggle zoom pane' },
+  { action: 'focus-left', label: 'Focus left' },
+  { action: 'focus-right', label: 'Focus right' },
+  { action: 'focus-up', label: 'Focus up' },
+  { action: 'focus-down', label: 'Focus down' },
+  { action: 'move-left', label: 'Move pane left' },
+  { action: 'move-right', label: 'Move pane right' },
+  { action: 'move-up', label: 'Move pane up' },
+  { action: 'move-down', label: 'Move pane down' },
+  { action: 'focus-1', label: 'Focus pane 1' },
+  { action: 'focus-2', label: 'Focus pane 2' },
+  { action: 'focus-3', label: 'Focus pane 3' },
+  { action: 'focus-4', label: 'Focus pane 4' },
+  { action: 'focus-5', label: 'Focus pane 5' },
+  { action: 'focus-6', label: 'Focus pane 6' },
+  { action: 'focus-7', label: 'Focus pane 7' },
+  { action: 'focus-8', label: 'Focus pane 8' },
+  { action: 'focus-9', label: 'Focus pane 9' },
+  { action: 'search-pane', label: 'Search terminal' },
+  { action: 'toggle-usage', label: 'Usage statistics' },
+  { action: 'toggle-settings', label: 'Settings' },
+  { action: 'toggle-fullscreen', label: 'Fullscreen' },
+  { action: 'toggle-devtools', label: 'Developer tools' },
+  { action: 'quit', label: 'Quit' }
 ]
 
-/** Tutte le azioni note, per validare una mappa scritta a mano. */
+/** Set of recognized actions for validating user keymaps. */
 const ACTIONS = new Set<string>(Object.values(DEFAULT_KEYMAP))
 
 export interface KeymapProblem {
@@ -137,22 +129,16 @@ export interface KeymapProblem {
 
 export interface ResolvedKeymap {
   keymap: Record<string, Action>
-  /** Voci scartate, da mostrare in chiaro invece di ignorarle in silenzio. */
+  /** Rejected key combinations with user-facing reasons. */
   problems: KeymapProblem[]
 }
 
 /**
- * Unisce le scorciatoie personalizzate a quelle predefinite.
+ * Merges custom shortcuts with the default keymap.
  *
- * Si SOVRAPPONE invece di sostituire: chi vuole spostare una sola
- * combinazione non deve ridichiarare le altre venti. Una voce con azione
- * vuota TOGLIE la scorciatoia, che è l'unico modo di liberare una
- * combinazione senza rimpiazzarla — serve a chi vuole restituire `Alt+B` a
- * readline.
- *
- * Le voci non valide vengono scartate con la ragione, non completate con un
- * valore di ripiego: una scorciatoia che fa una cosa diversa da quella
- * scritta è peggio di una che non funziona.
+ * Custom entries overlay defaults: remapping one shortcut does not require
+ * redefining the entire set. An empty action string removes the shortcut,
+ * freeing the combination.
  */
 export function resolveKeymap(custom: Record<string, string> | undefined): ResolvedKeymap {
   const keymap: Record<string, Action> = { ...DEFAULT_KEYMAP }
@@ -161,24 +147,21 @@ export function resolveKeymap(custom: Record<string, string> | undefined): Resol
   for (const [rawCombo, action] of Object.entries(custom ?? {})) {
     const combo = normalizeCombo(rawCombo)
     if (!combo) {
-      // La ragione va distinta: dire «combinazione vuota» a chi ha scritto
-      // `super+b` manda a cercare il problema dove non e'.
       problems.push({
         combo: rawCombo,
-        reason: rawCombo.trim() === '' ? 'combinazione vuota' : 'modificatore o tasto non valido'
+        reason: rawCombo.trim() === '' ? 'empty combination' : 'invalid modifier or key'
       })
       continue
     }
 
-    // Azione vuota = rimozione. Va gestita prima della validazione, perché
-    // la stringa vuota non è un'azione valida.
+    // Empty action = remove shortcut.
     if (action === '') {
       delete keymap[combo]
       continue
     }
 
     if (!ACTIONS.has(action)) {
-      problems.push({ combo, reason: `azione sconosciuta: ${action}` })
+      problems.push({ combo, reason: `unknown action: ${action}` })
       continue
     }
 
@@ -189,52 +172,38 @@ export function resolveKeymap(custom: Record<string, string> | undefined): Resol
 }
 
 /**
- * Riordina i modificatori nell'ordine canonico e normalizza il tasto.
+ * Normalizes modifier ordering and sanitizes the target key.
  *
- * Senza questo `shift+alt+b` non corrisponderebbe mai a niente, perché la
- * firma prodotta dall'evento è sempre `alt+shift+b`: il file si scrive a
- * mano, e nessuno indovina l'ordine giusto al primo colpo.
+ * Ensures combinations like `shift+alt+b` resolve to canonical `alt+shift+b`.
  */
 export function normalizeCombo(raw: string): string | null {
-  const testo = raw.toLowerCase()
+  const text = raw.toLowerCase()
 
-  // Una stringa vuota non e' una combinazione. Senza questo controllo finiva
-  // interpretata come «tasto +», e una chiave vuota nel file di
-  // configurazione legava silenziosamente il '+' a un'azione, togliendolo al
-  // terminale.
-  if (testo === '') return null
+  if (text === '') return null
 
-  // Il tasto si stacca sull'ULTIMO '+', non con uno split su tutti. Prima
-  // `split('+')` seguito da `filter(Boolean)` faceva sparire proprio i tasti
-  // '+' e spazio, e l'ultimo modificatore rimasto veniva scambiato per il
-  // tasto: chi assegnava Alt+Spazio perdeva la scorciatoia vecchia, non ne
-  // otteneva una nuova, e l'app mostrava «Alt» come tasto assegnato.
-  const taglio = testo.lastIndexOf('+')
+  // Split on the LAST '+' so '+' itself remains valid as a key.
+  const splitIdx = text.lastIndexOf('+')
 
-  // Un '+' in ultima posizione significa che il tasto è proprio '+'.
-  const grezzo = taglio === -1 ? testo : testo.slice(taglio + 1)
-  const modificatori = taglio === -1 ? '' : testo.slice(0, taglio)
+  const rawKey = splitIdx === -1 ? text : text.slice(splitIdx + 1)
+  const modifiers = splitIdx === -1 ? '' : text.slice(0, splitIdx)
 
-  // Lo spazio è un tasto legittimo, quindi si toglie il contorno solo quando
-  // resta qualcosa: `alt + b` scritto con spazi deve continuare a funzionare.
-  const key = grezzo.trim() || (grezzo === '' ? '+' : grezzo)
+  const key = rawKey.trim() || (rawKey === '' ? '+' : rawKey)
   if (!key) return null
 
   const mods = new Set(
-    modificatori
+    modifiers
       .split('+')
       .map((p) => p.trim())
       .filter(Boolean)
   )
   const order = ['ctrl', 'alt', 'shift', 'meta'].filter((m) => mods.has(m))
 
-  // Un modificatore sconosciuto in mezzo verrebbe scambiato per il tasto:
-  // meglio rifiutare che produrre una combinazione plausibile e sbagliata.
   if (order.length !== mods.size) return null
 
   return [...order, key].join('+')
 }
-/** Come `signature`, ma per il solo tasto: `code` per lettere e cifre. */
+
+/** Layout-independent key normalization: `code` for letters and digits. */
 function normalizeKey(e: KeyboardEvent): string {
   if (/^Key[A-Z]$/.test(e.code)) return e.code.slice(3).toLowerCase()
   if (/^Digit[0-9]$/.test(e.code)) return e.code.slice(5)
@@ -258,8 +227,7 @@ function normalizeKey(e: KeyboardEvent): string {
 }
 
 /**
- * Nome del tasto indipendente dal layout: per lettere e cifre si usa `code`,
- * così Alt+B resta Alt+B anche su tastiere non QWERTY.
+ * Computes a normalized keyboard event signature.
  */
 export function signature(e: KeyboardEvent): string {
   const parts: string[] = []
@@ -271,7 +239,7 @@ export function signature(e: KeyboardEvent): string {
   return parts.join('+')
 }
 
-/** Etichetta leggibile di una combinazione, per la UI. */
+/** Returns a user-friendly display string for a key combination. */
 export function prettyKey(sig: string): string {
   return sig
     .split('+')
@@ -292,11 +260,9 @@ export function prettyKey(sig: string): string {
         case 'down':
           return '↓'
         case 'enter':
-          return 'Invio'
-        // Senza un nome, «Alt+ » a schermo si legge «Alt+» e sembra una
-        // scorciatoia monca invece di una assegnata alla barra spaziatrice.
+          return 'Enter'
         case ' ':
-          return 'Spazio'
+          return 'Space'
         case 'escape':
           return 'Esc'
         default:
@@ -306,7 +272,7 @@ export function prettyKey(sig: string): string {
     .join('+')
 }
 
-/** Prima combinazione associata a un'azione, per mostrarla nei tooltip. */
+/** Returns the first key combination bound to an action for tooltips. */
 export function keyForAction(action: Action, keymap = DEFAULT_KEYMAP): string | null {
   const entry = Object.entries(keymap).find(([, a]) => a === action)
   return entry ? prettyKey(entry[0]) : null
@@ -314,15 +280,14 @@ export function keyForAction(action: Action, keymap = DEFAULT_KEYMAP): string | 
 
 export interface KeyHandlerOptions {
   keymap?: Readonly<Record<string, Action>>
-  /** Quando è false nessuna combinazione viene intercettata (es. overlay aperto). */
+  /** When false, no shortcuts are intercepted (e.g. modal overlay open). */
   isEnabled: () => boolean
   onAction: (action: Action) => void
 }
 
 /**
- * Registra l'ascoltatore in fase di CAPTURE su window: intercetta prima che
- * xterm veda l'evento. Le combinazioni non in mappa non vengono toccate, così
- * proseguono normalmente fino al terminale.
+ * Installs keydown listener during window CAPTURE phase to intercept
+ * shortcuts before xterm processes them.
  */
 export function installKeyHandler(options: KeyHandlerOptions): () => void {
   const keymap = options.keymap ?? DEFAULT_KEYMAP

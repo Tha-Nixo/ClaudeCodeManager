@@ -1,9 +1,9 @@
 import type { ITheme } from '@xterm/xterm'
 
 /**
- * Tema ANSI di xterm, derivato dalla stessa palette di claude-dark.css.
- * I 16 colori sono desaturati verso il grigio caldo del fondo così che
- * l'output colorato di Claude Code non stoni con la cornice dell'app.
+ * ANSI xterm theme, derived from the same palette as claude-dark.css.
+ * The 16 colors are desaturated towards warm gray background tones so that
+ * Claude Code colored output harmonizes with the application frame.
  */
 export const claudeDarkXterm: ITheme = {
   background: '#1A1917',

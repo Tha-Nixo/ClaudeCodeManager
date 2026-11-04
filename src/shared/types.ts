@@ -1,12 +1,12 @@
 import { DEFAULT_THEME_ID } from './themes/builtin'
 
 /**
- * Tipi condivisi fra main, preload e renderer.
- * Nessun import da 'electron' o da moduli node qui dentro: questo file
- * viene compilato anche nel bundle del renderer.
+ * Shared types between main, preload, and renderer.
+ * No imports from 'electron' or node modules here: this file
+ * is also compiled into renderer bundles.
  */
 
-/** Valori accettati da `claude --permission-mode`. 'default' = non passare il flag. */
+/** Accepted values for `claude --permission-mode`. 'default' = do not pass flag. */
 export type PermissionMode =
   | 'default'
   | 'acceptEdits'
@@ -16,53 +16,53 @@ export type PermissionMode =
   | 'dontAsk'
   | 'plan'
 
-/** Alias accettati da `claude --model`. 'default' = non passare il flag. */
+/** Accepted aliases for `claude --model`. 'default' = do not pass flag. */
 export type ModelAlias = 'default' | 'fable' | 'opus' | 'sonnet' | 'haiku'
 
-/** Livelli accettati da `claude --effort`. 'default' = non passare il flag. */
+/** Accepted levels for `claude --effort`. 'default' = do not pass flag. */
 export type Effort = 'default' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 
-// --- Connessioni remote -----------------------------------------------------
+// --- Remote Connections -----------------------------------------------------
 
-/** Parametri di connessione a un server. */
+/** Connection parameters for a remote server. */
 export interface SshTarget {
   host: string
   user: string
-  /** 22 se omessa. */
+  /** 22 if omitted. */
   port?: number
-  /** Percorso locale della chiave privata; se omesso decide ssh. */
+  /** Local path to private key; if omitted ssh defaults apply. */
   identityFile?: string
 }
 
 export interface SshConnection extends SshTarget {
   id: string
-  /** Etichetta mostrata nel selettore. */
+  /** Label shown in selector. */
   name: string
-  /** Cartella remota di partenza. */
+  /** Remote starting directory. */
   remotePath: string
-  /** Epoch ms dell'ultimo utilizzo, per l'ordinamento. */
+  /** Epoch ms of last usage for sorting. */
   lastUsed: number
 }
 
-/** Riferimento remoto di un riquadro: la connessione più la cartella scelta. */
+/** Remote reference for a pane: connection plus target directory. */
 export interface RemoteLaunch extends SshTarget {
   connectionId: string
-  /** Cartella remota in cui avviare claude. */
+  /** Remote directory where claude is spawned. */
   path: string
-  /** Nome della connessione, per l'intestazione del riquadro. */
+  /** Connection name for pane header. */
   name: string
 }
 
-/** Esito della ricognizione di un server. */
+/** Server reconnaissance probe result. */
 export interface RemoteProbe {
   ok: boolean
-  /** Messaggio già leggibile quando `ok` è falso. */
+  /** Human-readable error message when `ok` is false. */
   error?: string
   home: string
-  /** Percorso di claude sul server; vuoto se non installato. */
+  /** Remote path to claude binary; empty if not installed. */
   claudePath: string
   claudeVersion: string
-  /** Uscita di `uname -sr`. */
+  /** Output of `uname -sr`. */
   os: string
 }
 
@@ -76,13 +76,13 @@ export interface RemoteEntry {
 export interface RemoteDirListing {
   ok: boolean
   error?: string
-  /** Percorso assoluto risolto dal server, con `~` già espanso. */
+  /** Absolute path resolved by server with `~` expanded. */
   path: string
   parent: string | null
   entries: RemoteEntry[]
 }
 
-/** Conversazione già presente sul server, riprendibile con --resume. */
+/** Conversation already present on remote server, resumable with --resume. */
 export interface RemoteSession {
   sessionId: string
   label: string
@@ -93,39 +93,38 @@ export interface RemoteSession {
 }
 
 export interface LaunchOptions {
-  /** Cartella in cui aprire la sessione. Percorso Windows assoluto. */
+  /** Directory in which to open session. Windows absolute path. */
   cwd: string
   model?: ModelAlias
   effort?: Effort
   permissionMode?: PermissionMode
-  /** Testo inviato a Claude all'avvio (argomento posizionale della CLI). */
+  /** Initial text sent to Claude at startup (CLI positional argument). */
   initialPrompt?: string
-  /** Se valorizzato: `--resume <id>` invece di `--session-id <nuovo id>`. */
+  /** When set: `--resume <id>` instead of `--session-id <new id>`. */
   resumeSessionId?: string
-  /** Con resumeSessionId: crea un nuovo id invece di riusare l'originale. */
+  /** With resumeSessionId: creates a new id instead of reusing original. */
   forkSession?: boolean
-  /** `--continue`: riprende l'ultima conversazione nella cwd. Esclusivo con resume. */
+  /** `--continue`: resumes latest conversation in cwd. Mutually exclusive with resume. */
   continueLast?: boolean
-  /** `--name`: nome mostrato nel prompt box e in ~/.claude/sessions/<pid>.json */
+  /** `--name`: session name shown in prompt box and ~/.claude/sessions/<pid>.json. */
   name?: string
-  /** Dimensioni iniziali del PTY, misurate dal renderer prima dello spawn. */
+  /** Initial PTY dimensions, measured by renderer before spawn. */
   cols?: number
   rows?: number
   /**
-   * Quando presente il riquadro apre una connessione ssh ed esegue claude sul
-   * server, invece di lanciarlo in locale. `cwd` resta la cartella locale da
-   * cui parte ssh; la cartella di lavoro remota è `remote.path`.
+   * When present, pane opens an ssh connection and executes claude on server.
+   * `cwd` remains the local working directory for ssh; remote directory is `remote.path`.
    */
   remote?: RemoteLaunch
 }
 
 export interface CreateSessionResult {
-  /** Id del pannello. Coincide con `--session-id` salvo quando si fa resume. */
+  /** Pane ID. Matches `--session-id` except during session resume. */
   id: string
-  /** Id sessione Claude atteso su disco, usato per agganciare stato e statistiche. */
+  /** Expected Claude session ID on disk, used to link state and usage. */
   claudeSessionId: string
   cwd: string
-  /** Argomenti effettivamente passati a claude, utili per diagnostica. */
+  /** Arguments passed to claude, useful for diagnostics. */
   args: string[]
 }
 
@@ -140,13 +139,11 @@ export interface PtyExitEvent {
   signal?: number
 }
 
-// --- Sessioni Claude Code ---------------------------------------------------
+// --- Claude Code Sessions ---------------------------------------------------
 
 /**
- * Record scritto da Claude Code in ~/.claude/sessions/<pid>.json.
- * I campi oltre pid/sessionId/cwd sono opzionali di proposito: il formato è
- * interno a Claude Code e può cambiare fra versioni, quindi si legge quello
- * che c'è senza pretenderlo.
+ * Record written by Claude Code in ~/.claude/sessions/<pid>.json.
+ * Fields beyond pid/sessionId/cwd are optional: internal format subject to changes.
  */
 export interface LiveSession {
   pid: number
@@ -154,20 +151,20 @@ export interface LiveSession {
   cwd: string
   name?: string
   kind?: string
-  /** 'busy' | 'waiting' | 'idle' | altro. */
+  /** 'busy' | 'waiting' | 'idle' | other. */
   status?: string
-  /** Es. 'input needed'. Presente quando status è 'waiting'. */
+  /** E.g. 'input needed'. Present when status is 'waiting'. */
   waitingFor?: string
   startedAt?: number
   updatedAt?: number
   version?: string
 }
 
-/** Sessione passata, ricostruita dal transcript su disco. */
+/** Past session parsed from disk transcript. */
 export interface TranscriptSession {
   sessionId: string
   file: string
-  /** Etichetta scelta con la catena aiTitle -> lastPrompt -> primo messaggio. */
+  /** Label resolved via chain: aiTitle -> lastPrompt -> first message. */
   label: string
   aiTitle: string | null
   lastPrompt: string | null
@@ -175,15 +172,14 @@ export interface TranscriptSession {
   sizeBytes: number
 }
 
-// --- Aggiornamenti ----------------------------------------------------------
+// --- Updates ----------------------------------------------------------------
 
 /**
- * Stato del controllo aggiornamenti.
+ * Update check status.
  *
- * 'available' e 'ready' sono due cose diverse: 'available' vuol dire che una
- * versione nuova esiste ma va installata a mano, ed è il caso della copia
- * portabile; 'ready' vuol dire che è già scaricata e pronta a sostituirsi.
- * 'unsupported' non è un errore: è il caso normale in sviluppo.
+ * 'available' = new version exists but must be installed manually (e.g. portable).
+ * 'ready' = downloaded and ready to apply.
+ * 'unsupported' = normal state during development.
  */
 export type UpdateStatus =
   | 'idle'
@@ -196,31 +192,30 @@ export type UpdateStatus =
 
 export interface UpdateState {
   status: UpdateStatus
-  /** Versione disponibile, quando ce n'è una. */
+  /** Available version if one exists. */
   version?: string
-  /** Avanzamento dello scaricamento, 0-100. */
+  /** Download percentage (0-100). */
   percent?: number
-  /** Note della release, se il formato le rende leggibili come testo. */
+  /** Release notes if plain text format. */
   notes?: string
-  /** Spiegazione per 'error', 'available' e 'unsupported'. */
+  /** Explanation for 'error', 'available', or 'unsupported'. */
   message?: string
-  /** Pagina da cui scaricare, quando l'installazione va fatta a mano. */
+  /** Download release page url when manual update required. */
   releaseUrl?: string
-  /** Epoch ms dell'ultimo controllo andato a buon fine. */
+  /** Epoch ms of last successful check. */
   checkedAt?: number
 }
 
-// --- Layout persistente -----------------------------------------------------
+// --- Persisted Layout -------------------------------------------------------
 
 /**
- * Istantanea del compositor salvata fra un avvio e l'altro.
- * L'albero è tenuto come JSON opaco: la sua forma è definita dal motore di
- * layout nel renderer, e il main non ha motivo di conoscerla.
+ * Snapshot of compositor layout saved between app runs.
+ * Tree is stored as opaque JSON: structure defined by renderer layout engine.
  */
 export interface PersistedLayout {
   version: number
   savedAt: number
-  /** Serializzazione di `Layout` del renderer. */
+  /** Serialization of renderer `Layout`. */
   tree: unknown
   panes: PersistedPane[]
 }
@@ -229,11 +224,11 @@ export interface PersistedPane {
   paneId: string
   cwd: string
   launch: LaunchOptions
-  /** Sessione Claude da riprendere al ripristino, se nota. */
+  /** Claude session ID to resume on restore if known. */
   claudeSessionId: string | null
 }
 
-// --- Statistiche di utilizzo ------------------------------------------------
+// --- Usage Statistics -------------------------------------------------------
 
 export interface UsageSummary {
   todayCost: number
@@ -242,14 +237,14 @@ export interface UsageSummary {
   weekTokens: number
   totalCost: number
   totalTokens: number
-  /** Numero di transcript con almeno un turno conteggiato. */
+  /** Number of transcripts with at least one counted turn. */
   sessions: number
   byModel: { model: string; tokens: number; cost: number }[]
   byProject: { path: string; tokens: number; cost: number }[]
   generatedAt: number
 }
 
-/** Utilizzo di una singola sessione, per il pannello di monitoraggio. */
+/** Single session usage data for monitor panel. */
 export interface SessionUsage {
   sessionId: string
   cwd: string | null
@@ -258,24 +253,23 @@ export interface SessionUsage {
   cost: number
   lastAt: number
   /**
-   * Token in ingresso dell'ultimo turno, cache compresa: approssima quanto è
-   * pieno il contesto in questo momento.
+   * Latest turn input tokens including cache: estimates current context fullness.
    */
   contextTokens: number
-  /** Finestra del modello; 0 quando il modello non è riconosciuto. */
+  /** Context window size for model; 0 when unrecognized. */
   contextWindow: number
-  /** La finestra è dedotta dalla famiglia del modello, non certa. */
+  /** Window size is inferred by family heuristic rather than exact match. */
   contextApproximate: boolean
   model: string | null
 }
 
-/** Riga del pannello di monitoraggio: un riquadro con i suoi numeri. */
+/** Monitor panel entry: pane with its metrics. */
 export interface MonitorPane {
   paneId: string
   index: number
-  /** Etichetta già pronta: titolo del terminale o cartella accorciata. */
+  /** Prepared label: terminal title or shortened directory. */
   label: string
-  /** Percorso completo, locale o `utente@host:/cartella` se remoto. */
+  /** Full path: local path or `user@host:/remote/path` if remote. */
   where: string
   status: string
   waitingFor?: string | null
@@ -284,17 +278,17 @@ export interface MonitorPane {
   usage?: SessionUsage
 }
 
-/** Tutto ciò che il pannello mostra, sia agganciato sia staccato. */
+/** Complete state displayed by monitor panel, docked or detached. */
 export interface MonitorState {
   panes: MonitorPane[]
-  /** Costo e token di oggi, come nella barra superiore. */
+  /** Today cost and tokens as shown in topbar. */
   todayCost: number
   todayTokens: number
-  /** Epoch ms dell'ultimo aggiornamento. */
+  /** Epoch ms of latest update. */
   updatedAt: number
 }
 
-// --- Esplorazione cartelle --------------------------------------------------
+// --- Directory Browsing -----------------------------------------------------
 
 export interface DirEntry {
   name: string
@@ -305,17 +299,17 @@ export interface FolderInfo {
   path: string
   exists: boolean
   isGit: boolean
-  /** Ramo corrente, letto da .git/HEAD. */
+  /** Current git branch read from .git/HEAD. */
   branch: string | null
-  /** Presenza di CLAUDE.md o AGENTS.md. */
+  /** Whether CLAUDE.md or AGENTS.md exists. */
   hasInstructions: boolean
-  /** Transcript gia' presenti per questa cartella. */
+  /** Transcripts existing for this directory. */
   sessionCount: number
-  /** Il dialogo di fiducia di Claude Code e' gia' stato accettato. */
+  /** Claude Code trust dialog already accepted for folder. */
   trusted: boolean
 }
 
-/** Da dove arriva una voce del selettore. */
+/** Origin of candidate folder in selector. */
 export type CandidateSource =
   | 'favorite'
   | 'recent'
@@ -326,7 +320,7 @@ export type CandidateSource =
   | 'typed'
   | 'browse'
 
-/** Indici che richiedono una scansione del disco. */
+/** Index kinds requiring disk scanning. */
 export type IndexKind = 'roots' | 'git' | 'drive'
 
 export interface IndexStatus {
@@ -334,9 +328,9 @@ export interface IndexStatus {
   running: boolean
   visited: number
   found: number
-  /** Cartella in esame, per dare un segno di vita durante la scansione. */
+  /** Directory currently being scanned for progress feedback. */
   current: string
-  /** Epoch ms dell'ultima scansione completata, 0 se mai eseguita. */
+  /** Epoch ms of last completed scan, 0 if never run. */
   scannedAt: number
 }
 
@@ -344,56 +338,53 @@ export interface FolderCandidate {
   path: string
   source: CandidateSource
   lastUsed: number
-  /** Indici dei caratteri che corrispondono alla ricerca, per evidenziarli. */
+  /** Character indices matching search pattern for highlighting. */
   positions?: number[]
   info?: FolderInfo
 }
 
 export interface AppConfig {
-  /** Cartella usata al primo avvio e come fallback. */
+  /** Directory used on first launch and as fallback. */
   defaultCwd: string
-  /** Opzioni di lancio preimpostate nel selettore. */
+  /** Preset launch options in selector. */
   launchDefaults: {
     model: ModelAlias
     effort: Effort
     permissionMode: PermissionMode
   }
-  /** Numero di colonne/righe iniziali prima che FitAddon misuri l'elemento. */
+  /** Initial column and row counts before FitAddon measures element. */
   initialCols: number
   initialRows: number
   /**
-   * Al ripristino del layout riprende anche la conversazione di ogni riquadro
-   * con --resume, invece di aprire sessioni vuote sulle stesse cartelle.
+   * Resumes conversation of each pane with --resume upon layout restoration,
+   * instead of starting empty sessions in the same directories.
    */
   restoreResumesSessions: boolean
-  /** Sorgenti attive dell'indice del selettore. */
+  /** Enabled candidate sources for selector index. */
   indexSources: {
-    /** Cartelle già usate con Claude Code, più recenti e preferiti. */
+    /** Directories previously used with Claude Code, plus recents and favorites. */
     claude: boolean
-    /** Radici configurate, scansionate fino a 3 livelli. */
+    /** Configured roots scanned up to 3 levels deep. */
     roots: boolean
-    /** Solo cartelle che contengono un repository git. */
+    /** Only folders containing a git repository. */
     git: boolean
-    /** Scansione completa delle unità. Pesante: si attiva a mano. */
+    /** Complete filesystem drive scan. Heavy: enabled manually. */
     drive: boolean
   }
-  /** Radici usate dagli indici 'roots' e 'git'. */
+  /** Root paths used by 'roots' and 'git' indexers. */
   scanRoots: string[]
-  /** Id del tema attivo, integrato o caricato da file. */
+  /** Active theme ID, built-in or loaded from custom file. */
   themeId: string
   /**
-   * Notifica di sistema quando una sessione passa ad attendere input.
-   * Il lampeggio nella barra delle applicazioni resta comunque: è il segnale
-   * di riserva quando le notifiche sono spente o soppresse da Windows.
+   * Desktop notification when a session transitions to waiting for input.
+   * Taskbar flashing remains active regardless as fallback.
    */
   notifyOnWaiting: boolean
   /**
-   * Scorciatoie personalizzate: combinazione → azione.
+   * Custom keymap: key combo -> action.
    *
-   * Si SOVRAPPONE alla mappa predefinita invece di sostituirla, così un
-   * utente che vuole spostare una sola combinazione non deve ridichiarare
-   * tutte le altre. Per togliere una scorciatoia senza rimpiazzarla si
-   * assegna la stringa vuota.
+   * Overlays on top of default keymap without replacing it entirely.
+   * Mapping to empty string unbinds the action.
    */
   keymap: Record<string, string>
 }
@@ -407,8 +398,7 @@ export const DEFAULT_CONFIG: Omit<AppConfig, 'defaultCwd'> = {
   initialCols: 120,
   initialRows: 30,
   restoreResumesSessions: true,
-  // La scansione completa delle unità è l'unica disattivata di default: la
-  // prima esecuzione richiede minuti e va decisa dall'utente.
+  // Full drive scan disabled by default: first run takes minutes and requires user opt-in.
   indexSources: { claude: true, roots: true, git: true, drive: false },
   scanRoots: [],
   themeId: DEFAULT_THEME_ID,

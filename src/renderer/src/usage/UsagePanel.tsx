@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react'
 import type { UsageSummary } from '@shared/types'
 import { shortenPath } from '../util/path'
 
-/** I numeri grandi vanno letti a colpo d'occhio, non contati. */
 export function formatTokens(n: number): string {
   if (n >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(2)} G`
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)} M`
@@ -31,31 +30,29 @@ export function UsagePanel({ onClose }: UsagePanelProps): React.JSX.Element {
     <div className="cm-overlay" onPointerDown={onClose}>
       <div className="cm-usage" onPointerDown={(e) => e.stopPropagation()}>
         <header className="cm-usage__head">
-          <span className="cm-usage__title">Utilizzo</span>
+          <span className="cm-usage__title">Usage</span>
           <span className="cm-usage__spacer" />
-          <button className="cm-iconbtn" onClick={onClose} title="Chiudi (Esc)">
+          <button className="cm-iconbtn" onClick={onClose} title="Close (Esc)">
             ✕
           </button>
         </header>
 
         {!summary ? (
-          <div className="cm-selector__empty">Lettura dei transcript…</div>
+          <div className="cm-selector__empty">Reading transcripts…</div>
         ) : (
           <>
             <div className="cm-usage__stats">
-              <Stat label="Oggi" cost={summary.todayCost} tokens={summary.todayTokens} />
-              <Stat label="Ultimi 7 giorni" cost={summary.weekCost} tokens={summary.weekTokens} />
-              <Stat label="Totale" cost={summary.totalCost} tokens={summary.totalTokens} />
-              {/* Non "sessioni": i sotto-agenti hanno transcript propri, quindi
-                  il conteggio dei file è più alto di quello delle sessioni. */}
-              <Stat label="Transcript" plain={String(summary.sessions)} />
+              <Stat label="Today" cost={summary.todayCost} tokens={summary.todayTokens} />
+              <Stat label="Last 7 days" cost={summary.weekCost} tokens={summary.weekTokens} />
+              <Stat label="Total" cost={summary.totalCost} tokens={summary.totalTokens} />
+              <Stat label="Transcripts" plain={String(summary.sessions)} />
             </div>
 
             <div className="cm-usage__cols">
               <section className="cm-usage__col">
-                <div className="cm-field__label">Per modello</div>
+                <div className="cm-field__label">By model</div>
                 {summary.byModel.length === 0 ? (
-                  <div className="cm-usage__none">nessun dato</div>
+                  <div className="cm-usage__none">no data</div>
                 ) : (
                   summary.byModel.map((m) => (
                     <Bar
@@ -70,9 +67,9 @@ export function UsagePanel({ onClose }: UsagePanelProps): React.JSX.Element {
               </section>
 
               <section className="cm-usage__col">
-                <div className="cm-field__label">Per cartella</div>
+                <div className="cm-field__label">By directory</div>
                 {summary.byProject.length === 0 ? (
-                  <div className="cm-usage__none">nessun dato</div>
+                  <div className="cm-usage__none">no data</div>
                 ) : (
                   summary.byProject.map((p) => (
                     <Bar
@@ -89,8 +86,8 @@ export function UsagePanel({ onClose }: UsagePanelProps): React.JSX.Element {
             </div>
 
             <footer className="cm-usage__foot">
-              Prezzi di listino dell&apos;API Anthropic. Con un abbonamento Max o Pro questa non è
-              spesa reale, ma quanto sarebbe costato lo stesso lavoro via API.
+              Anthropic API list pricing. With a Max or Pro subscription, this reflects
+              equivalent API consumption rather than direct billing.
             </footer>
           </>
         )}
@@ -113,34 +110,36 @@ function Stat({
   return (
     <div className="cm-stat">
       <div className="cm-stat__label">{label}</div>
-      <div className="cm-stat__value">{plain ?? formatCost(cost ?? 0)}</div>
-      {tokens !== undefined && <div className="cm-stat__sub">{formatTokens(tokens)} token</div>}
+      <div className="cm-stat__value">{plain ?? (cost !== undefined ? formatCost(cost) : '—')}</div>
+      {tokens !== undefined && (
+        <div className="cm-stat__detail">{formatTokens(tokens)} tokens</div>
+      )}
     </div>
   )
 }
 
 function Bar({
   label,
-  detail,
   value,
   max,
+  detail,
   title
 }: {
   label: string
-  detail: string
   value: number
   max: number
+  detail: string
   title?: string
 }): React.JSX.Element {
-  const pct = max > 0 ? Math.max(2, Math.round((value / max) * 100)) : 0
+  const percent = max > 0 ? Math.max(3, Math.round((value / max) * 100)) : 0
   return (
-    <div className="cm-bar" title={title ?? label}>
+    <div className="cm-bar" title={title}>
       <div className="cm-bar__row">
         <span className="cm-bar__label">{label}</span>
         <span className="cm-bar__detail">{detail}</span>
       </div>
       <div className="cm-bar__track">
-        <div className="cm-bar__fill" style={{ width: `${pct}%` }} />
+        <div className="cm-bar__fill" style={{ width: `${percent}%` }} />
       </div>
     </div>
   )

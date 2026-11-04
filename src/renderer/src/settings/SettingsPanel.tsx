@@ -8,7 +8,7 @@ interface SettingsPanelProps {
   config: AppConfig
   onConfigChange: (config: AppConfig) => void
   onClose: () => void
-  /** Scorciatoie scartate dalla configurazione, da mostrare in chiaro. */
+  /** Ignored user keymap entries to display explicitly. */
   keymapProblems: KeymapProblem[]
 }
 
@@ -22,28 +22,28 @@ const SOURCES: {
   {
     key: 'claude',
     kind: null,
-    title: 'Cartelle già usate con Claude',
-    detail: 'Da history.jsonl e dai transcript. Nessuna scansione del disco, sempre aggiornata.'
+    title: 'Folders previously used with Claude',
+    detail: 'Parsed from history.jsonl and transcripts. No disk scanning, always up to date.'
   },
   {
     key: 'git',
     kind: 'git',
-    title: 'Repository git',
-    detail: 'Si ferma alla prima cartella con .git dentro le radici configurate.'
+    title: 'Git repositories',
+    detail: 'Stops at the first folder containing .git within configured roots.'
   },
   {
     key: 'roots',
     kind: 'roots',
-    title: 'Radici configurate',
-    detail: 'Tutte le sottocartelle fino a 3 livelli dentro le radici configurate.'
+    title: 'Configured roots',
+    detail: 'All subdirectories up to 3 levels deep within configured roots.'
   },
   {
     key: 'drive',
     kind: 'drive',
-    title: 'Unità complete',
+    title: 'Full drives',
     detail:
-      'Scansione di tutte le unità. La prima esecuzione può richiedere minuti; ' +
-      'sono escluse Windows, Program Files, AppData, node_modules e simili.',
+      'Scans all local drives. The initial sweep may take several minutes; ' +
+      'system paths such as Windows, Program Files, AppData, and node_modules are excluded.',
     heavy: true
   }
 ]
@@ -60,8 +60,7 @@ export function SettingsPanel({
   const [themeErrors, setThemeErrors] = useState<ThemeLoadError[]>([])
 
   useEffect(() => {
-    // Il catalogo si rilegge ad ogni apertura: cosi' un file appena messo
-    // nella cartella compare senza dover riavviare l'app.
+    // Reload catalog on open so newly dropped files appear without restarting.
     void window.cm.theme.catalog().then((c) => {
       setCatalog(c.themes)
       setThemeErrors(c.errors)
@@ -103,24 +102,21 @@ export function SettingsPanel({
     <div className="cm-overlay" onPointerDown={onClose}>
       <div className="cm-settings" onPointerDown={(e) => e.stopPropagation()}>
         <header className="cm-usage__head">
-          <span className="cm-usage__title">Impostazioni</span>
+          <span className="cm-usage__title">Settings</span>
           <span className="cm-usage__spacer" />
-          <button className="cm-iconbtn" onClick={onClose} title="Chiudi (Esc)">
+          <button className="cm-iconbtn" onClick={onClose} title="Close (Esc)">
             ✕
           </button>
         </header>
 
         <div className="cm-settings__body">
-          {/* In cima perche' la pastiglia della barra porta qui: se la sezione
-              fosse in fondo, chi la preme troverebbe il pannello all'inizio e
-              dovrebbe cercarsi da solo quello che ha appena chiesto. */}
           <UpdateSection />
 
           <section className="cm-settings__section">
             <div className="cm-settings__row">
-              <span className="cm-field__label">Tema</span>
+              <span className="cm-field__label">Theme</span>
               <button className="cm-chip" onClick={() => void window.cm.theme.openDir()}>
-                Apri la cartella dei temi
+                Open themes folder
               </button>
             </div>
 
@@ -130,7 +126,7 @@ export function SettingsPanel({
                   key={theme.id}
                   className={`cm-theme ${theme.id === config.themeId ? 'cm-theme--on' : ''}`}
                   onClick={() => patch({ themeId: theme.id })}
-                  title={theme.source ?? 'tema integrato'}
+                  title={theme.source ?? 'built-in theme'}
                 >
                   <span className="cm-theme__swatches">
                     {[
@@ -148,7 +144,7 @@ export function SettingsPanel({
                   </span>
                   <span className="cm-theme__name">
                     {theme.name}
-                    {theme.custom && <span className="cm-theme__tag">tuo</span>}
+                    {theme.custom && <span className="cm-theme__tag">custom</span>}
                   </span>
                   {theme.description && (
                     <span className="cm-theme__desc">{theme.description}</span>
@@ -169,7 +165,7 @@ export function SettingsPanel({
           </section>
 
           <section className="cm-settings__section">
-            <div className="cm-field__label">Cartella di partenza</div>
+            <div className="cm-field__label">Starting directory</div>
             <input
               className="cm-selector__prompt"
               value={config.defaultCwd}
@@ -183,7 +179,7 @@ export function SettingsPanel({
                 checked={config.restoreResumesSessions}
                 onChange={(e) => patch({ restoreResumesSessions: e.target.checked })}
               />
-              Al ripristino riprendi anche le conversazioni, non solo le cartelle
+              On restore, resume conversations in addition to directories
             </label>
             <label className="cm-settings__check">
               <input
@@ -191,31 +187,30 @@ export function SettingsPanel({
                 checked={config.notifyOnWaiting}
                 onChange={(e) => patch({ notifyOnWaiting: e.target.checked })}
               />
-              Avvisa quando una sessione attende una risposta
+              Notify when a session awaits user input
             </label>
             <div className="cm-source__detail">
-              Solo quando la finestra non ha il fuoco. L&apos;icona nella barra delle
-              applicazioni lampeggia comunque, anche a notifiche spente.
+              Only when window is unfocused. Taskbar icon flashes regardless.
             </div>
           </section>
 
           <KeymapEditor config={config} onPatch={patch} problems={keymapProblems} />
 
           <section className="cm-settings__section">
-            <div className="cm-field__label">Radici da indicizzare</div>
+            <div className="cm-field__label">Roots to index</div>
             <textarea
               className="cm-settings__roots"
               value={rootsText}
               spellCheck={false}
               rows={4}
-              placeholder={'Un percorso per riga\nC:\\Users\\...\\Desktop'}
+              placeholder={'One path per line\nC:\\Users\\...\\Projects'}
               onChange={(e) => setRootsText(e.target.value)}
               onBlur={commitRoots}
             />
           </section>
 
           <section className="cm-settings__section">
-            <div className="cm-field__label">Sorgenti del selettore</div>
+            <div className="cm-field__label">Folder picker sources</div>
             {SOURCES.map((source) => {
               const status = source.kind ? statuses[source.kind] : null
               const enabled = config.indexSources[source.key]
@@ -238,29 +233,29 @@ export function SettingsPanel({
                       {status?.running ? (
                         <>
                           <span className="cm-source__progress">
-                            {status.visited.toLocaleString('it-IT')} cartelle visitate ·{' '}
-                            {status.found.toLocaleString('it-IT')} trovate
+                            {status.visited.toLocaleString('en-US')} folders visited ·{' '}
+                            {status.found.toLocaleString('en-US')} found
                             {status.current ? ` · ${status.current}` : ''}
                           </span>
                           <button
                             className="cm-chip"
                             onClick={() => window.cm.index.cancel(source.kind as IndexKind)}
                           >
-                            Annulla
+                            Cancel
                           </button>
                         </>
                       ) : (
                         <>
                           <span className="cm-source__progress">
                             {status?.scannedAt
-                              ? `${status.found.toLocaleString('it-IT')} cartelle · ${relative(status.scannedAt)}`
-                              : 'mai eseguita'}
+                              ? `${status.found.toLocaleString('en-US')} folders · ${relative(status.scannedAt)}`
+                              : 'never scanned'}
                           </span>
                           <button
                             className="cm-chip"
                             onClick={() => void window.cm.index.rescan(source.kind as IndexKind)}
                           >
-                            {status?.scannedAt ? 'Riscansiona' : 'Scansiona'}
+                            {status?.scannedAt ? 'Rescan' : 'Scan'}
                           </button>
                         </>
                       )}
@@ -273,8 +268,7 @@ export function SettingsPanel({
         </div>
 
         <footer className="cm-usage__foot">
-          Le impostazioni sono salvate in <code>%APPDATA%\claudemanager\config.json</code> e possono
-          essere modificate anche a mano.
+          Settings are saved in <code>%APPDATA%\claudemanager\config.json</code> and can be edited manually.
         </footer>
       </div>
     </div>
@@ -282,10 +276,7 @@ export function SettingsPanel({
 }
 
 /**
- * Versione in esecuzione e stato degli aggiornamenti.
- *
- * Il pulsante che riavvia è volutamente separato e chiede conferma: installare
- * significa chiudere l'app, e con essa ogni sessione Claude aperta.
+ * Running version and update status.
  */
 function UpdateSection(): React.JSX.Element {
   const [version, setVersion] = useState('')
@@ -310,12 +301,12 @@ function UpdateSection(): React.JSX.Element {
   return (
     <section className="cm-settings__section">
       <div className="cm-settings__row">
-        <span className="cm-field__label">Versione</span>
+        <span className="cm-field__label">Version</span>
         <span className="cm-update__version">{version || '…'}</span>
         <span className="cm-usage__spacer" />
         {status !== 'unsupported' && (
           <button className="cm-chip" disabled={checking} onClick={() => void check()}>
-            {checking || status === 'checking' ? 'Controllo…' : 'Controlla aggiornamenti'}
+            {checking || status === 'checking' ? 'Checking…' : 'Check for updates'}
           </button>
         )}
       </div>
@@ -324,26 +315,25 @@ function UpdateSection(): React.JSX.Element {
         {status === 'unsupported' && state?.message}
         {status === 'idle' &&
           (state?.checkedAt
-            ? `Nessun aggiornamento disponibile · controllato ${relative(state.checkedAt)}`
-            : 'Il controllo avviene da solo poco dopo l’avvio e poi una volta al giorno.')}
-        {status === 'checking' && 'Controllo in corso…'}
+            ? `No updates available · checked ${relative(state.checkedAt)}`
+            : 'Update check runs shortly after startup and daily thereafter.')}
+        {status === 'checking' && 'Checking for updates…'}
         {status === 'downloading' &&
-          `Scaricamento della versione ${state?.version} · ${state?.percent ?? 0}%`}
-        {status === 'error' && `Controllo non riuscito: ${state?.message}`}
+          `Downloading version ${state?.version} · ${state?.percent ?? 0}%`}
+        {status === 'error' && `Update check failed: ${state?.message}`}
         {status === 'available' && (
           <>
-            È uscita la versione <strong>{state?.version}</strong>. {state?.message}
+            Version <strong>{state?.version}</strong> is available. {state?.message}
           </>
         )}
         {status === 'ready' && (
           <>
-            La versione <strong>{state?.version}</strong> è pronta. Verrà installata da sola alla
-            chiusura dell’app.
+            Version <strong>{state?.version}</strong> is ready. It will be installed automatically
+            when the application exits.
           </>
         )}
       </div>
 
-      {/* React lo rende come testo, e dal main arriva gia' ripulito dall'HTML. */}
       {state?.notes && (status === 'available' || status === 'ready') && (
         <div className="cm-update__notes">{state.notes}</div>
       )}
@@ -351,11 +341,10 @@ function UpdateSection(): React.JSX.Element {
       {status === 'available' && (
         <div className="cm-source__actions">
           <span className="cm-source__progress">
-            Chiudi ClaudeManager prima di sostituire il file: un eseguibile in uso non si può
-            rimpiazzare.
+            Close ClaudeManager before replacing the executable.
           </span>
           <button className="cm-chip" onClick={() => void window.cm.update.openRelease()}>
-            Vai alla versione {state?.version}
+            View version {state?.version}
           </button>
         </div>
       )}
@@ -365,18 +354,18 @@ function UpdateSection(): React.JSX.Element {
           {confirming ? (
             <>
               <span className="cm-source__progress">
-                Il riavvio chiude tutte le sessioni aperte. Procedere?
+                Restarting will close all open sessions. Proceed?
               </span>
               <button className="cm-chip" onClick={() => setConfirming(false)}>
                 No
               </button>
               <button className="cm-chip" onClick={() => void window.cm.update.install()}>
-                Riavvia e installa
+                Restart & install
               </button>
             </>
           ) : (
             <button className="cm-chip" onClick={() => setConfirming(true)}>
-              Installa adesso
+              Install now
             </button>
           )}
         </div>
@@ -387,9 +376,9 @@ function UpdateSection(): React.JSX.Element {
 
 function relative(timestamp: number): string {
   const minutes = Math.round((Date.now() - timestamp) / 60000)
-  if (minutes < 1) return 'appena aggiornata'
-  if (minutes < 60) return `${minutes} min fa`
+  if (minutes < 1) return 'just now'
+  if (minutes < 60) return `${minutes}m ago`
   const hours = Math.round(minutes / 60)
-  if (hours < 24) return `${hours} h fa`
-  return `${Math.round(hours / 24)} g fa`
+  if (hours < 24) return `${hours}h ago`
+  return `${Math.round(hours / 24)}d ago`
 }

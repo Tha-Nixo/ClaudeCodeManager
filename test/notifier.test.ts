@@ -4,315 +4,276 @@ import { decideNotices } from '../src/main/notify/notifier'
 import type { LiveSession, MonitorPane } from '@shared/types'
 
 /**
- * `decideNotices` e' il cuore di M11: decide se l'utente viene interrotto o no.
+ * `decideNotices` is the core of M11: it determines when the user should be alerted.
  *
- * Tutto quello che puo' andare storto sta qui — riconoscere il passaggio,
- * tacere al primo avvistamento, non insistere, non intromettersi nelle sessioni
- * altrui — mentre mostrare la notifica e' una riga sola. Se questa funzione
- * sbaglia, o l'avviso non arriva quando serve (e la funzione non esiste), o
- * arriva a raffica (e l'utente la spegne).
+ * It manages edge cases: detecting state transitions, silencing first sightings,
+ * throttling repeat alerts, ignoring non-owned sessions.
  */
 
-/** Ricordo per sessione: stesso contenuto della memoria interna del notifier. */
-interface Ricordo {
+interface MemoryEntry {
   status: string
   missing: number
 }
 
-function sessione(sessionId: string, status?: string): LiveSession {
-  return { pid: 1000, sessionId, cwd: 'C:\\progetto', status }
+function liveSession(sessionId: string, status?: string): LiveSession {
+  return { pid: 1000, sessionId, cwd: 'C:\\project', status }
 }
 
-function riquadro(claudeSessionId: string | null, label = 'riquadro'): MonitorPane {
+function monitorPane(claudeSessionId: string | null, label = 'pane'): MonitorPane {
   return {
-    paneId: `pane-${claudeSessionId ?? 'vuoto'}`,
+    paneId: `pane-${claudeSessionId ?? 'empty'}`,
     index: 0,
     label,
-    where: 'C:\\progetto',
+    where: 'C:\\project',
     status: 'idle',
     remote: false,
     claudeSessionId
   }
 }
 
-/** Etichette dei riquadri avvisati: l'unica cosa che l'utente vede davvero. */
-function avvisati(notices: { pane: MonitorPane }[]): string[] {
+/** Labels of notified panes: what the user actually sees. */
+function notifiedLabels(notices: { pane: MonitorPane }[]): string[] {
   return notices.map((n) => n.pane.label)
 }
 
-describe('notifier: memoria fra un giro e l\'altro — Regressione della issue #2', () => {
-  it('avvisa al ritorno dopo un giro di assenza dal registro', () => {
-    // Il registro viene RISCRITTO proprio quando lo stato cambia, quindi per un
-    // giro la sessione puo' mancare. Dimenticandola subito, il ritorno con
-    // 'waiting' sembrava un primo avvistamento e nessun avviso partiva: la
-    // funzione falliva nel caso piu' probabile, cioe' sempre.
-    const memoria = new Map<string, Ricordo>()
-    const panes = [riquadro('s1', 'API')]
+describe('notifier: memory across polling cycles — Regression test for issue #2', () => {
+  it('notifies on return after a single cycle absence from registry', () => {
+    // The registry is rewritten when status changes, so a session might briefly vanish for 1 cycle.
+    const memory = new Map<string, MemoryEntry>()
+    const panes = [monitorPane('s1', 'API')]
 
-    decideNotices([sessione('s1', 'busy')], panes, memoria)
-    assert.deepEqual(avvisati(decideNotices([], panes, memoria)), [], 'un giro vuoto non avvisa')
+    decideNotices([liveSession('s1', 'busy')], panes, memory)
+    assert.deepEqual(notifiedLabels(decideNotices([], panes, memory)), [], 'empty cycle does not notify')
 
-    const dopo = decideNotices([sessione('s1', 'waiting')], panes, memoria)
-    assert.deepEqual(avvisati(dopo), ['API'], 'il ritorno a waiting dopo un buco deve avvisare')
+    const after = decideNotices([liveSession('s1', 'waiting')], panes, memory)
+    assert.deepEqual(notifiedLabels(after), ['API'], 'returning to waiting after a gap must notify')
   })
 
-  it('sopravvive anche a quattro giri di assenza consecutivi', () => {
-    // Il margine non e' di un giro solo: piu' riscritture ravvicinate del
-    // registro non devono bastare a perdere il filo.
-    const memoria = new Map<string, Ricordo>()
-    const panes = [riquadro('s1', 'API')]
+  it('survives up to four consecutive absent cycles', () => {
+    const memory = new Map<string, MemoryEntry>()
+    const panes = [monitorPane('s1', 'API')]
 
-    decideNotices([sessione('s1', 'busy')], panes, memoria)
-    for (let i = 0; i < 4; i++) decideNotices([], panes, memoria)
+    decideNotices([liveSession('s1', 'busy')], panes, memory)
+    for (let i = 0; i < 4; i++) decideNotices([], panes, memory)
 
-    assert.deepEqual(avvisati(decideNotices([sessione('s1', 'waiting')], panes, memoria)), ['API'])
+    assert.deepEqual(notifiedLabels(decideNotices([liveSession('s1', 'waiting')], panes, memory)), ['API'])
   })
 
-  it('dimentica davvero una sessione sparita per sempre', () => {
-    // L'altra meta' della issue: se il ricordo non scadesse mai, la mappa
-    // crescerebbe ad ogni sessione chiusa finche' l'app resta accesa.
-    const memoria = new Map<string, Ricordo>()
-    const panes = [riquadro('s1', 'API')]
+  it('forgets sessions gone permanently', () => {
+    const memory = new Map<string, MemoryEntry>()
+    const panes = [monitorPane('s1', 'API')]
 
-    decideNotices([sessione('s1', 'busy')], panes, memoria)
-    assert.equal(memoria.size, 1)
+    decideNotices([liveSession('s1', 'busy')], panes, memory)
+    assert.equal(memory.size, 1)
 
-    for (let i = 0; i < 20; i++) decideNotices([], panes, memoria)
-    assert.equal(memoria.size, 0, 'la memoria di una sessione sparita deve liberarsi')
+    for (let i = 0; i < 20; i++) decideNotices([], panes, memory)
+    assert.equal(memory.size, 0, 'memory of permanently vanished session should clear')
   })
 
-  it('non accumula ricordi di sessioni che vanno e vengono', () => {
-    // Trenta sessioni brevi, una alla volta: se ognuna lasciasse traccia, la
-    // memoria crescerebbe senza limite in una giornata di lavoro normale.
-    const memoria = new Map<string, Ricordo>()
+  it('does not accumulate memory of transient sessions', () => {
+    const memory = new Map<string, MemoryEntry>()
     for (let i = 0; i < 30; i++) {
-      decideNotices([sessione(`s${i}`, 'busy')], [], memoria)
-      for (let giro = 0; giro < 5; giro++) decideNotices([], [], memoria)
+      decideNotices([liveSession(`s${i}`, 'busy')], [], memory)
+      for (let round = 0; round < 5; round++) decideNotices([], [], memory)
     }
-    assert.equal(memoria.size, 0)
+    assert.equal(memory.size, 0)
   })
 
-  it('l\'assenza si conta dall\'ultimo avvistamento, non dal primo', () => {
-    // Una sessione lunga che sfarfalla piu' volte non deve essere dimenticata
-    // sommando assenze lontane fra loro.
-    const memoria = new Map<string, Ricordo>()
-    const panes = [riquadro('s1', 'API')]
+  it('absence counts from the last sighting, not the first', () => {
+    const memory = new Map<string, MemoryEntry>()
+    const panes = [monitorPane('s1', 'API')]
 
-    decideNotices([sessione('s1', 'busy')], panes, memoria)
-    for (let ciclo = 0; ciclo < 3; ciclo++) {
-      for (let i = 0; i < 4; i++) decideNotices([], panes, memoria)
-      decideNotices([sessione('s1', 'busy')], panes, memoria)
+    decideNotices([liveSession('s1', 'busy')], panes, memory)
+    for (let cycle = 0; cycle < 3; cycle++) {
+      for (let i = 0; i < 4; i++) decideNotices([], panes, memory)
+      decideNotices([liveSession('s1', 'busy')], panes, memory)
     }
 
-    for (let i = 0; i < 4; i++) decideNotices([], panes, memoria)
-    assert.deepEqual(avvisati(decideNotices([sessione('s1', 'waiting')], panes, memoria)), ['API'])
+    for (let i = 0; i < 4; i++) decideNotices([], panes, memory)
+    assert.deepEqual(notifiedLabels(decideNotices([liveSession('s1', 'waiting')], panes, memory)), ['API'])
   })
 })
 
-describe('notifier: quando avvisare', () => {
-  it('avvisa sul passaggio diretto da busy ad attesa', () => {
-    // Il caso base che giustifica l'intera funzione.
-    const memoria = new Map<string, Ricordo>()
-    const panes = [riquadro('s1', 'API')]
+describe('notifier: when to notify', () => {
+  it('notifies on direct transition from busy to waiting', () => {
+    const memory = new Map<string, MemoryEntry>()
+    const panes = [monitorPane('s1', 'API')]
 
-    decideNotices([sessione('s1', 'busy')], panes, memoria)
-    const notices = decideNotices([sessione('s1', 'waiting')], panes, memoria)
+    decideNotices([liveSession('s1', 'busy')], panes, memory)
+    const notices = decideNotices([liveSession('s1', 'waiting')], panes, memory)
 
     assert.equal(notices.length, 1)
     assert.equal(notices[0].pane.label, 'API')
-    assert.equal(notices[0].live.sessionId, 's1', 'l\'avviso deve portarsi dietro la sessione giusta')
+    assert.equal(notices[0].live.sessionId, 's1', 'notice must carry correct session id')
   })
 
-  it('non riavvisa finche\' la sessione resta in attesa', () => {
-    // Il registro viene riscritto spesso: una raffica di notifiche per una sola
-    // attesa e' il modo piu' rapido per far spegnere la funzione all'utente.
-    const memoria = new Map<string, Ricordo>()
-    const panes = [riquadro('s1', 'API')]
+  it('does not repeat notice while session remains in waiting', () => {
+    const memory = new Map<string, MemoryEntry>()
+    const panes = [monitorPane('s1', 'API')]
 
-    decideNotices([sessione('s1', 'busy')], panes, memoria)
-    assert.equal(decideNotices([sessione('s1', 'waiting')], panes, memoria).length, 1)
+    decideNotices([liveSession('s1', 'busy')], panes, memory)
+    assert.equal(decideNotices([liveSession('s1', 'waiting')], panes, memory).length, 1)
 
     for (let i = 0; i < 5; i++) {
       assert.equal(
-        decideNotices([sessione('s1', 'waiting')], panes, memoria).length,
+        decideNotices([liveSession('s1', 'waiting')], panes, memory).length,
         0,
-        'restare in attesa non e\' un passaggio'
+        'remaining in waiting is not a new transition'
       )
     }
   })
 
-  it('riavvisa se l\'attesa riprende dopo che la sessione e\' ripartita', () => {
-    // Rispondere e poi essere richiamati e' un evento nuovo: qui l'avviso serve
-    // di nuovo, altrimenti la seconda attesa passerebbe inosservata.
-    const memoria = new Map<string, Ricordo>()
-    const panes = [riquadro('s1', 'API')]
+  it('re-notifies if waiting resumes after session became busy again', () => {
+    const memory = new Map<string, MemoryEntry>()
+    const panes = [monitorPane('s1', 'API')]
 
-    decideNotices([sessione('s1', 'busy')], panes, memoria)
-    decideNotices([sessione('s1', 'waiting')], panes, memoria)
-    decideNotices([sessione('s1', 'busy')], panes, memoria)
+    decideNotices([liveSession('s1', 'busy')], panes, memory)
+    decideNotices([liveSession('s1', 'waiting')], panes, memory)
+    decideNotices([liveSession('s1', 'busy')], panes, memory)
 
-    assert.deepEqual(avvisati(decideNotices([sessione('s1', 'waiting')], panes, memoria)), ['API'])
+    assert.deepEqual(notifiedLabels(decideNotices([liveSession('s1', 'waiting')], panes, memory)), ['API'])
   })
 
-  it('tace al primo avvistamento, anche se la sessione attende gia\'', () => {
-    // All'avvio dell'app tutte le sessioni vive sono "nuove": avvisare sul
-    // primo giro produrrebbe una raffica per attese che l'utente conosce gia'.
-    const memoria = new Map<string, Ricordo>()
-    const panes = [riquadro('s1', 'API'), riquadro('s2', 'Web')]
+  it('silences on first sighting even if session is already waiting', () => {
+    const memory = new Map<string, MemoryEntry>()
+    const panes = [monitorPane('s1', 'API'), monitorPane('s2', 'Web')]
 
     const notices = decideNotices(
-      [sessione('s1', 'waiting'), sessione('s2', 'waiting')],
+      [liveSession('s1', 'waiting'), liveSession('s2', 'waiting')],
       panes,
-      memoria
+      memory
     )
 
-    assert.deepEqual(avvisati(notices), [])
+    assert.deepEqual(notifiedLabels(notices), [])
   })
 
-  it('non avvisa per passaggi verso stati diversi dall\'attesa', () => {
-    // Solo l'attesa richiede l'utente: idle o busy sono affari dell'app.
-    const memoria = new Map<string, Ricordo>()
-    const panes = [riquadro('s1', 'API')]
+  it('does not notify for transitions to states other than waiting', () => {
+    const memory = new Map<string, MemoryEntry>()
+    const panes = [monitorPane('s1', 'API')]
 
-    decideNotices([sessione('s1', 'waiting')], panes, memoria)
-    assert.deepEqual(avvisati(decideNotices([sessione('s1', 'busy')], panes, memoria)), [])
-    assert.deepEqual(avvisati(decideNotices([sessione('s1', 'idle')], panes, memoria)), [])
+    decideNotices([liveSession('s1', 'waiting')], panes, memory)
+    assert.deepEqual(notifiedLabels(decideNotices([liveSession('s1', 'busy')], panes, memory)), [])
+    assert.deepEqual(notifiedLabels(decideNotices([liveSession('s1', 'idle')], panes, memory)), [])
   })
 
-  it('avvisa per ogni sessione che passa in attesa nello stesso giro', () => {
-    // Tre riquadri che si fermano insieme sono tre cose da fare: perderne due
-    // sarebbe peggio che non avvisare affatto.
-    const memoria = new Map<string, Ricordo>()
-    const panes = [riquadro('s1', 'API'), riquadro('s2', 'Web'), riquadro('s3', 'Docs')]
-    const busy = [sessione('s1', 'busy'), sessione('s2', 'busy'), sessione('s3', 'busy')]
+  it('notifies for every session transitioning to waiting in the same cycle', () => {
+    const memory = new Map<string, MemoryEntry>()
+    const panes = [monitorPane('s1', 'API'), monitorPane('s2', 'Web'), monitorPane('s3', 'Docs')]
+    const busy = [liveSession('s1', 'busy'), liveSession('s2', 'busy'), liveSession('s3', 'busy')]
 
-    decideNotices(busy, panes, memoria)
+    decideNotices(busy, panes, memory)
     const notices = decideNotices(
-      [sessione('s1', 'waiting'), sessione('s2', 'waiting'), sessione('s3', 'waiting')],
+      [liveSession('s1', 'waiting'), liveSession('s2', 'waiting'), liveSession('s3', 'waiting')],
       panes,
-      memoria
+      memory
     )
 
-    assert.deepEqual(avvisati(notices).sort(), ['API', 'Docs', 'Web'])
+    assert.deepEqual(notifiedLabels(notices).sort(), ['API', 'Docs', 'Web'])
   })
 
-  it('avvisa solo chi e\' passato, non i vicini gia\' in attesa', () => {
-    const memoria = new Map<string, Ricordo>()
-    const panes = [riquadro('s1', 'API'), riquadro('s2', 'Web')]
+  it('notifies only transitioning session, not neighbors already waiting', () => {
+    const memory = new Map<string, MemoryEntry>()
+    const panes = [monitorPane('s1', 'API'), monitorPane('s2', 'Web')]
 
-    decideNotices([sessione('s1', 'waiting'), sessione('s2', 'busy')], panes, memoria)
+    decideNotices([liveSession('s1', 'waiting'), liveSession('s2', 'busy')], panes, memory)
     const notices = decideNotices(
-      [sessione('s1', 'waiting'), sessione('s2', 'waiting')],
+      [liveSession('s1', 'waiting'), liveSession('s2', 'waiting')],
       panes,
-      memoria
+      memory
     )
 
-    assert.deepEqual(avvisati(notices), ['Web'])
+    assert.deepEqual(notifiedLabels(notices), ['Web'])
   })
 })
 
-describe('notifier: sessioni che non ci riguardano', () => {
-  it('non avvisa per una sessione che non appartiene a nessun riquadro', () => {
-    // Il registro elenca ogni Claude Code vivo sulla macchina, comprese quelle
-    // aperte in un altro terminale: interromperne l'utente sarebbe intromettersi
-    // in un lavoro che l'app non mostra e non controlla.
-    const memoria = new Map<string, Ricordo>()
-    const panes = [riquadro('s1', 'API')]
+describe('notifier: external sessions', () => {
+  it('does not notify for a session not belonging to any pane', () => {
+    const memory = new Map<string, MemoryEntry>()
+    const panes = [monitorPane('s1', 'API')]
 
-    decideNotices([sessione('s1', 'busy'), sessione('estranea', 'busy')], panes, memoria)
+    decideNotices([liveSession('s1', 'busy'), liveSession('external', 'busy')], panes, memory)
     const notices = decideNotices(
-      [sessione('s1', 'busy'), sessione('estranea', 'waiting')],
+      [liveSession('s1', 'busy'), liveSession('external', 'waiting')],
       panes,
-      memoria
+      memory
     )
 
-    assert.deepEqual(avvisati(notices), [])
+    assert.deepEqual(notifiedLabels(notices), [])
   })
 
-  it('non avvisa quando non c\'e\' nessun riquadro aperto', () => {
-    const memoria = new Map<string, Ricordo>()
+  it('does not notify when no panes are open', () => {
+    const memory = new Map<string, MemoryEntry>()
 
-    decideNotices([sessione('s1', 'busy')], [], memoria)
-    assert.deepEqual(avvisati(decideNotices([sessione('s1', 'waiting')], [], memoria)), [])
+    decideNotices([liveSession('s1', 'busy')], [], memory)
+    assert.deepEqual(notifiedLabels(decideNotices([liveSession('s1', 'waiting')], [], memory)), [])
   })
 
-  it('ignora i riquadri senza sessione agganciata', () => {
-    // Un riquadro con `claudeSessionId` nullo e' un terminale senza Claude:
-    // non deve agganciarsi alla prima sessione che passa.
-    const memoria = new Map<string, Ricordo>()
-    const panes = [riquadro(null, 'Terminale')]
+  it('ignores panes with no attached session', () => {
+    const memory = new Map<string, MemoryEntry>()
+    const panes = [monitorPane(null, 'Terminal')]
 
-    decideNotices([sessione('s1', 'busy')], panes, memoria)
-    assert.deepEqual(avvisati(decideNotices([sessione('s1', 'waiting')], panes, memoria)), [])
+    decideNotices([liveSession('s1', 'busy')], panes, memory)
+    assert.deepEqual(notifiedLabels(decideNotices([liveSession('s1', 'waiting')], panes, memory)), [])
   })
 
-  it('avvisa la sessione estranea appena entra in un riquadro', () => {
-    // L'appartenenza si valuta ad ogni giro: agganciare un riquadro a una
-    // sessione gia' vista non deve escluderla per sempre dagli avvisi.
-    const memoria = new Map<string, Ricordo>()
+  it('notifies previously external session once attached to a pane', () => {
+    const memory = new Map<string, MemoryEntry>()
 
-    decideNotices([sessione('s1', 'busy')], [], memoria)
-    const notices = decideNotices([sessione('s1', 'waiting')], [riquadro('s1', 'API')], memoria)
+    decideNotices([liveSession('s1', 'busy')], [], memory)
+    const notices = decideNotices([liveSession('s1', 'waiting')], [monitorPane('s1', 'API')], memory)
 
-    assert.deepEqual(avvisati(notices), ['API'])
+    assert.deepEqual(notifiedLabels(notices), ['API'])
   })
 })
 
-describe('notifier: sessioni senza stato', () => {
-  it('non avvisa per una sessione priva di status', () => {
-    // Un registro incompleto o di una versione diversa non deve produrre
-    // avvisi: uno stato sconosciuto non e' un'attesa.
-    const memoria = new Map<string, Ricordo>()
-    const panes = [riquadro('s1', 'API')]
+describe('notifier: sessions without status', () => {
+  it('does not notify for a session missing status', () => {
+    const memory = new Map<string, MemoryEntry>()
+    const panes = [monitorPane('s1', 'API')]
 
-    decideNotices([sessione('s1', 'busy')], panes, memoria)
-    const notices = decideNotices([sessione('s1')], panes, memoria)
+    decideNotices([liveSession('s1', 'busy')], panes, memory)
+    const notices = decideNotices([liveSession('s1')], panes, memory)
 
-    assert.deepEqual(avvisati(notices), [])
+    assert.deepEqual(notifiedLabels(notices), [])
   })
 
-  it('avvisa quando una sessione senza status arriva ad attendere', () => {
-    // Il passaggio conta anche partendo da uno stato sconosciuto, altrimenti
-    // una sessione vista prima che il registro fosse completo resterebbe muta.
-    const memoria = new Map<string, Ricordo>()
-    const panes = [riquadro('s1', 'API')]
+  it('notifies when session without status transitions to waiting', () => {
+    const memory = new Map<string, MemoryEntry>()
+    const panes = [monitorPane('s1', 'API')]
 
-    decideNotices([sessione('s1')], panes, memoria)
-    assert.deepEqual(avvisati(decideNotices([sessione('s1', 'waiting')], panes, memoria)), ['API'])
+    decideNotices([liveSession('s1')], panes, memory)
+    assert.deepEqual(notifiedLabels(decideNotices([liveSession('s1', 'waiting')], panes, memory)), ['API'])
   })
 
-  it('due giri senza status non producono niente', () => {
-    const memoria = new Map<string, Ricordo>()
-    const panes = [riquadro('s1', 'API')]
+  it('two cycles without status produce no notifications', () => {
+    const memory = new Map<string, MemoryEntry>()
+    const panes = [monitorPane('s1', 'API')]
 
-    decideNotices([sessione('s1')], panes, memoria)
-    assert.deepEqual(avvisati(decideNotices([sessione('s1')], panes, memoria)), [])
+    decideNotices([liveSession('s1')], panes, memory)
+    assert.deepEqual(notifiedLabels(decideNotices([liveSession('s1')], panes, memory)), [])
   })
 })
 
-describe('notifier: la memoria passata viene aggiornata', () => {
-  it('scrive nella mappa ricevuta invece di tenersi uno stato suo', () => {
-    // Il chiamante possiede la memoria: se la funzione non la aggiornasse, ogni
-    // giro sarebbe un primo avvistamento e nessun avviso partirebbe mai.
-    const memoria = new Map<string, Ricordo>()
+describe('notifier: passed memory is updated in-place', () => {
+  it('writes into passed map instead of retaining internal state', () => {
+    const memory = new Map<string, MemoryEntry>()
 
-    decideNotices([sessione('s1', 'busy'), sessione('s2')], [], memoria)
+    decideNotices([liveSession('s1', 'busy'), liveSession('s2')], [], memory)
 
-    assert.deepEqual([...memoria.keys()].sort(), ['s1', 's2'])
-    assert.deepEqual(memoria.get('s1'), { status: 'busy', missing: 0 })
-    assert.deepEqual(memoria.get('s2'), { status: 'unknown', missing: 0 })
+    assert.deepEqual([...memory.keys()].sort(), ['s1', 's2'])
+    assert.deepEqual(memory.get('s1'), { status: 'busy', missing: 0 })
+    assert.deepEqual(memory.get('s2'), { status: 'unknown', missing: 0 })
 
-    decideNotices([sessione('s1', 'waiting')], [], memoria)
-    assert.deepEqual(memoria.get('s1'), { status: 'waiting', missing: 0 })
-    assert.equal(memoria.get('s2')?.missing, 1, 'chi manca accumula assenze invece di sparire')
+    decideNotices([liveSession('s1', 'waiting')], [], memory)
+    assert.deepEqual(memory.get('s1'), { status: 'waiting', missing: 0 })
+    assert.equal(memory.get('s2')?.missing, 1, 'missing sessions increment missing count')
   })
 
-  it('parte da zero con una mappa nuova, senza ricordi condivisi fra chiamate', () => {
-    // Due mappe diverse sono due storie diverse: nessuno stato globale nascosto.
-    const panes = [riquadro('s1', 'API')]
-    const prima = new Map<string, Ricordo>()
+  it('starts clean with a new map, with no state shared across calls', () => {
+    const panes = [monitorPane('s1', 'API')]
+    const first = new Map<string, MemoryEntry>()
 
-    decideNotices([sessione('s1', 'busy')], panes, prima)
-    assert.deepEqual(avvisati(decideNotices([sessione('s1', 'waiting')], panes, new Map())), [])
+    decideNotices([liveSession('s1', 'busy')], panes, first)
+    assert.deepEqual(notifiedLabels(decideNotices([liveSession('s1', 'waiting')], panes, new Map())), [])
   })
 })

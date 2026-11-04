@@ -32,11 +32,10 @@ export interface ListDirResult {
 }
 
 /**
- * Contratto dell'API esposta su `window.cm`.
+ * Contract of the API exposed on `window.cm`.
  *
- * Sta qui, e non nel preload, perché deve essere visibile da entrambi i lati:
- * il preload lo implementa (controllo a compile time), il renderer lo consuma.
- * Nessun import da 'electron', altrimenti finirebbe nel bundle del renderer.
+ * Placed here (not preload) so it is visible to both preload and renderer.
+ * No imports from 'electron' to ensure clean renderer bundling.
  */
 export interface CmApi {
   pty: {
@@ -45,21 +44,21 @@ export interface CmApi {
     resize(id: string, cols: number, rows: number): void
     kill(id: string): Promise<void>
     scrollback(id: string): Promise<string>
-    /** Ritorna la funzione per disiscriversi. */
+    /** Returns unsubscribe callback. */
     onData(cb: (e: PtyDataEvent) => void): () => void
-    /** Ritorna la funzione per disiscriversi. */
+    /** Returns unsubscribe callback. */
     onExit(cb: (e: PtyExitEvent) => void): () => void
   }
   claude: {
-    /** Stato corrente delle sessioni Claude Code vive. */
+    /** Current status of live Claude Code sessions. */
     live(): Promise<LiveSession[]>
-    /** Ritorna la funzione per disiscriversi. */
+    /** Returns unsubscribe callback. */
     onLiveChange(cb: (sessions: LiveSession[]) => void): () => void
-    /** Sessioni riprendibili per una cartella, dalla più recente. */
+    /** Resumable sessions for a folder, newest first. */
     sessionsFor(folder: string): Promise<TranscriptSession[]>
   }
   folders: {
-    /** Ricerca fuzzy sull'indice; query vuota = elenco per pertinenza. */
+    /** Fuzzy search on index; empty query = sorted by relevance. */
     search(query: string): Promise<FolderCandidate[]>
     list(path: string): Promise<ListDirResult>
     drives(): Promise<string[]>
@@ -68,20 +67,20 @@ export interface CmApi {
     toggleFavorite(path: string): Promise<string[]>
   }
   theme: {
-    /** Temi integrati più quelli caricati da file, con gli eventuali errori. */
+    /** Built-in themes plus custom themes from files, with any errors. */
     catalog(): Promise<ThemeCatalog>
-    /** Apre la cartella dei temi personali nell'esplora risorse. */
+    /** Opens custom themes folder in OS file manager. */
     openDir(): Promise<void>
   }
   ssh: {
     list(): Promise<SshConnection[]>
-    /** Crea o aggiorna; null se i dati non bastano a comporre una connessione. */
+    /** Create or update; null if parameters are insufficient. */
     save(input: Partial<SshConnection>): Promise<SshConnection | null>
     delete(id: string): Promise<void>
-    /** Prova la connessione e riporta home, sistema e versione di Claude Code. */
+    /** Test connection and report home, OS, and Claude Code version. */
     probe(target: SshTarget): Promise<RemoteProbe>
     listDir(target: SshTarget, path: string): Promise<RemoteDirListing>
-    /** Conversazioni già presenti sul server per una cartella remota. */
+    /** Existing conversations on remote server for path. */
     sessionsFor(
       target: SshTarget,
       path: string
@@ -89,46 +88,46 @@ export interface CmApi {
   }
   index: {
     status(): Promise<IndexStatus[]>
-    /** Risolve a scansione conclusa; l'avanzamento arriva da onProgress. */
+    /** Resolves when scan finishes; progress reported via onProgress. */
     rescan(kind: IndexKind): Promise<IndexStatus>
     cancel(kind: IndexKind): void
-    /** Ritorna la funzione per disiscriversi. */
+    /** Returns unsubscribe callback. */
     onProgress(cb: (status: IndexStatus) => void): () => void
   }
   usage: {
     summary(): Promise<UsageSummary>
   }
   monitor: {
-    /** Il renderer principale pubblica i propri riquadri. Fire-and-forget. */
+    /** Main renderer publishes active panes. Fire-and-forget. */
     publish(panes: MonitorPane[]): void
-    /** Avvia gli aggiornamenti e ritorna lo stato corrente. */
+    /** Starts live updates and returns current state. */
     subscribe(): Promise<MonitorState>
     unsubscribe(): void
-    /** Ritorna la funzione per disiscriversi. */
+    /** Returns unsubscribe callback. */
     onState(cb: (state: MonitorState) => void): () => void
-    /** La finestra staccata è aperta. */
+    /** Whether detached monitor window is currently open. */
     isDetached(): Promise<boolean>
     detach(): Promise<void>
     attach(): Promise<void>
-    /** Ritorna la funzione per disiscriversi. */
+    /** Returns unsubscribe callback. */
     onDetachedChange(cb: (detached: boolean) => void): () => void
   }
   update: {
-    /** Versione dell'app in esecuzione. */
+    /** Currently running app version. */
     version(): Promise<string>
     state(): Promise<UpdateState>
-    /** Forza un controllo; risolve con lo stato risultante. */
+    /** Force update check; resolves with updated state. */
     check(): Promise<UpdateState>
-    /** Riavvia e installa l'aggiornamento già scaricato. */
+    /** Relaunches and installs downloaded update. */
     install(): Promise<void>
-    /** Apre nel browser la pagina da cui scaricare la versione nuova. */
+    /** Opens download page in external browser. */
     openRelease(): Promise<void>
-    /** Ritorna la funzione per disiscriversi. */
+    /** Returns unsubscribe callback. */
     onChange(cb: (state: UpdateState) => void): () => void
   }
   layout: {
     load(): Promise<PersistedLayout | null>
-    /** Fire-and-forget: il main accorpa le scritture. */
+    /** Fire-and-forget: main process throttles writes. */
     save(layout: PersistedLayout): void
   }
   config: {
@@ -137,8 +136,8 @@ export interface CmApi {
   }
   notify: {
     /**
-     * Il clic su una notifica chiede di portare il fuoco a quel riquadro.
-     * Ritorna la funzione per disiscriversi.
+     * Notification click requests focusing that pane.
+     * Returns unsubscribe callback.
      */
     onFocusPane(cb: (paneId: string) => void): () => void
   }

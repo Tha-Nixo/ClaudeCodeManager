@@ -9,11 +9,11 @@ import { buildPtyEnv } from './env'
 import { buildCommandLine } from './winargs'
 import { buildSshInvocation, sshDestination } from '../ssh/command'
 
-/** Intervallo di accorpamento dell'output prima di attraversare l'IPC. */
+/** Output batching interval before sending across IPC. */
 const FLUSH_MS = 8
-/** Oltre questa soglia si scarica subito, senza aspettare il timer. */
+/** Flush threshold: flushed immediately without waiting for the timer. */
 const FLUSH_BYTES = 64 * 1024
-/** Scrollback tenuto in main per riagganciare il terminale dopo un reload del renderer. */
+/** Scrollback retained in main process to reattach terminal after renderer reload. */
 const SCROLLBACK_LIMIT = 256 * 1024
 
 interface PtySession {
@@ -34,8 +34,8 @@ export interface PtyManagerEvents {
 }
 
 /**
- * Possiede tutti i processi PTY. Vive solo nel main process: il renderer
- * non tocca mai node-pty direttamente.
+ * Owns all PTY processes. Lives only in the main process: the renderer
+ * never touches node-pty directly.
  */
 export class PtyManager extends EventEmitter<PtyManagerEvents> {
   private sessions = new Map<string, PtySession>()
@@ -47,10 +47,10 @@ export class PtyManager extends EventEmitter<PtyManagerEvents> {
     const cwd = existsSync(opts.cwd) ? opts.cwd : process.env.USERPROFILE || process.cwd()
     const script = ensureBootstrapScript()
 
-    // Un riquadro remoto avvia ssh, che a sua volta esegue claude sul server.
-    // Il bootstrap resta lo stesso: cambiano solo eseguibile e argomenti, e
-    // così alla chiusura della connessione si resta comunque sulla shell
-    // locale invece di veder sparire il riquadro.
+    // A remote pane launches ssh, which in turn runs claude on the server.
+    // The bootstrap remains the same: only the executable and arguments change,
+    // so upon connection close the user drops into the local shell
+    // instead of seeing the pane disappear.
     const remote = opts.remote
     const invocation = remote
       ? buildSshInvocation(opts, id)
@@ -64,12 +64,12 @@ export class PtyManager extends EventEmitter<PtyManagerEvents> {
       env: buildPtyEnv({
         cwd,
         exe: invocation.file,
-        // Composta qui secondo le regole del runtime C: lasciata a PowerShell,
-        // la riga di comando perderebbe i doppi apici e spezzerebbe gli
-        // argomenti sullo spazio successivo.
+        // Composed here according to C runtime rules: left to PowerShell,
+        // the command line would lose double quotes and split arguments
+        // at the next space.
         commandLine: buildCommandLine(invocation.args),
         label: remote
-          ? `Connessione a ${sshDestination(remote)} — ${remote.path}`
+          ? `Connecting to ${sshDestination(remote)} — ${remote.path}`
           : undefined
       })
     })
@@ -106,17 +106,17 @@ export class PtyManager extends EventEmitter<PtyManagerEvents> {
   resize(id: string, cols: number, rows: number): void {
     const s = this.sessions.get(id)
     if (!s || s.exited) return
-    // ConPTY va in errore su dimensioni nulle: capita durante le transizioni
-    // di layout, quando un riquadro è momentaneamente a zero.
+    // ConPTY throws on zero dimensions: happens during layout transitions
+    // when a pane is momentarily sized at zero.
     if (cols < 1 || rows < 1) return
     try {
       s.pty.resize(cols, rows)
     } catch {
-      // Il processo può essere morto fra il controllo e la chiamata.
+      // The process may have terminated between check and call.
     }
   }
 
-  /** Output accumulato finora, per riagganciare un terminale dopo un reload. */
+  /** Output accumulated so far, to reattach a terminal after reload. */
   scrollback(id: string): string {
     return this.sessions.get(id)?.scrollback ?? ''
   }
@@ -129,7 +129,7 @@ export class PtyManager extends EventEmitter<PtyManagerEvents> {
       try {
         s.pty.kill()
       } catch {
-        // Già morto: niente da fare.
+        // Already terminated: nothing to do.
       }
     }
     this.sessions.delete(id)

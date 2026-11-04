@@ -9,7 +9,7 @@ import { flushLayout } from './store/layout'
 import { initUpdater, stopUpdater } from './update/updater'
 
 const isDev = !app.isPackaged
-/** In sviluppo si può partire in finestra: CM_WINDOWED=1 npm run dev */
+/** In development, windowed mode can be enabled: CM_WINDOWED=1 npm run dev */
 const startWindowed = isDev && process.env.CM_WINDOWED === '1'
 
 let mainWindow: BrowserWindow | null = null
@@ -41,14 +41,14 @@ function createWindow(): void {
     mainWindow = null
   })
 
-  // Tornare sull'app è la risposta all'avviso: il lampeggio ha esaurito il
-  // suo compito e continuare sarebbe solo fastidio.
+  // Refocusing the app responds to the notification: flashing has fulfilled
+  // its purpose and continuing would just be annoying.
   mainWindow.on('focus', () => mainWindow && clearAttention(mainWindow))
 
-  // I link esterni non devono mai navigare dentro la finestra dell'app, e
-  // vanno consegnati al sistema solo se sono http/https: shell.openExternal
-  // apre anche file:, ms-settings: e qualunque altro schema registrato, e
-  // l'URL arriva dal renderer, che non è una fonte fidata.
+  // External links must never navigate within the app window, and
+  // should only be handed off to the system if http/https: shell.openExternal
+  // also opens file:, ms-settings: and any registered scheme, while
+  // the URL originates from the renderer, an untrusted boundary.
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     try {
       const parsed = new URL(url)
@@ -56,17 +56,16 @@ function createWindow(): void {
         void shell.openExternal(url)
       }
     } catch {
-      // URL malformato: si ignora.
+      // Malformed URL: ignore.
     }
     return { action: 'deny' }
   })
   mainWindow.webContents.on('will-navigate', (event) => event.preventDefault())
 
-  // Un renderer che riparte (ricarica in sviluppo, crash del processo) perde
-  // ogni riferimento ai PTY: resterebbero processi vivi che nessuna interfaccia
-  // può più raggiungere né chiudere.
-  // Si uccide all'INIZIO del nuovo caricamento, non alla fine: così i vecchi
-  // processi sono già spariti quando il nuovo renderer inizia a ricrearne.
+  // A restarted renderer (dev reload, crash) loses all PTY references:
+  // otherwise orphan processes would remain that no UI could reach or close.
+  // We kill at the START of a new load, not the end: so old processes are
+  // gone before the new renderer starts re-instantiating them.
   let loadedOnce = false
   mainWindow.webContents.on('did-start-loading', () => {
     if (loadedOnce) ptys.killAll()
@@ -84,8 +83,8 @@ function createWindow(): void {
 }
 
 /**
- * CSP applicata solo in produzione: in sviluppo Vite ha bisogno di eval e di
- * una connessione websocket per l'HMR, che una policy stretta bloccherebbe.
+ * CSP applied only in production: in development Vite requires eval and
+ * a websocket connection for HMR, which a strict policy would block.
  */
 function applyProductionCsp(): void {
   if (isDev) return
@@ -103,7 +102,7 @@ function applyProductionCsp(): void {
   })
 }
 
-// Una sola istanza: due compositor che gestiscono gli stessi PTY non ha senso.
+// Single instance lock: two compositors managing the same PTYs makes no sense.
 if (!app.requestSingleInstanceLock()) {
   app.quit()
 } else {
@@ -114,15 +113,15 @@ if (!app.requestSingleInstanceLock()) {
   })
 
   void app.whenReady().then(() => {
-    // Il menu predefinito di Electron va rimosso, non nascosto: porta con sé
-    // Ctrl+R (ricarica il renderer, azzerando tutti i buffer dei terminali),
-    // Ctrl+W e Ctrl+Q, e fa sì che il solo Alt attivi la barra dei menu —
-    // cioè proprio il tasto che il compositor usa come modificatore.
+    // The default Electron menu must be removed, not just hidden: it attaches
+    // Ctrl+R (which reloads the renderer, wiping all terminal buffers),
+    // Ctrl+W, and Ctrl+Q, and causes standalone Alt to focus the menu bar —
+    // the exact key the compositor uses as a modifier.
     Menu.setApplicationMenu(null)
 
-    // Prima di costruire qualunque notifica: su Windows senza identificativo
-    // del modello applicativo gli avvisi risultano di "electron.app.Electron",
-    // o non compaiono affatto.
+    // Before building any notification: on Windows without an explicit
+    // Application User Model ID, toasts appear as "electron.app.Electron"
+    // or fail to appear entirely.
     initNotifier()
 
     applyProductionCsp()
@@ -139,11 +138,11 @@ if (!app.requestSingleInstanceLock()) {
 
   app.on('window-all-closed', () => app.quit())
 
-  // I processi PTY sono figli di questo processo: senza kill esplicito
-  // resterebbero PowerShell orfani dopo la chiusura dell'app.
+  // PTY processes are children of this process: without explicit termination,
+  // orphaned PowerShell processes would linger after app exit.
   app.on('before-quit', () => {
-    // Il salvataggio del layout è accorpato: alla chiusura può esserci una
-    // scrittura ancora in attesa, e va forzata prima di uscire.
+    // Layout saving is debounced: at shutdown there may still be a pending
+    // write, which must be flushed before quitting.
     flushLayout()
     live.stop()
     stopUpdater()

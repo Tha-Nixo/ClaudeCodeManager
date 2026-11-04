@@ -10,29 +10,25 @@ import {
 import { BUILTIN_THEMES } from '@shared/themes/builtin'
 
 /**
- * Temi disponibili: quelli integrati più i file JSON lasciati dall'utente in
+ * Available themes: built-in themes plus JSON files located in
  * %APPDATA%\claudemanager\themes\.
- *
- * Un file non valido non viene silenziosamente ignorato: l'errore viaggia
- * fino alle impostazioni, altrimenti chi ha scritto il tema non ha modo di
- * capire perché non compare.
  */
 
 export function themesDir(): string {
   return join(app.getPath('userData'), 'themes')
 }
 
-/** Crea la cartella e ci lascia un esempio commentato la prima volta. */
+/** Ensures directory exists and seeds commented example on first launch. */
 export function ensureThemesDir(): string {
   const dir = themesDir()
   try {
     mkdirSync(dir, { recursive: true })
-    const example = join(dir, 'esempio.json.txt')
+    const example = join(dir, 'example.json.txt')
     if (!existsSync(example)) {
       writeFileSync(example, EXAMPLE, 'utf8')
     }
   } catch {
-    // Senza cartella restano i temi integrati: non è un errore fatale.
+    // Falls back to built-in themes on filesystem error.
   }
   return dir
 }
@@ -54,19 +50,18 @@ export function loadThemes(): ThemeCatalog {
     const full = join(dir, file)
     let raw: unknown
     try {
-      raw = JSON.parse(readFileSync(full, 'utf8').replace(/^﻿/, ''))
+      raw = JSON.parse(readFileSync(full, 'utf8').replace(/^\uFEFF/, ''))
     } catch (err) {
-      errors.push({ file, error: `JSON non valido: ${err instanceof Error ? err.message : String(err)}` })
+      errors.push({ file, error: `Invalid JSON: ${err instanceof Error ? err.message : String(err)}` })
       continue
     }
 
     const { theme, error } = validateTheme(raw, full)
     if (!theme) {
-      errors.push({ file, error: error ?? 'tema non valido' })
+      errors.push({ file, error: error ?? 'invalid theme' })
       continue
     }
-    // Un tema personale può sostituire un integrato usandone l'id: è il modo
-    // per ritoccare un tema esistente senza doverne inventare un altro.
+    // Custom theme overrides built-in theme if sharing matching ID.
     if (seen.has(theme.id)) {
       const index = themes.findIndex((t) => t.id === theme.id)
       themes[index] = theme
@@ -84,19 +79,19 @@ export function findTheme(id: string): Theme {
   return themes.find((t) => t.id === id) ?? BUILTIN_THEMES[0]
 }
 
-const EXAMPLE = `Copia questo contenuto in un file con estensione .json in questa cartella
-e comparira' fra i temi nelle impostazioni. Usando l'id di un tema integrato
-(per esempio "claude-dark") lo si sostituisce invece di aggiungerne uno nuovo.
+const EXAMPLE = `Copy this content to a .json file in this directory to make it
+appear in Settings. Using a built-in theme ID (e.g. "claude-dark")
+overrides that theme instead of adding a new one.
 
-I colori sono esadecimali: #rgb, #rrggbb oppure #rrggbbaa.
-"ansi" sono i 16 colori del terminale nell'ordine standard:
-nero, rosso, verde, giallo, blu, magenta, ciano, bianco,
-e poi le stesse otto tinte in versione brillante.
+Colors must be hexadecimal: #rgb, #rrggbb or #rrggbbaa.
+"ansi" defines the 16 terminal colors in standard order:
+black, red, green, yellow, blue, magenta, cyan, white,
+followed by bright versions of the same eight colors.
 
 {
-  "id": "mio-tema",
-  "name": "Il mio tema",
-  "description": "due parole che compaiono nelle impostazioni",
+  "id": "my-theme",
+  "name": "My Theme",
+  "description": "Short description shown in Settings",
   "dark": true,
   "ui": {
     "desktop": "#1F1E1D",

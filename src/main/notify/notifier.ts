@@ -4,59 +4,43 @@ import { BrowserWindow, Notification, app } from 'electron'
 import type { LiveSession, MonitorPane } from '@shared/types'
 
 /**
- * Avvisa quando una sessione passa ad attendere input.
+ * Notifies when a session transitions to waiting for user input.
  *
- * È il senso stesso di un gestore multi-sessione: con sei riquadri aperti non
- * si possono guardare tutti, e l'app sa già l'istante esatto in cui uno si
- * ferma ad aspettare — lo legge dal registro che Claude Code mantiene, con un
- * watcher e 120 ms di ritardo. Finora non ne faceva niente.
+ * Essential for multi-session workflows: with multiple open panes, users
+ * cannot monitor every terminal constantly. The app reads exact session state
+ * from Claude Code session registry files via watcher.
  *
- * Tre regole tengono la cosa utile invece che molesta:
+ * Three core rules keep notifications useful and non-intrusive:
  *
- * 1. Si avvisa solo sul PASSAGGIO a "attende input", non finché ci resta.
- *    Il registro viene riscritto spesso, e notificare ad ogni riscrittura
- *    produrrebbe una raffica per una sola attesa.
- * 2. Niente notifica se la finestra ha il fuoco: chi sta guardando l'app vede
- *    già il pallino cambiare colore.
- * 3. Solo le sessioni che appartengono a un riquadro. Il registro contiene
- *    ogni Claude Code vivo sulla macchina, comprese le sessioni aperte in un
- *    altro terminale: avvisare per quelle sarebbe intromettersi.
+ * 1. Only notify on TRANSITION to "waiting for input", not repeatedly.
+ * 2. Suppress notifications when app window is focused and visible.
+ * 3. Only notify for sessions belonging to active panes in this app.
  */
 
-/**
- * Identificativo del modello applicativo per Windows.
- *
- * Senza, le notifiche compaiono attribuite a "electron.app.Electron" — o non
- * compaiono affatto nel pacchetto. Deve combaciare con l'appId di
- * electron-builder, che è ciò che l'installer registra.
- */
+/** Application User Model ID for Windows toast notifications. */
 const APP_USER_MODEL_ID = 'dev.nixo.claudemanager'
 
-/** Stato precedente per sessione, per riconoscere il passaggio. */
+/** Previous state per session to detect state transitions. */
 const previous = new Map<string, RememberedSession>()
 
 /**
- * Stato ricordato di una sessione, con quanti giri consecutivi manca.
+ * Cached session state with consecutive missing cycle counter.
  *
- * Il conteggio non e' un dettaglio: il registro viene RISCRITTO quando una
- * sessione cambia stato, e per un istante il file puo' non esserci. Se si
- * dimenticasse la sessione al primo giro di assenza, il ritorno con stato
- * 'waiting' sembrerebbe un primo avvistamento e l'avviso non partirebbe —
- * proprio nel momento piu' probabile perche' serva.
+ * Claude Code rewrites registry files on state changes, causing transient 1-cycle gaps.
+ * Retaining memory across a few misses avoids false first-sighting suppression.
  */
 interface RememberedSession {
   status: string
   missing: number
 }
 
-/** Giri di assenza consecutivi tollerati prima di dimenticare una sessione. */
+/** Number of consecutive absent cycles allowed before eviction. */
 const FORGET_AFTER_MISSES = 5
-/** Riquadri noti, ripubblicati dal renderer ad ogni cambiamento. */
+/** Known panes published from renderer on layout updates. */
 let known: MonitorPane[] = []
 let enabled = true
 
 export function initNotifier(): void {
-  // Va impostato prima di costruire qualunque Notification.
   app.setAppUserModelId(APP_USER_MODEL_ID)
 }
 
@@ -74,12 +58,8 @@ export interface PendingNotice {
 }
 
 /**
- * Decide chi merita un avviso, e aggiorna lo stato precedente.
- *
- * Separata dall'effetto perché è qui che sta tutta la logica sbagliabile —
- * i passaggi, il primo avvistamento, l'appartenenza a un riquadro, la pulizia
- * — mentre mostrare la notifica è una riga. Così si può provare senza
- * Electron, invece di doversi fidare.
+ * Evaluates pending notices and updates historical state cache.
+ * Isolated pure logic enabling unit tests without Electron runtime.
  */
 export function decideNotices(
   sessions: LiveSession[],
@@ -95,67 +75,46 @@ export function decideNotices(
     const now = live.status ?? 'unknown'
     seenBefore.set(live.sessionId, { status: now, missing: 0 })
 
-    // Solo il passaggio, e solo verso l'attesa. `before` indefinito significa
-    // primo avvistamento: all'avvio dell'app tutte le sessioni sarebbero
-    // "nuove", e si aprirebbe una raffica di notifiche per stati che l'utente
-    // conosce già.
     if (before === undefined || before.status === now || now !== 'waiting') continue
 
     const pane = panes.find((p) => p.claudeSessionId === live.sessionId)
     if (pane) out.push({ pane, live })
   }
 
-  // Le sessioni sparite non si dimenticano subito: il registro viene riscritto
-  // proprio quando lo stato cambia, e un'assenza di un solo giro e' normale.
-  // Dimenticarla subito faceva sembrare il ritorno un primo avvistamento, e
-  // l'avviso non partiva.
-  for (const [id, ricordo] of [...seenBefore.entries()]) {
+  for (const [id, record] of [...seenBefore.entries()]) {
     if (present.has(id)) continue
-    if (ricordo.missing + 1 >= FORGET_AFTER_MISSES) seenBefore.delete(id)
-    else seenBefore.set(id, { ...ricordo, missing: ricordo.missing + 1 })
+    if (record.missing + 1 >= FORGET_AFTER_MISSES) seenBefore.delete(id)
+    else seenBefore.set(id, { ...record, missing: record.missing + 1 })
   }
 
   return out
 }
 
-/**
- * Confronta il registro col precedente e avvisa sui passaggi.
- *
- * Chiamata ad ogni cambiamento del registro, non a intervalli: la sorgente è
- * già basata su eventi.
- */
+/** Compares registry with cached state and triggers alerts on transitions. */
 export function onLiveChange(sessions: LiveSession[], getWindow: () => BrowserWindow | null): void {
   const waiting = decideNotices(sessions, known, previous)
   if (waiting.length === 0) return
 
   const win = getWindow()
-  // Chi sta guardando l'app vede già il pallino cambiare: una notifica di
-  // sistema sopra la finestra che la genera è solo rumore. Una finestra
-  // ridotta a icona però non mostra niente, anche se il sistema la considera
-  // ancora attiva: va trattata come non guardata.
-  const visibile = Boolean(win && win.isFocused() && !win.isMinimized())
+  const visible = Boolean(win && win.isFocused() && !win.isMinimized())
 
-  traceForTests(waiting, visibile)
-  if (visibile) return
+  traceForTests(waiting, visible)
+  if (visible) return
 
   notify(waiting, win)
 }
 
 function notify(waiting: PendingNotice[], win: BrowserWindow | null): void {
-
-  // Il lampeggio nella barra delle applicazioni si fa comunque: resta visibile
-  // anche se le notifiche di sistema sono disattivate o soppresse dal
-  // Assistente notifiche di Windows.
+  // Flash taskbar icon regardless of OS toast notification settings
   if (win && !win.isDestroyed()) win.flashFrame(true)
 
   if (!enabled || !Notification.isSupported()) return
 
-  // Più sessioni insieme diventano un avviso solo: tre notifiche impilate per
-  // un evento unico sono peggio di una che le riassume.
+  // Group multiple waiting sessions into single notification
   const title =
     waiting.length === 1
-      ? `${waiting[0].pane.label} attende una risposta`
-      : `${waiting.length} sessioni attendono una risposta`
+      ? `${waiting[0].pane.label} is waiting for input`
+      : `${waiting.length} sessions waiting for input`
 
   const body =
     waiting.length === 1
@@ -164,8 +123,6 @@ function notify(waiting: PendingNotice[], win: BrowserWindow | null): void {
 
   const notification = new Notification({ title, body, silent: false })
 
-  // Il clic porta all'app e al riquadro giusto: senza questo l'avviso dice
-  // che qualcosa aspetta ma lascia il compito di cercarlo.
   notification.on('click', () => {
     const target = getMainWindow(win)
     if (!target) return
@@ -179,37 +136,27 @@ function notify(waiting: PendingNotice[], win: BrowserWindow | null): void {
   notification.show()
 }
 
-/**
- * Lascia traccia degli avvisi mostrati, per i test end-to-end.
- *
- * Una notifica di Windows non è osservabile dall'esterno senza fotografare
- * l'intero schermo, e il processo principale di Electron non consegna
- * l'uscita standard a un file su Windows. Il ponte di sviluppo è il banco di
- * prova, quindi la traccia va nella sua cartella. Nel pacchetto la variabile
- * non è mai impostata e non si scrive niente.
- */
-function traceForTests(waiting: PendingNotice[], soppressa: boolean): void {
+/** Dev-bridge trace log for automated end-to-end testing. */
+function traceForTests(waiting: PendingNotice[], suppressed: boolean): void {
   if (process.env.CM_DEV_BRIDGE !== '1') return
   try {
-    const esito = soppressa ? 'SOPPRESSA(finestra a vista)' : 'MOSTRATA'
-    const chi = waiting.map((w) => w.pane.paneId.slice(0, 8)).join(',')
+    const outcome = suppressed ? 'SUPPRESSED(window visible)' : 'SHOWN'
+    const who = waiting.map((w) => w.pane.paneId.slice(0, 8)).join(',')
     appendFileSync(
-      join(app.getPath('userData'), 'dev-bridge', 'notifiche.log'),
-      `${new Date().toISOString()} ${esito} ${chi}\n`,
+      join(app.getPath('userData'), 'dev-bridge', 'notifications.log'),
+      `${new Date().toISOString()} ${outcome} ${who}\n`,
       'utf8'
     )
   } catch {
-    // Una traccia mancata non deve impedire l'avviso vero.
+    // Ignore trace failure
   }
 }
 
-/** La finestra principale resta il bersaglio anche se il fuoco è altrove. */
 function getMainWindow(fallback: BrowserWindow | null): BrowserWindow | null {
   if (fallback && !fallback.isDestroyed()) return fallback
   return BrowserWindow.getAllWindows().find((w) => !w.isDestroyed()) ?? null
 }
 
-/** Spegne il lampeggio quando l'utente torna sull'app. */
 export function clearAttention(win: BrowserWindow): void {
   if (!win.isDestroyed()) win.flashFrame(false)
 }

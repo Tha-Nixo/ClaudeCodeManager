@@ -1,44 +1,44 @@
 /**
- * Composizione della riga di comando per l'eseguibile avviato in un riquadro.
+ * Command line composition for executables spawned inside a pane.
  *
- * ## Il problema
+ * ## The Problem
  *
- * Per molto tempo gli argomenti venivano passati a PowerShell come JSON e
- * poi splattati (`& $exe @args`). Misurato: PowerShell 5.1 avvolge fra doppi
- * apici gli argomenti che contengono spazi, ma NON protegge i doppi apici
- * gia' presenti nel valore, e non raddoppia i backslash finali. Peggio, la
- * decisione di avvolgere dipende dalla parita' del numero di apici incontrati
- * prima dello spazio, quindi un valore con un numero dispari di apici non
- * viene avvolto affatto e si spezza:
+ * Previously, arguments were serialized to PowerShell as JSON and
+ * splatted (`& $exe @args`). PowerShell 5.1 wraps arguments containing
+ * spaces in double quotes, but does NOT escape existing double quotes
+ * in the value, and does not double trailing backslashes. Worse, its
+ * quote-wrapping heuristic depends on the parity of quotes encountered
+ * before a space, so a value with an odd number of quotes was not wrapped
+ * at all and split:
  *
- *   inviato   'scrivi una funzione "ciao mondo"'
- *   ricevuto  ['scrivi una funzione ciao', 'mondo']
+ *   sent      'write a function "hello world"'
+ *   received  ['write a function hello', 'world']
  *
- * Nessun errore: Claude riceveva un prompt troncato piu' un argomento
- * posizionale in piu'.
+ * No error was raised: Claude received a truncated prompt plus an extra
+ * positional argument.
  *
- * ## La soluzione
+ * ## The Solution
  *
- * Non si lascia piu' costruire la riga di comando a PowerShell. La compone
- * questo modulo secondo le regole documentate del runtime C di Windows
- * (CommandLineToArgvW), e il bootstrap la passa a
- * `System.Diagnostics.ProcessStartInfo.Arguments`, che la consegna al
- * processo senza rielaborarla. Le regole sono tre:
+ * We no longer let PowerShell construct the command line. This module
+ * composes it according to the standard rules of the Windows C runtime
+ * (CommandLineToArgvW), and the bootstrap passes it to
+ * `System.Diagnostics.ProcessStartInfo.Arguments`, which forwards it
+ * to the process without further mangling. The rules are threefold:
  *
- * - un doppio apice letterale si scrive `\"`;
- * - i backslash che precedono un apice vanno raddoppiati;
- * - i backslash in fondo all'argomento vanno raddoppiati, perche' subito dopo
- *   arriva l'apice di chiusura.
+ * - a literal double quote is escaped as `\"`;
+ * - backslashes immediately preceding a quote must be doubled;
+ * - backslashes at the very end of the argument must be doubled, because
+ *   they precede the closing quote.
  *
- * Verificato su un corpus di 35 casi ostili (apici annidati, apici isolati,
- * backslash finali, a capo, tabulazioni, unicode, stringa vuota, sequenze di
- * dieci apici): tutti e 35 arrivano identici al processo figlio.
+ * Verified against a suite of hostile cases (nested quotes, unpaired quotes,
+ * trailing backslashes, newlines, tabs, Unicode, empty string, sequences of
+ * multiple quotes): all arrive intact at the child process.
  */
 
-/** Rende un singolo argomento secondo le regole del runtime C di Windows. */
+/** Quotes a single argument according to the Windows C runtime rules. */
 export function quoteNativeArg(value: string): string {
-  // Senza spazi, apici o spazi bianchi non serve niente: avvolgere sempre
-  // funzionerebbe comunque, ma lascia righe di comando illeggibili nei log.
+  // Without spaces, quotes, or whitespace, no quoting is needed: wrapping always
+  // would work, but leaves unreadable command lines in logs.
   if (value !== '' && !/[\s"]/.test(value)) return value
 
   let out = '"'
@@ -50,8 +50,8 @@ export function quoteNativeArg(value: string): string {
       continue
     }
     if (ch === '"') {
-      // I backslash accumulati precedono un apice: raddoppiati, piu' quello
-      // che protegge l'apice stesso.
+      // Accumulated backslashes precede a quote: doubled, plus the one
+      // escaping the quote itself.
       out += '\\'.repeat(backslashes * 2 + 1) + '"'
       backslashes = 0
       continue
@@ -60,16 +60,16 @@ export function quoteNativeArg(value: string): string {
     backslashes = 0
   }
 
-  // In fondo segue l'apice di chiusura: senza raddoppio lo proteggerebbero
-  // per sbaglio, e l'argomento si fonderebbe con il successivo.
+  // At the end, the closing quote follows: without doubling, backslashes would
+  // inadvertently escape it, merging the argument with the next.
   out += '\\'.repeat(backslashes * 2) + '"'
   return out
 }
 
 /**
- * Riga di comando completa per gli argomenti, senza l'eseguibile.
+ * Complete argument command line, without the executable.
  *
- * .NET antepone da solo il FileName, quindi qui ci vanno solo gli argomenti.
+ * .NET prepends FileName itself, so only arguments belong here.
  */
 export function buildCommandLine(args: string[]): string {
   return args.map(quoteNativeArg).join(' ')

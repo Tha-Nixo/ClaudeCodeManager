@@ -2,37 +2,27 @@ import type { LaunchOptions, SshTarget } from '@shared/types'
 import { buildClaudeArgs } from '../claude/cli'
 
 /**
- * Costruzione del comando ssh.
+ * SSH command construction.
  *
- * Qui si attraversano DUE livelli di quoting: PowerShell, che avvia ssh, e la
- * shell remota, che riceve il comando come stringa unica. Sbagliarne uno
- * rompe ogni percorso con uno spazio, e non se ne accorge nessuno finché non
- * si apre una cartella che ne contiene uno.
+ * Deals with TWO levels of quoting: PowerShell (which spawns ssh) and the
+ * remote shell (which receives the command as a single string).
  *
- * La regola che tiene insieme tutto: il comando remoto usa SOLO apici
- * singoli. PowerShell avvolge fra doppi apici gli argomenti con spazi, e un
- * argomento che non contiene doppi apici attraversa quel livello intatto.
+ * All remote commands strictly use single quotes. PowerShell wraps arguments
+ * containing spaces in double quotes, so single-quoted arguments pass through
+ * intact.
  */
 
-/**
- * Rende una stringa un letterale sicuro per una shell POSIX.
- *
- * L'apice singolo non si può proteggere dentro apici singoli: si chiude la
- * stringa, si aggiunge un apice protetto, e si riapre. È il modo standard,
- * ed è il motivo per cui il risultato è pieno di `'\''`.
- */
+/** Escapes a string safely for a POSIX shell literal. */
 export function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`
 }
 
-/** Argomenti di ssh, esclusa la destinazione e il comando remoto. */
+/** SSH connection arguments, excluding destination and remote command. */
 function connectionArgs(target: SshTarget): string[] {
   const args: string[] = [
-    // Senza -t ssh non alloca un terminale, e Claude Code non può disegnare
-    // la propria interfaccia: si vedrebbe solo output grezzo senza prompt.
+    // Allocate a pseudo-terminal so Claude Code can render its UI
     '-t',
-    // Un terminale che si pianta a metà sessione resterebbe appeso per sempre
-    // senza che nulla lo segnali.
+    // Keep connection alive so hung sessions drop cleanly
     '-o',
     'ServerAliveInterval=30',
     '-o',
@@ -41,50 +31,26 @@ function connectionArgs(target: SshTarget): string[] {
   if (target.port && target.port !== 22) args.push('-p', String(target.port))
   if (target.identityFile) {
     args.push('-i', target.identityFile)
-    // Con una chiave indicata esplicitamente si evita che ssh provi prima
-    // tutte le altre e sbatta contro il limite di tentativi del server.
     args.push('-o', 'IdentitiesOnly=yes')
   }
   return args
 }
 
-/** Destinazione nella forma utente@host. */
+/** Destination formatted as user@host or host. */
 export function sshDestination(target: SshTarget): string {
   return target.user ? `${target.user}@${target.host}` : target.host
 }
 
 /**
- * Un tempo qui c'era un divieto assoluto di doppi apici nel comando remoto:
- * PowerShell 5.1 non sapeva consegnarli a un eseguibile nativo, quindi
- * l'unico modo di restare corretti era non usarli mai. Il divieto pero'
- * faceva fallire l'apertura del riquadro con un'eccezione appena l'utente
- * scriveva un prompt del tutto normale come `sistema il bug del "login"`.
+ * Changes into remote directory and runs claude.
  *
- * Ora gli argomenti vengono protetti a monte (vedi `pty/winargs.ts`), quindi
- * i doppi apici attraversano PowerShell intatti e il divieto non serve piu'.
- * Il comando remoto continua a usare apici singoli per scelta, perche' sono
- * il modo piu' semplice di rendere letterale un valore per una shell POSIX.
- */
-
-/**
- * Entra nella cartella remota e avvia claude.
- *
- * `exec` sostituisce la shell con claude invece di lasciarne una in mezzo:
- * chiudendo claude la connessione cade subito, senza uno strato inerte che
- * tiene aperto il terminale. Se la cartella non esiste il comando dice quale,
- * invece di ripiegare sulla home e far credere che sia andato tutto bene.
+ * `exec` replaces the shell with claude directly: exiting claude drops the connection.
+ * If the remote directory does not exist, an informative error is displayed.
  */
 export function remoteCommand(opts: LaunchOptions, sessionId: string): string {
   const path = opts.remote?.path?.trim() || '~'
   const args = buildClaudeArgs(opts, sessionId)
 
-  // '~' fra apici non viene espanso dalla shell: resterebbe un nome di
-  // cartella letterale. Per i percorsi che iniziano con ~ si quota solo la
-  // parte restante.
-  //
-  // Il '--' non è decorativo: gli apici rendono letterale il valore per la
-  // shell, ma non impediscono a `cd` di leggerlo come opzione. Una cartella
-  // chiamata '-' porterebbe a $OLDPWD, cioè altrove, in silenzio.
   const cd =
     path === '~'
       ? 'cd -- ~'
@@ -95,27 +61,22 @@ export function remoteCommand(opts: LaunchOptions, sessionId: string): string {
   const claude = ['claude', ...args].map(shellQuote).join(' ')
 
   return [
-    // L'errore di cd viene zittito: la shell ne stampa uno proprio, e due
-    // messaggi per lo stesso problema confondono invece di aiutare.
-    `${cd} 2>/dev/null || { echo ${shellQuote(`ClaudeManager: cartella remota non raggiungibile: ${path}`)} >&2; exit 1; }`,
-    // Senza claude sul server la connessione cadrebbe subito, lasciando solo
-    // un errore lampeggiante. Meglio restare sulla shell remota: da lì lo si
-    // può installare senza riaprire un altro terminale.
-    `command -v claude >/dev/null 2>&1 || { echo ${shellQuote('ClaudeManager: Claude Code non risulta installato su questo server.')} >&2; exec ${'${SHELL:-sh}'} -l; }`,
+    `${cd} 2>/dev/null || { echo ${shellQuote(`ClaudeManager: remote directory unreachable: ${path}`)} >&2; exit 1; }`,
+    `command -v claude >/dev/null 2>&1 || { echo ${shellQuote('ClaudeManager: Claude Code does not appear to be installed on this remote server.')} >&2; exec ${'${SHELL:-sh}'} -l; }`,
     `exec ${claude}`
   ].join('; ')
 }
 
 export interface SshInvocation {
-  /** Eseguibile: sempre ssh, risolto dal PATH. */
+  /** Executable: always ssh from PATH. */
   file: string
   args: string[]
 }
 
-/** Comando completo per aprire una sessione Claude remota. */
+/** Complete command to launch a remote Claude session. */
 export function buildSshInvocation(opts: LaunchOptions, sessionId: string): SshInvocation {
   const target = opts.remote
-  if (!target) throw new Error('buildSshInvocation richiede opts.remote')
+  if (!target) throw new Error('buildSshInvocation requires opts.remote')
 
   return {
     file: 'ssh',
@@ -123,14 +84,13 @@ export function buildSshInvocation(opts: LaunchOptions, sessionId: string): SshI
   }
 }
 
-/** Comando ssh non interattivo, per interrogare il server. */
+/** Non-interactive SSH query command for probing remote host. */
 export function buildSshQuery(target: SshTarget, remoteScript: string): SshInvocation {
   const args: string[] = [
     '-o',
     'BatchMode=yes',
     '-o',
     'ConnectTimeout=10',
-    // Senza terminale: l'output va letto, non mostrato.
     '-T'
   ]
   if (target.port && target.port !== 22) args.push('-p', String(target.port))

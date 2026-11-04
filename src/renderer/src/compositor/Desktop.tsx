@@ -25,15 +25,15 @@ interface DesktopProps {
   onResizeFloating: (paneId: string, w: number, h: number) => void
   onDropPane: (movingId: string, targetId: string, side: DropSide) => void
   onRectsChange: (rects: Record<string, Rect>) => void
-  /** Riquadro con la barra di ricerca aperta, se ce n'è uno. */
+  /** Pane with open search bar, if any. */
   searchPaneId: string | null
   onCloseSearch: () => void
 }
 
 const MIN_FLOAT = 220
-/** Spostamento oltre il quale un clic sull'intestazione diventa trascinamento. */
+/** Pointer displacement threshold after which header click becomes drag. */
 const DRAG_THRESHOLD = 5
-/** Deve restare allineata alla durata della transizione in claude-dark.css. */
+/** Must remain aligned with transition duration in claude-dark.css. */
 const ANIMATION_MS = 190
 
 interface DragState {
@@ -60,10 +60,9 @@ export function Desktop({
   const [stageSize, setStageSize] = useState({ w: 0, h: 0 })
   const [drag, setDrag] = useState<DragState | null>(null)
   /**
-   * Copia sincrona dello stato di trascinamento. Serve perché al rilascio la
-   * decisione va presa subito: leggerla da dentro un updater di setState
-   * significherebbe eseguire un effetto collaterale in fase di render, che
-   * React è libero di scartare — ed è esattamente quello che faceva.
+   * Synchronous copy of drag state. Needed because on release the decision
+   * must be made immediately: reading it from inside a setState updater
+   * runs a side effect during render that React may discard.
    */
   const dragRef = useRef<DragState | null>(null)
   const updateDrag = useCallback((next: DragState | null) => {
@@ -73,10 +72,9 @@ export function Desktop({
   const [animating, setAnimating] = useState(false)
 
   /**
-   * Le transizioni valgono solo per i cambi di LAYOUT, non per quelli dello
-   * stage: ridimensionando la finestra i riquadri devono seguire il bordo
-   * senza inseguirlo con un ritardo. E vanno spente durante un trascinamento,
-   * dove il riquadro deve stare sotto il puntatore.
+   * Transitions apply only to LAYOUT changes, not stage dimension changes:
+   * resizing the window must move pane borders synchronously without lag.
+   * Transitions are disabled during drag gestures so the pane follows the pointer.
    */
   const interacting = useRef(false)
   const previousLayout = useRef(layout)
@@ -93,7 +91,7 @@ export function Desktop({
     animationTimer.current = window.setTimeout(() => {
       animationTimer.current = 0
       setAnimating(false)
-      // Una sola rimisurazione a transizione conclusa, invece di una per frame.
+      // A single remeasurement after transition ends, rather than once per frame.
       setFitSuspendedAll(false)
     }, ANIMATION_MS)
   }, [layout])
@@ -106,8 +104,7 @@ export function Desktop({
     []
   )
 
-  // Il layout dipende dalla dimensione dello stage, che va misurata dopo il
-  // primo paint e poi ad ogni cambio di finestra.
+  // Layout depends on stage size, measured after initial paint and on window resize.
   useLayoutEffect(() => {
     const el = stageRef.current
     if (!el) return
@@ -124,14 +121,11 @@ export function Desktop({
   const stage: Rect = { x: 0, y: 0, w: stageSize.w, h: stageSize.h }
   const { panes, gutters } = computeLayout(layout, stage)
 
-  // I gestori di trascinamento vivono per tutta la durata del gesto e
-  // catturerebbero i riquadri di quando è iniziato: qui leggono sempre gli
-  // ultimi calcolati.
+  // Drag handlers persist for gesture duration; read the latest computed panes.
   const panesRef = useRef(panes)
   panesRef.current = panes
 
-  // Pubblica le geometrie: servono al focus direzionale e al passaggio
-  // tiled -> flottante, che deve partire dalla posizione attuale.
+  // Publishes geometries for directional focus and tiled -> floating transitions.
   useEffect(() => {
     const rects: Record<string, Rect> = {}
     for (const p of panes) rects[p.id] = { x: p.x, y: p.y, w: p.w, h: p.h }
@@ -144,10 +138,10 @@ export function Desktop({
     return { left: r?.left ?? 0, top: r?.top ?? 0 }
   }, [])
 
-  /** Trascinamento di un riquadro del mosaico per riordinarlo. */
+  /** Drag gesture to reorder tiled panes. */
   const onTileDragStart = useCallback(
     (e: React.PointerEvent, paneId: string) => {
-      // Solo il tasto principale, e non sui comandi dell'intestazione.
+      // Only primary mouse button, ignoring header controls.
       if (e.button !== 0) return
       const origin = stageOrigin()
       const startX = e.clientX
@@ -156,8 +150,7 @@ export function Desktop({
 
       const move = (ev: PointerEvent): void => {
         if (!started) {
-          // Sotto soglia resta un clic: altrimenti selezionare un riquadro
-          // farebbe partire un trascinamento a ogni tremolio del mouse.
+          // Below threshold remains a click to avoid accidental drags.
           if (Math.abs(ev.clientX - startX) + Math.abs(ev.clientY - startY) < DRAG_THRESHOLD) return
           started = true
           interacting.current = true
@@ -202,7 +195,7 @@ export function Desktop({
     [stageOrigin, onDropPane, updateDrag]
   )
 
-  /** Trascinamento di un canale fra due riquadri affiancati. */
+  /** Drag gesture on gutter between two tiled panes. */
   const onGutterDown = useCallback(
     (e: React.PointerEvent, gutter: GutterLayout) => {
       e.preventDefault()
@@ -233,12 +226,10 @@ export function Desktop({
     [layout, stage, onSetRatio, stageOrigin]
   )
 
-  /** Spostamento di un riquadro flottante afferrandone l'intestazione. */
+  /** Drag gesture moving a floating pane by its header. */
   const onFloatDragStart = useCallback(
     (e: React.PointerEvent, paneId: string) => {
-      // L'origine va letta da layout.floating, non dai rettangoli calcolati:
-      // sotto zoom quelli sono stati sovrascritti con le misure dello stage, e
-      // partire da lì distruggerebbe la geometria memorizzata del riquadro.
+      // Origin must be read from layout.floating, not computed rects which zoom overrides.
       const pane = layout.floating.find((f) => f.id === paneId)
       if (!pane) return
       e.preventDefault()
@@ -248,8 +239,7 @@ export function Desktop({
       const originY = pane.y
 
       const move = (ev: PointerEvent): void => {
-        // Si tiene sempre una striscia del riquadro dentro lo stage,
-        // altrimenti diventa irraggiungibile.
+        // Always keep a strip of the pane inside the stage to prevent loss.
         const x = clamp(originX + (ev.clientX - startX), -pane.w + 80, stage.w - 80)
         const y = clamp(originY + (ev.clientY - startY), 0, stage.h - 30)
         onMoveFloating(paneId, x, y)
@@ -306,9 +296,8 @@ export function Desktop({
   const dropRect = dropTarget && drag?.target ? dropPreviewRect(dropTarget, drag.target.side) : null
 
   const ordered = [...panes].sort((a, b) => a.z - b.z)
-  // Numerazione su TUTTI i riquadri, nell'ordine dell'albero: è la stessa che
-  // usa Alt+1..9. Escludere quelli nascosti dallo zoom li rinumererebbe, e il
-  // numero mostrato non corrisponderebbe più al tasto da premere.
+  // Numbering over ALL panes in tree order, matching Alt+1..9 shortcuts.
+  // Excluding panes hidden by zoom would renumber remaining ones inconsistently.
   const indexOf = new Map(panes.map((p, i) => [p.id, i + 1]))
 
   return (
@@ -347,7 +336,7 @@ export function Desktop({
           style={{ left: dropRect.x, top: dropRect.y, width: dropRect.w, height: dropRect.h }}
         >
           <span className="cm-drop__label">
-            {drag.target.side === 'center' ? 'scambia' : 'affianca'}
+            {drag.target.side === 'center' ? 'swap' : 'split'}
           </span>
         </div>
       )}
@@ -363,9 +352,9 @@ export function Desktop({
 
       {panes.length === 0 && (
         <div className="cm-notice">
-          <div className="cm-notice__title">Nessuna sessione aperta</div>
+          <div className="cm-notice__title">No open sessions</div>
           <div>
-            <span className="cm-kbd">Alt+N</span> per aprirne una
+            <span className="cm-kbd">Alt+N</span> to open one
           </div>
         </div>
       )}

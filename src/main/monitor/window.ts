@@ -3,28 +3,27 @@ import { BrowserWindow, app, screen } from 'electron'
 import { readJson, writeJsonAtomic } from '../store/config'
 
 /**
- * Finestra staccata del pannello di monitoraggio.
+ * Detached window for the monitoring panel.
  *
- * Piccola, senza cornice, sempre in primo piano: serve a tenere d'occhio le
- * sessioni mentre si lavora in un'altra applicazione, tipicamente su un
- * secondo schermo.
+ * Compact, frameless, always-on-top: keeps an eye on sessions
+ * while working in another application, typically on a secondary display.
  *
- * Carica lo STESSO bundle del renderer con `#monitor` in coda. Un secondo
- * punto d'ingresso in electron.vite.config.ts sarebbe più "pulito" sulla
- * carta, ma raddoppierebbe la build e obbligherebbe a duplicare il montaggio
- * del tema; l'ancora non tocca il percorso del file, quindi funziona identica
- * col server di sviluppo e con `file://`.
+ * Loads the SAME renderer bundle with `#monitor` appended. A separate
+ * entrypoint in electron.vite.config.ts would look cleaner on paper,
+ * but would double build times and require duplicating theme mounting;
+ * the URL hash does not alter the file path, so it functions identically
+ * with the dev server and with `file://`.
  */
 
 let monitorWindow: BrowserWindow | null = null
 
 /**
- * Avvisa il resto dell'app quando la finestra staccata compare o sparisce.
+ * Notifies the rest of the application when the detached window appears or disappears.
  *
- * Prima l'annuncio partiva solo dai due comandi «stacca» e «riaggancia».
- * Chiudendo la finestra dalla finestra stessa — con la X o con Alt+F4 —
- * nessuno diceva niente, e il cassetto restava a mostrare «Il pannello è in
- * una finestra separata» indicando una finestra che non c'era più.
+ * Previously the announcement only fired from the two commands "detach" and "reattach".
+ * Closing the window directly — with the close button or Alt+F4 —
+ * triggered nothing, leaving the drawer displaying "Panel is in a separate window"
+ * referencing a window that was no longer there.
  */
 let onDetachedChange: ((detached: boolean) => void) | null = null
 
@@ -46,11 +45,11 @@ function boundsPath(): string {
 }
 
 /**
- * Posizione salvata, ma solo se ricade ancora dentro uno schermo esistente.
+ * Saved bounds, but only if they still intersect an existing display.
  *
- * Un portatile scollegato dal monitor esterno lascerebbe altrimenti la
- * finestra a coordinate che non appartengono più a nessun display: si
- * aprirebbe fuori dallo schermo, invisibile e irraggiungibile.
+ * A laptop disconnected from an external monitor would otherwise place the
+ * window at coordinates that no longer belong to any display: it would open
+ * off-screen, invisible and unreachable.
  */
 function restoreBounds(): Bounds | null {
   const saved = readJson<Bounds>(boundsPath())
@@ -58,8 +57,8 @@ function restoreBounds(): Bounds | null {
 
   const visible = screen.getAllDisplays().some((display) => {
     const a = display.workArea
-    // Basta che un angolo sia dentro: una finestra a cavallo di due schermi è
-    // legittima e non va spostata.
+    // As long as one corner intersects: a window spanning two monitors is
+    // valid and should not be repositioned.
     return (
       saved.x + saved.width > a.x &&
       saved.x < a.x + a.width &&
@@ -80,7 +79,7 @@ export function isMonitorOpen(): boolean {
   return monitorWindow !== null && !monitorWindow.isDestroyed()
 }
 
-/** Apre la finestra staccata, o la porta in primo piano se c'è già. */
+/** Opens the detached window, or brings it forward if already open. */
 export function openMonitorWindow(isDev: boolean): void {
   if (isMonitorOpen()) {
     monitorWindow?.show()
@@ -95,9 +94,9 @@ export function openMonitorWindow(isDev: boolean): void {
     ...(saved ?? {}),
     show: false,
     frame: false,
-    // Sopra le finestre normali ma sotto i pannelli di sistema: 'floating' è
-    // il livello giusto. 'screen-saver' starebbe anche sopra le notifiche,
-    // che è invadente per un pannello informativo.
+    // Above regular windows but below system overlays: 'floating' is the
+    // appropriate level. 'screen-saver' would sit above notifications,
+    // which is intrusive for an informative panel.
     alwaysOnTop: true,
     skipTaskbar: false,
     minWidth: 280,
@@ -115,9 +114,9 @@ export function openMonitorWindow(isDev: boolean): void {
 
   monitorWindow.setAlwaysOnTop(true, 'floating')
 
-  // Il <title> del documento sovrascriverebbe quello impostato qui, e le due
-  // finestre finirebbero omonime: indistinguibili nella barra delle
-  // applicazioni, e non più raggiungibili dai test.
+  // The document <title> would overwrite the one configured here, making both
+  // windows eponymous: indistinguishable in the taskbar and difficult
+  // to target in tests.
   monitorWindow.on('page-title-updated', (event) => event.preventDefault())
 
   monitorWindow.on('ready-to-show', () => monitorWindow?.show())
@@ -127,13 +126,12 @@ export function openMonitorWindow(isDev: boolean): void {
   monitorWindow.on('close', () => monitorWindow && rememberBounds(monitorWindow))
   monitorWindow.on('closed', () => {
     monitorWindow = null
-    // Anche la chiusura diretta e' una transizione: senza questo annuncio il
-    // cassetto resterebbe convinto che il pannello sia altrove.
+    // Direct closing is also a state transition: without this notification,
+    // the drawer would still believe the panel is detached.
     onDetachedChange?.(false)
   })
 
-  // Stesse protezioni della finestra principale: niente navigazione, niente
-  // apertura di finestre nuove.
+  // Same protections as the main window: no navigation, no new window opening.
   monitorWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
   monitorWindow.webContents.on('will-navigate', (event) => event.preventDefault())
 

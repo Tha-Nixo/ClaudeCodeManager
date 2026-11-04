@@ -11,23 +11,19 @@ import {
 } from '../keys/bindings'
 
 /**
- * Editor delle scorciatoie.
+ * Keybindings editor.
  *
- * Si registra premendo la combinazione, non scrivendola: la firma di un tasto
- * dipende da `code` e dall'ordine dei modificatori, e nessuno la indovina a
- * mano al primo colpo. La combinazione premuta viene mostrata così com'è
- * stata catturata, quindi quello che si vede è esattamente quello che l'app
- * confronterà.
+ * Combinations are recorded by pressing keys directly.
  */
 
 interface KeymapEditorProps {
   config: AppConfig
   onPatch: (patch: Partial<AppConfig>) => void
-  /** Voci scartate dalla configurazione, già calcolate dall'app. */
+  /** Ignored combinations calculated by the resolver. */
   problems: KeymapProblem[]
 }
 
-/** Combinazioni che non vanno lasciate rubare al terminale. */
+/** Combinations reserved for terminal input. */
 const RESERVED = new Set(['escape', 'enter', 'tab', 'backspace', 'space'])
 
 export function KeymapEditor({ config, onPatch, problems }: KeymapEditorProps): React.JSX.Element {
@@ -36,7 +32,7 @@ export function KeymapEditor({ config, onPatch, problems }: KeymapEditorProps): 
 
   const { keymap } = useMemo(() => resolveKeymap(config.keymap), [config.keymap])
 
-  /** Combinazione attualmente assegnata a un'azione, se ce n'è una. */
+  /** Currently assigned combination for an action, if any. */
   const comboFor = useCallback(
     (action: Action): string | null =>
       Object.entries(keymap).find(([, a]) => a === action)?.[0] ?? null,
@@ -47,16 +43,12 @@ export function KeymapEditor({ config, onPatch, problems }: KeymapEditorProps): 
     (action: Action, combo: string) => {
       const custom = { ...config.keymap }
 
-      // La combinazione può essere già di qualcun altro: si libera, altrimenti
-      // ne resterebbero due che rispondono e vincerebbe l'ordine di lettura.
       const owner = keymap[combo]
       if (owner && owner !== action) {
         const ownerCombo = comboFor(owner)
         if (ownerCombo) custom[ownerCombo] = ''
       }
 
-      // La vecchia combinazione dell'azione va tolta esplicitamente: senza,
-      // resterebbe quella predefinita e l'azione risponderebbe a due tasti.
       const previous = comboFor(action)
       if (previous && previous !== combo) custom[previous] = ''
 
@@ -66,8 +58,6 @@ export function KeymapEditor({ config, onPatch, problems }: KeymapEditorProps): 
     [config.keymap, keymap, comboFor, onPatch]
   )
 
-  // La cattura è in fase di capture su window: deve vedere il tasto prima di
-  // chiunque altro, compresi i campi di testo del pannello.
   useEffect(() => {
     if (!recording) return
 
@@ -75,7 +65,6 @@ export function KeymapEditor({ config, onPatch, problems }: KeymapEditorProps): 
       e.preventDefault()
       e.stopPropagation()
 
-      // Un modificatore da solo non è una combinazione: si aspetta il tasto.
       if (['Control', 'Alt', 'Shift', 'Meta'].includes(e.key)) return
 
       if (e.key === 'Escape') {
@@ -87,14 +76,12 @@ export function KeymapEditor({ config, onPatch, problems }: KeymapEditorProps): 
       const combo = signature(e)
       const bare = combo.split('+').pop() ?? ''
 
-      // Senza modificatori si ruberebbe un tasto normale al terminale, e
-      // Claude smetterebbe di riceverlo.
       if (!/^(ctrl|alt|shift|meta)\+/.test(combo)) {
-        setError('Serve almeno un modificatore: senza, il tasto non arriverebbe più al terminale.')
+        setError('At least one modifier required: otherwise key will not reach terminal.')
         return
       }
       if (RESERVED.has(bare) && !combo.includes('ctrl') && !combo.includes('alt')) {
-        setError(`${prettyKey(combo)} è troppo importante per il terminale.`)
+        setError(`${prettyKey(combo)} is reserved for the terminal.`)
         return
       }
 
@@ -107,30 +94,29 @@ export function KeymapEditor({ config, onPatch, problems }: KeymapEditorProps): 
     return () => window.removeEventListener('keydown', onKey, { capture: true })
   }, [recording, assign])
 
-  const modificate = Object.keys(config.keymap).length > 0
+  const isCustomized = Object.keys(config.keymap).length > 0
 
   return (
     <section className="cm-settings__section">
       <div className="cm-settings__row">
-        <span className="cm-field__label">Scorciatoie</span>
+        <span className="cm-field__label">Keybindings</span>
         <span className="cm-usage__spacer" />
-        {modificate && (
+        {isCustomized && (
           <button className="cm-chip" onClick={() => onPatch({ keymap: {} })}>
-            Ripristina le predefinite
+            Reset to defaults
           </button>
         )}
       </div>
 
       <div className="cm-source__detail">
-        Premi una riga e poi la combinazione che vuoi. Serve almeno un modificatore, altrimenti
-        quel tasto smetterebbe di arrivare a Claude. <span className="cm-kbd">Esc</span> annulla.
+        Click a row and press the desired combination. Requires at least one modifier key. <span className="cm-kbd">Esc</span> cancels.
       </div>
 
       {error && <div className="cm-keymap__error">{error}</div>}
 
       {problems.length > 0 && (
         <div className="cm-keymap__error">
-          Voci ignorate in config.json:{' '}
+          Ignored entries in config.json:{' '}
           {problems.map((p) => `${p.combo} (${p.reason})`).join(' · ')}
         </div>
       )}
@@ -150,7 +136,7 @@ export function KeymapEditor({ config, onPatch, problems }: KeymapEditorProps): 
             >
               <span className="cm-keymap__label">{label}</span>
               <span className={`cm-keymap__combo ${isDefault ? '' : 'cm-keymap__combo--custom'}`}>
-                {recording === action ? 'premi…' : combo ? prettyKey(combo) : 'nessuna'}
+                {recording === action ? 'press…' : combo ? prettyKey(combo) : 'none'}
               </span>
             </button>
           )

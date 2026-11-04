@@ -1,132 +1,66 @@
 # Changelog
 
-Le versioni seguono [SemVer](https://semver.org/lang/it/): il primo numero
-cambia quando qualcosa smette di funzionare come prima, il secondo quando
-arrivano funzioni nuove, il terzo per le correzioni.
+All versions follow [SemVer](https://semver.org/): the first number changes when breaking changes occur, the second for new features, and the third for bug fixes.
 
-<!-- nuove versioni qui sotto -->
+<!-- new versions below -->
 
 ## 1.1.1 — 2026-08-05
 
-Solo correzioni: ventiquattro difetti, quindici trovati da una campagna di test
-sistematica e nove dalla suite scritta subito dopo. Niente di nuovo da imparare.
+Bug fixes only: 24 issues resolved, 15 found during a systematic test campaign and 9 by the regression suite written immediately afterward. Nothing new to learn.
 
-- **Le virgolette nel prompt iniziale non vengono più mangiate.** Gli argomenti
-  per `claude` passavano attraverso PowerShell, che ogni `"` lo perdeva per
-  strada: un prompt iniziale veniva troncato al primo apice, e un riquadro
-  remoto con virgolette nel percorso non si apriva affatto. Ora arrivano al
-  processo figlio esattamente come sono stati scritti.
-- **Statistiche allineate al tuo giorno.** «Oggi» e «ultimi sette giorni»
-  tagliavano a mezzanotte UTC: fino alle due del mattino il lavoro di ieri
-  risultava di oggi.
-- **Il riempimento del contesto non dice più «circa».** Gli identificativi di
-  modello con la data in coda non venivano riconosciuti, e la percentuale
-  restava perennemente approssimata.
-- **Notifiche più affidabili.** Se una sessione spariva per un giro dal registro
-  di Claude Code, il suo passaggio ad «attende input» non veniva annunciato.
-- **File di configurazione modificati a mano.** Salvarne uno con il Blocco note
-  ci mette in testa un BOM, e la lettura falliva: tutte le impostazioni
-  tornavano ai valori predefiniti, in silenzio. Un `folders.json` corrotto
-  rendeva il selettore di cartelle inutilizzabile per sempre invece che per un
-  avvio. I valori di tipo sbagliato ora si scartano uno a uno, e non fanno più
-  fallire il pannello Impostazioni.
-- **Ricerca cartelle.** Cercando «cm», ClaudeManager finiva dietro Musica e
-  Modelli: ora il nome della cartella pesa più del percorso che la contiene.
-- **Scorciatoie.** Assegnare `+` o la barra spaziatrice cancellava la
-  combinazione vecchia senza crearne una nuova; le azioni `Alt+1`…`Alt+9` non
-  comparivano nell'elenco, quindi non c'era modo di rimapparle.
-- **Riquadri.** Dall'ottava divisione consecutiva il nuovo riquadro nasceva
-  largo zero pixel: ora la divisione si rifiuta quando lo spazio non basta. E un
-  `layout.json` con valori impossibili non fa più sparire dallo schermo i due
-  riquadri di una divisione.
-- **Cassetto di monitoraggio.** Chiudendo la finestra staccata, la linguetta
-  restava convinta che fosse ancora fuori.
-- **Temi.** Nel tema «Alto contrasto» il nero ANSI coincideva con lo sfondo del
-  terminale: cornici, barre di avanzamento e diff sparivano del tutto, proprio
-  nel tema che promette la massima leggibilità. Un tema con un colore mancante,
-  o con `dark` di tipo sbagliato, ora viene rifiutato invece di applicarsi a
-  metà.
-- **Sessioni.** Le etichette nell'elenco di ripresa mostravano il markup grezzo
-  dei comandi slash; una porta SSH con i decimali veniva accettata e salvata, e
-  poi rifiutata da ssh; un nome con un'emoji al sessantaquattresimo carattere
-  veniva spezzato a metà.
+- **Quotes in the initial prompt are no longer lost.** Arguments passed to `claude` went through PowerShell, which dropped `"` characters along the way: initial prompts were truncated at the first quote, and remote panes with quotes in their path failed to open entirely. They now reach the child process exactly as written.
+- **Statistics aligned to your local day.** "Today" and "last 7 days" used to cut off at midnight UTC: until 2:00 AM, yesterday's work was counted toward today.
+- **Context saturation no longer says "approx."** Model identifiers with a trailing date suffix were not matched, leaving the percentage permanently labeled as approximate.
+- **More reliable notifications.** If a session briefly disappeared from the Claude Code registry for a single cycle, its transition to "waiting for input" was missed.
+- **Hand-edited configuration files.** Saving a config file in Notepad prepends a UTF-8 BOM, causing file parsing to fail and silently resetting all settings to defaults. A corrupt `folders.json` rendered the folder selector permanently unusable across restarts. Invalid types are now discarded on a per-field basis and no longer crash the Settings panel.
+- **Folder search.** Searching for "cm" placed ClaudeManager below Music and Models: the folder name now weighs higher than its parent directory path.
+- **Keybindings.** Binding `+` or the Spacebar cleared the old combination without creating a new one; actions `Alt+1`…`Alt+9` were omitted from the settings list, making them unmappable.
+- **Panes.** Starting from the eighth consecutive split, new panes spawned with zero width: splits are now rejected when insufficient space remains. Additionally, an invalid `layout.json` no longer causes split panes to vanish.
+- **Monitoring drawer.** Closing the detached window left the drawer handle in an inconsistent state, assuming it was still popped out.
+- **Themes.** In the High Contrast theme, ANSI black matched the terminal background: borders, progress bars, and diffs were rendered invisible. Themes with missing color fields or invalid `dark` types are now rejected upfront rather than partially applied.
+- **Sessions.** Labels in the resume list displayed raw slash-command markup; SSH ports with decimals were parsed and saved, subsequently failing during ssh execution; session names containing emojis at the 64th character boundary were sliced improperly.
 
-Sotto il cofano: 376 test automatici che girano a ogni modifica, su Windows,
-perché una parte verifica proprio come arrivano gli argomenti a un eseguibile
-nativo — dove il difetto più grave si nascondeva.
+Under the hood: 376 automated tests run on every commit on Windows, verifying child-process argument marshaling into native executables where the subtlest edge cases resided.
 
 ## 1.1.0 — 2026-08-02
 
-- **Avvisi quando una sessione ti aspetta.** Con più riquadri aperti non si
-  possono guardare tutti: quando uno passa ad attendere una risposta arriva una
-  notifica di sistema e l'icona nella barra delle applicazioni lampeggia. Il
-  clic porta a quel riquadro, col fuoco già nel terminale. Si avvisa sul
-  *passaggio*, non finché ci resta, e mai mentre stai guardando l'app.
-- **Cassetto di monitoraggio.** Una linguetta sul bordo destro apre un pannello
-  con costo e token del giorno e, per ogni sessione, **quanto è pieno il
-  contesto**. Si stacca in una finestra a sé, sempre in primo piano e
-  spostabile su un altro monitor.
-- **Scorciatoie rimappabili.** Si preme la riga nelle impostazioni e poi la
-  combinazione voluta. Le personalizzazioni si sovrappongono alle predefinite,
-  e assegnando la stringa vuota si libera una combinazione senza rimpiazzarla —
-  per restituire `Alt+B` a readline, ad esempio.
-- **Ricerca nel terminale.** `Alt+S` cerca nello scrollback del riquadro
-  attivo, con evidenziazione delle occorrenze e spostamento avanti e indietro.
+- **Alerts when a session awaits your input.** With multiple panes open, you cannot monitor all of them: when a session transitions to waiting for user input, a native system notification is dispatched and the taskbar icon flashes. Clicking the notification focuses the terminal in that specific pane. Notifications trigger on *state transitions*, never spamming while the app is in focus.
+- **Monitoring drawer.** A tab on the right edge opens a drawer displaying today's token usage, costs, and **context window saturation** for each active session. Can be detached into an independent, always-on-top floating window movable to a secondary monitor.
+- **Remappable shortcuts.** Click any entry in Settings and press your desired key combination. Custom mappings override defaults, and assigning an empty combination frees the shortcut without a replacement (e.g., returning `Alt+B` to readline).
+- **Terminal search.** `Alt+S` searches the scrollback buffer of the active pane, with match highlighting and forward/backward navigation.
 
 ## 1.0.1 — 2026-08-02
 
-- Anche la copia portabile controlla se è uscita una versione nuova e lo dice,
-  con il collegamento per scaricarla. Non può sostituirsi da sola, ma non
-  saperlo nemmeno non serviva a nessuno.
+- The portable release checks for newer versions on startup and displays an update prompt with a direct download link.
 
 ## 1.0.0 — 2026-08-02
 
-Prima versione pubblica.
+Initial public release.
 
-### Il desktop
+### Desktop Compositor
 
-- Una sola finestra a schermo intero fa da compositor: i riquadri delle
-  sessioni si dividono lo spazio in mosaico, e quello attivo può essere
-  staccato come finestra flottante, spostato e ridimensionato.
-- Riordino col mouse: l'intestazione di ogni riquadro è una maniglia, e
-  rilasciando vicino a un bordo ci si affianca, al centro ci si scambia.
-  Un'anteprima mostra dove finirà prima di mollare, ed `Esc` annulla a metà.
-- Scorciatoie con `Alt`, su una lista chiusa: tutto il resto arriva intatto al
-  terminale e quindi a Claude.
-- Animazioni sui cambi di layout, con `prefers-reduced-motion` rispettato.
+- A single fullscreen window acts as a compositor: session panes tile space automatically, while active panes can be detached into floating windows, moved, and resized.
+- Mouse reordering: pane headers act as drag handles. Dropping near an edge tiles beside adjacent panes, while dropping in the center swaps positions. A live preview displays placement, and `Esc` cancels the drag gesture.
+- `Alt`-based shortcut map: all other keyboard input passes untouched to the terminal and Claude.
+- Smooth transitions for layout changes, respecting `prefers-reduced-motion`.
 
-### Le sessioni
+### Sessions
 
-- Ogni riquadro apre PowerShell nella cartella scelta e vi avvia `claude`.
-  Uscendo da Claude si resta nella shell, nella stessa cartella.
-- Selettore di cartella con ricerca fuzzy, esplora-cartelle e campo per
-  incollare un percorso, con badge per ramo git, presenza di `CLAUDE.md`,
-  sessioni già esistenti e stato di fiducia.
-- Ripresa delle conversazioni passate di una cartella, elencate con la loro
-  etichetta, con l'opzione di duplicarle invece di continuarle.
-- Stato in tempo reale letto dal registro che Claude Code mantiene in
-  `~/.claude/sessions/`, senza interpretare l'output del terminale.
-- Opzioni di lancio per riquadro: modello, impegno, modalità permessi e prompt
-  iniziale.
+- Each pane opens PowerShell in the selected directory and launches `claude`. Exiting Claude drops back to the shell in that directory.
+- Folder picker with fuzzy search, filesystem explorer, and path paste, complete with badges for git branch, `CLAUDE.md` presence, existing sessions, and folder trust state.
+- Resume previous conversations in a directory with labeled history, with an option to fork rather than continue.
+- Real-time status read directly from Claude Code's session registry in `~/.claude/sessions/` without scraping terminal stdout.
+- Per-pane launch flags: model alias, effort level, permission mode, and initial prompt.
 
-### Sessioni remote
+### Remote Sessions
 
-- Un riquadro può aprire Claude Code su un server via SSH: connessioni
-  salvate, esplorazione delle cartelle remote con gli stessi badge del locale,
-  e ripresa delle conversazioni già presenti là.
-- Nessuna password viene chiesta o memorizzata: vale l'autenticazione che ssh
-  sa già fare da sola.
+- Panes can launch Claude Code on remote servers via SSH: saved connection profiles, remote directory browsing with local-equivalent badges, and remote session resuming.
+- No passwords requested or stored: leverages existing system SSH authentication and agent keys.
 
-### Il resto
+### Additional Features
 
-- Statistiche di utilizzo: token e costo di listino per giorno, modello e
-  cartella, ricavati dai transcript.
-- Ripristino del layout alla riapertura, con le conversazioni riprese dove
-  erano rimaste.
-- Sei temi integrati più i tuoi, come file JSON in
-  `%APPDATA%\claudemanager\themes\`. Ogni tema definisce interfaccia e i 16
-  colori ANSI del terminale insieme.
-- Indice del selettore da quattro sorgenti componibili, inclusa la scansione
-  completa delle unità.
-- Aggiornamenti automatici dalle release di GitHub: si scaricano da soli e si
-  installano alla chiusura dell'app, mai a sorpresa mentre si lavora.
+- Usage statistics: token consumption and list pricing calculated per day, model, and directory parsed from local transcripts.
+- State restoration on launch, resuming active panes where they left off.
+- Six built-in themes plus custom themes via JSON in `%APPDATA%\claudemanager\themes\`. Each theme configures the UI and 16 ANSI terminal colors concurrently.
+- Configurable folder index supporting up to four composable sources, including full-drive sweeps.
+- Automated background updates via GitHub releases: downloaded silently and applied on application exit.

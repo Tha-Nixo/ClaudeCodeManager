@@ -2,18 +2,17 @@ import { readdir } from 'node:fs/promises'
 import { basename, join } from 'node:path'
 
 /**
- * Camminata sul filesystem per costruire l'indice delle cartelle.
+ * Filesystem traversal to build folder indices.
  *
- * Gira nel main process ma cede il controllo all'event loop ogni YIELD_EVERY
- * voci. Il lavoro è dominato dall'I/O, non dalla CPU: un worker thread
- * separato costringerebbe a un secondo target di build in electron-vite e a
- * gestirne il percorso nel pacchetto, senza aggiungere nulla rispetto a
- * questo, perché ciò che conta è non tenere occupato il thread mentre si
- * aspetta il disco. La scrittura sui PTY e il ridimensionamento continuano a
- * essere serviti durante la scansione.
+ * Runs in the main process yielding control to the event loop every YIELD_EVERY entries.
+ * The workload is I/O dominated rather than CPU bound: a separate worker thread
+ * would require an additional build target in electron-vite and path management
+ * in packages without benefits over this approach, since the key requirement is
+ * not tying up the event loop while waiting for disk operations. PTY writes
+ * and resizes continue to be serviced during scanning.
  */
 
-/** Cartelle che non contengono mai progetti e che costano moltissimo. */
+/** Folders that never contain projects and are costly to traverse. */
 const EXCLUDED = new Set([
   'windows',
   'program files',
@@ -44,11 +43,11 @@ const EXCLUDED = new Set([
 const YIELD_EVERY = 400
 
 export interface WalkOptions {
-  /** Profondità massima relativa alla radice. */
+  /** Maximum traversal depth relative to root. */
   maxDepth: number
-  /** Si ferma alla prima cartella che contiene .git e non scende oltre. */
+  /** Stops at the first folder containing .git without descending deeper. */
   gitOnly: boolean
-  /** Tetto di sicurezza sui risultati. */
+  /** Safety ceiling on returned results. */
   maxResults: number
 }
 
@@ -84,7 +83,7 @@ export async function walk(
     try {
       entries = await readdir(path, { withFileTypes: true })
     } catch {
-      // Accesso negato, unità staccata, percorso troppo lungo: si prosegue.
+      // Access denied, detached drive, path too long: continue.
       continue
     }
 
@@ -93,8 +92,8 @@ export async function walk(
     if (options.gitOnly) {
       if (hasGit) {
         found.push(path)
-        // Un repository è la radice del progetto: dentro non c'è altro da
-        // indicizzare, e scendere significherebbe visitare tutti i sorgenti.
+        // A repository is the project root: no need to index deeper inside,
+        // which would needlessly traverse all source trees.
         continue
       }
     } else if (depth > 0) {
@@ -107,7 +106,7 @@ export async function walk(
       if (!entry.isDirectory()) continue
       const name = entry.name.toLowerCase()
       if (EXCLUDED.has(name)) continue
-      // Le cartelle nascoste raramente sono progetti dell'utente.
+      // Hidden folders are rarely top-level user projects.
       if (name.startsWith('.') && name !== '.config') continue
       queue.push({ path: join(path, entry.name), depth: depth + 1 })
     }
@@ -116,8 +115,8 @@ export async function walk(
     if (sinceYield >= YIELD_EVERY) {
       sinceYield = 0
       onProgress({ visited, found: found.length, current: basename(path) || path })
-      // Restituisce il controllo all'event loop: senza questo, una scansione
-      // dell'intero disco bloccherebbe l'IPC e i terminali si impunterebbero.
+      // Yield control to the event loop: without this, scanning an entire drive
+      // would block IPC and stall terminals.
       await new Promise<void>((resolve) => setImmediate(resolve))
     }
   }

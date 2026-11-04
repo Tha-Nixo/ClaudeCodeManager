@@ -15,21 +15,12 @@ import {
 } from './pricing'
 
 /**
- * Contabilità dei token a partire dai transcript di Claude Code.
+ * Token accounting derived from Claude Code JSONL transcripts.
  *
- * L'unità di incrementalità è il FILE, non la riga. Quando un transcript
- * cambia lo si rilegge per intero e se ne sostituisce il contributo.
- *
- * Sembra più costoso di riprendere dall'ultima riga letta, ma evita un errore
- * concreto: Claude Code scrive PIÙ righe con lo stesso `message.id` per la
- * stessa risposta API, e vale l'ultima. Riprendendo da metà file, una riga già
- * conteggiata che ricompare più avanti verrebbe sommata due volte. Rileggendo
- * il file intero la deduplica per message.id è sempre corretta, e in regime
- * stazionario cambia solo il transcript della sessione attiva.
+ * Incremental caching operates per file: when a transcript changes, it is re-parsed
+ * in its entirety to accurately resolve message.id deduplication.
  */
 
-// Alzata a 4 per i campi dell'ultimo turno: la riscansione completa che ne
-// consegue costa qualche decina di millisecondi, una volta sola.
 const CACHE_VERSION = 4
 
 interface FileContribution {
@@ -40,21 +31,16 @@ interface FileContribution {
   turns: number
   firstAt: number
   lastAt: number
-  /** Token per modello: il costo dipende dal modello, non si può aggregare prima. */
+  /** Token breakdown by model. */
   byModel: Record<string, TokenCounts>
-  /** Token per giorno (YYYY-MM-DD) e modello. */
+  /** Token breakdown by local date (YYYY-MM-DD) and model. */
   byDay: Record<string, Record<string, TokenCounts>>
   /**
-   * Token in ingresso dell'ULTIMO turno assistant, cache compresa.
-   *
-   * Approssima quanto è pieno il contesto adesso: ogni richiesta rimanda
-   * l'intera conversazione, quindi l'ingresso dell'ultimo turno è la
-   * dimensione corrente della conversazione. `input_tokens` da solo non
-   * basta: è la sola parte NON servita dalla cache, e in una sessione lunga
-   * è la minoranza.
+   * Input tokens of the LATEST assistant turn, including cache reads/writes.
+   * Estimates current conversation context fullness.
    */
   lastContext: number
-  /** Modello dell'ultimo turno, per sapere contro quale finestra rapportarlo. */
+  /** Model of the latest turn. */
   lastModel: string | null
 }
 
@@ -78,7 +64,7 @@ function loadCache(): UsageCache {
   return cache
 }
 
-/** Tutti i transcript, inclusi quelli dei sotto-agenti nelle sottocartelle. */
+/** Recursively discovers transcript files including subagents. */
 function findTranscripts(dir: string, out: string[] = []): string[] {
   let entries: import('node:fs').Dirent[]
   try {
@@ -121,8 +107,6 @@ function parseTranscript(file: string): Omit<FileContribution, 'mtimeMs' | 'size
     return contribution
   }
 
-  // Deduplica dentro il file: più record condividono lo stesso message.id e
-  // solo l'ultimo porta i totali definitivi. Sommarli tutti gonfia i numeri.
   const byMessageId = new Map<string, Turn>()
 
   for (const line of raw.split('\n')) {
@@ -161,8 +145,6 @@ function parseTranscript(file: string): Omit<FileContribution, 'mtimeMs' | 'size
 
     const created = usage.cache_creation
     const creationTotal = usage.cache_creation_input_tokens ?? 0
-    // La ripartizione 5m/1h è quella autorevole quando c'è; altrimenti si
-    // attribuisce tutto ai 5 minuti, che è il TTL predefinito.
     const write5m = created?.ephemeral_5m_input_tokens ?? (created ? 0 : creationTotal)
     const write1h = created?.ephemeral_1h_input_tokens ?? 0
 
@@ -185,19 +167,14 @@ function parseTranscript(file: string): Omit<FileContribution, 'mtimeMs' | 'size
     const key = rec.message?.id
     const turn: Turn = { model, tokens, timestamp }
 
-    // Ordine del file, non del timestamp: l'ultimo turno scritto è quello che
-    // descrive il contesto adesso, e i timestamp fra sotto-agenti e sessione
-    // principale non sono necessariamente monotoni.
     contribution.lastContext = tokens.input + tokens.cacheRead + tokens.cacheWrite5m + tokens.cacheWrite1h
     contribution.lastModel = model
 
-    // Senza message.id non c'è modo di deduplicare: si tiene comunque il
-    // turno, usando una chiave unica.
     byMessageId.set(key || `anon-${byMessageId.size}`, turn)
   }
 
   for (const turn of byMessageId.values()) {
-    const model = turn.model ?? 'sconosciuto'
+    const model = turn.model ?? 'unknown'
     contribution.turns += 1
     contribution.byModel[model] = addTokens(contribution.byModel[model] ?? ZERO_TOKENS, turn.tokens)
 
@@ -219,7 +196,7 @@ function parseTranscript(file: string): Omit<FileContribution, 'mtimeMs' | 'size
   return contribution
 }
 
-/** Aggiorna la cache leggendo solo i transcript cambiati. */
+/** Updates cache by scanning updated transcripts. */
 export function scan(force = false): void {
   if (!force && Date.now() - lastScan < MIN_RESCAN_MS) return
   lastScan = Date.now()
@@ -247,13 +224,7 @@ export function scan(force = false): void {
     changed = true
   }
 
-  // Transcript cancellati: il loro contributo va tolto.
-  //
-  // È una differenza deliberata rispetto a claude-usage, che accumula per
-  // sempre: sulla stessa macchina il suo database contiene 5 transcript non
-  // più esistenti, per 412 turni e 345k token di output che continua a
-  // sommare. Qui i numeri descrivono i transcript che ci sono davvero, così
-  // restano verificabili e la pulizia periodica di Claude Code non li gonfia.
+  // Prune deleted transcripts so totals match real files on disk
   for (const known of Object.keys(state.files)) {
     if (!present.has(known)) {
       delete state.files[known]
@@ -264,14 +235,7 @@ export function scan(force = false): void {
   if (changed) writeJsonAtomic(cachePath(), state)
 }
 
-/**
- * Utilizzo per singola sessione, indicizzato per sessionId.
- *
- * Serve al pannello di monitoraggio, che ragiona per riquadro e non per
- * cartella o modello come fa `summarize`. La scansione è la stessa: chiamarli
- * entrambi nello stesso giro non costa il doppio, perché `scan` ha una
- * frequenza minima propria.
- */
+/** Per-session usage indexed by sessionId for monitor panel. */
 export function sessionUsage(): Record<string, SessionUsage> {
   scan()
   const state = loadCache()
@@ -287,8 +251,6 @@ export function sessionUsage(): Record<string, SessionUsage> {
 
     const { window, approximate } = contextWindowFor(file.lastModel)
 
-    // Un sotto-agente ha un transcript proprio ma lo stesso id non esiste
-    // altrove, quindi la mappa non ha collisioni: una voce per file.
     out[file.sessionId] = {
       sessionId: file.sessionId,
       cwd: file.cwd,
@@ -306,20 +268,11 @@ export function sessionUsage(): Record<string, SessionUsage> {
   return out
 }
 
-/**
- * Chiave del giorno secondo il fuso dell'utente, non secondo Greenwich.
- *
- * `toISOString()` dava il giorno UTC: per chi sta in Italia il lavoro fatto
- * fra mezzanotte e le due del mattino finiva contato nel giorno precedente, e
- * «Oggi» — il numero piu' in vista dell'app — diceva una cosa diversa da
- * quella che l'utente aveva appena fatto. Nei fusi negativi succedeva il
- * contrario. La chiave resta nella stessa forma AAAA-MM-GG, quindi i confronti
- * e l'ordinamento non cambiano.
- */
+/** Local calendar date key (YYYY-MM-DD) based on user's timezone. */
 function localDayKey(d: Date): string {
-  const mese = String(d.getMonth() + 1).padStart(2, '0')
-  const giorno = String(d.getDate()).padStart(2, '0')
-  return `${d.getFullYear()}-${mese}-${giorno}`
+  const month = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${d.getFullYear()}-${month}-${day}`
 }
 
 function dayKey(offsetDays: number): string {
@@ -350,7 +303,7 @@ export function summarize(): UsageSummary {
     if (contribution.turns === 0) continue
     sessions += 1
 
-    const project = contribution.cwd ?? 'sconosciuto'
+    const project = contribution.cwd ?? 'unknown'
 
     for (const [model, tokens] of Object.entries(contribution.byModel)) {
       const cost = costOf(model, tokens)

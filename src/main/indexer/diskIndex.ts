@@ -7,12 +7,12 @@ import { readJson, writeJsonAtomic } from '../store/config'
 import { walk } from './walker'
 
 /**
- * Indici che richiedono una scansione del disco, tenuti separati dalle
- * sorgenti immediate (preferiti, recenti, cartelle già usate con Claude).
+ * Indices that require disk scanning, maintained separately from
+ * immediate sources (favorites, recents, folders already used with Claude).
  *
- * Ogni indice è persistito e viene ricostruito solo su richiesta esplicita o
- * quando è più vecchio di STALE_MS: una scansione all'avvio renderebbe l'app
- * lenta ad aprirsi proprio quando serve che sia pronta.
+ * Each index is persisted and only rebuilt upon explicit request or
+ * when older than STALE_MS: an eager scan at launch would make the app
+ * slow to start precisely when responsiveness is needed.
  */
 
 const STALE_MS = 24 * 60 * 60 * 1000
@@ -84,7 +84,7 @@ export function cancel(kind: IndexKind): void {
 
 export interface RescanOptions {
   kind: IndexKind
-  /** Radici configurate dall'utente; per 'drive' vengono ignorate. */
+  /** User-configured roots; ignored for 'drive'. */
   roots: string[]
   onUpdate?: (s: IndexStatus) => void
 }
@@ -110,8 +110,8 @@ export async function rescan(options: RescanOptions): Promise<IndexStatus> {
   const folders = await walk(
     roots,
     {
-      // Le radici configurate si fermano a 3 livelli: oltre si entra nei
-      // sorgenti dei progetti, che non sono cartelle da aprire.
+      // Configured roots stop at depth 3: deeper descends into project source
+      // trees, which are not top-level workspaces to open.
       maxDepth: kind === 'roots' ? 3 : kind === 'git' ? 6 : 8,
       gitOnly: kind === 'git',
       maxResults: MAX_RESULTS
@@ -126,8 +126,8 @@ export async function rescan(options: RescanOptions): Promise<IndexStatus> {
   delete running[kind]
 
   const scannedAt = Date.now()
-  // Una scansione annullata non sovrascrive l'indice precedente con un
-  // risultato parziale, che sembrerebbe completo al prossimo avvio.
+  // A cancelled scan does not overwrite the previous index with a partial
+  // result that would appear complete on next launch.
   if (!handle.cancelled) {
     writeJsonAtomic(file(kind), {
       version: VERSION,

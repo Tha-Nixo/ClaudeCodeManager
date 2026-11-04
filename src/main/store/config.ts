@@ -5,9 +5,9 @@ import { app } from 'electron'
 import { DEFAULT_CONFIG, type AppConfig } from '@shared/types'
 
 /**
- * Radici predefinite per l'indice: le cartelle dove di solito si tengono i
- * progetti. Sta qui e non nell'indicizzatore per non creare un ciclo di
- * import, dato che l'indicizzatore usa le funzioni di scrittura di questo file.
+ * Default roots for indexing: directories where projects typically reside.
+ * Located here rather than in the indexer to avoid circular imports,
+ * as the indexer relies on writing functions in this module.
  */
 export function defaultRoots(): string[] {
   const home = homedir()
@@ -21,9 +21,9 @@ export function defaultRoots(): string[] {
 }
 
 /**
- * Scrittura atomica: si scrive su un file temporaneo e si rinomina.
- * Un crash a metà scrittura lascia il file precedente intatto invece di
- * un JSON troncato che all'avvio successivo farebbe perdere la configurazione.
+ * Atomic write: write to a temporary file and rename.
+ * A crash mid-write leaves the previous file intact rather than
+ * truncated JSON that would corrupt configuration on next launch.
  */
 export function writeJsonAtomic(target: string, value: unknown): boolean {
   const tmp = `${target}.tmp`
@@ -33,15 +33,14 @@ export function writeJsonAtomic(target: string, value: unknown): boolean {
     renameSync(tmp, target)
     return true
   } catch (err) {
-    // Disco pieno, permessi, file in uso: perdere una scrittura è accettabile,
-    // far morire il processo principale con dentro tutti i PTY no. Alcune di
-    // queste chiamate avvengono dentro un timer, dove un'eccezione non
-    // catturata abbatterebbe l'app.
-    console.error(`scrittura di ${target} fallita`, err)
+    // Full disk, permissions, file in use: losing a write is acceptable,
+    // crashing the main process with all active PTYs is not. Some of
+    // these calls happen within timers where an unhandled exception would crash the app.
+    console.error(`Failed to write ${target}`, err)
     try {
       rmSync(tmp, { force: true })
     } catch {
-      // Nulla da fare: il file temporaneo resta e verrà sovrascritto.
+      // Nothing to do: temporary file remains and will be overwritten.
     }
     return false
   }
@@ -49,13 +48,12 @@ export function writeJsonAtomic(target: string, value: unknown): boolean {
 
 export function readJson<T>(target: string): T | null {
   try {
-    // Il BOM va tolto prima del parse: JSON.parse ci lancia sopra, l'errore
-    // viene inghiottito qui e il file finisce ignorato in silenzio, poi
-    // sovrascritto alla prima scrittura. Questi file sono dichiaratamente
-    // modificabili a mano, e su Windows gli strumenti piu' comuni
-    // (Set-Content -Encoding utf8, il Blocco note) il BOM ce lo mettono:
-    // senza questa riga una modifica innocua cancella impostazioni,
-    // preferiti, cartelle recenti e connessioni ssh.
+    // Strip BOM before parsing: JSON.parse throws on it, causing the error
+    // to be swallowed here and the file silently ignored, then overwritten
+    // on next save. These files are explicitly user-editable, and on Windows
+    // common tools (Set-Content -Encoding utf8, Notepad) often prepend a BOM.
+    // Without this line, an innocent edit wipes out settings, bookmarks,
+    // recent folders, and ssh connections.
     const raw = readFileSync(target, 'utf8')
     return JSON.parse(raw.charCodeAt(0) === 0xfeff ? raw.slice(1) : raw) as T
   } catch {
@@ -76,11 +74,10 @@ export function getConfig(): AppConfig {
 
   const stored = readJson<Partial<AppConfig>>(pathToConfig())
 
-  // Il file è dichiaratamente modificabile a mano, quindi ogni campo va
-  // accettato solo se ha il tipo giusto. Prima lo era solo `keymap`, e un
-  // errore banale come `scanRoots` scritto come stringa invece che come
-  // elenco arrivava intatto al renderer, dove il pannello Impostazioni
-  // chiamava .join() su una stringa e smetteva di disegnarsi.
+  // The file is explicitly user-editable, so every field must be validated
+  // for correct type. Previously only `keymap` was validated, and a simple
+  // mistake like `scanRoots` written as a string instead of an array arrived
+  // in the renderer, causing SettingsPanel to call .join() on a string and crash.
   const str = (v: unknown, fallback: string): string =>
     typeof v === 'string' && v.trim() ? v : fallback
   const num = (v: unknown, fallback: number): number =>
@@ -88,14 +85,13 @@ export function getConfig(): AppConfig {
   const bool = (v: unknown, fallback: boolean): boolean => (typeof v === 'boolean' ? v : fallback)
 
   /**
-   * Fonde un oggetto memorizzato sopra il predefinito, ma tiene solo le chiavi
-   * gia' previste e solo se il valore ha lo stesso tipo di quello predefinito.
+   * Merges a stored object over defaults, keeping only recognized keys
+   * and only if the value matches the type of the default.
    *
-   * Una fusione cieca lasciava passare `indexSources: { claude: 'si' }` e
-   * `launchDefaults: { model: 42 }`: l'oggetto arrivava al renderer con la
-   * forma sbagliata, che e' esattamente il difetto che la convalida doveva
-   * chiudere. Le chiavi in piu' vengono scartate: non appartengono ad
-   * AppConfig e nessuno le leggerebbe.
+   * Blind merging allowed `indexSources: { claude: 'yes' }` and
+   * `launchDefaults: { model: 42 }`: the object reached the renderer with
+   * invalid shape, precisely what validation is intended to prevent.
+   * Extra keys are discarded: they do not belong to AppConfig and are unused.
    */
   const obj = <T extends Record<string, unknown>>(v: unknown, fallback: T): T => {
     if (!v || typeof v !== 'object' || Array.isArray(v)) return fallback
@@ -107,8 +103,8 @@ export function getConfig(): AppConfig {
     return out
   }
 
-  /** Tiene solo le coppie in cui chiave e valore sono stringhe. */
-  const mappaDiStringhe = (v: unknown): Record<string, string> => {
+  /** Retains only key-value pairs where both key and value are strings. */
+  const stringMap = (v: unknown): Record<string, string> => {
     if (!v || typeof v !== 'object' || Array.isArray(v)) return {}
     const out: Record<string, string> = {}
     for (const [k, val] of Object.entries(v as Record<string, unknown>)) {
@@ -132,16 +128,15 @@ export function getConfig(): AppConfig {
       DEFAULT_CONFIG.restoreResumesSessions
     ),
     indexSources: obj(stored?.indexSources, DEFAULT_CONFIG.indexSources),
-    // Senza radici configurate si usano quelle in cui si tengono di solito i
-    // progetti, così l'indice è utile al primo avvio senza chiedere nulla.
+    // Without configured roots, fall back to standard project locations
+    // so the index is immediately useful on first launch without prompts.
     scanRoots: roots.length ? roots : defaultRoots(),
     themeId: str(stored?.themeId, DEFAULT_CONFIG.themeId),
     notifyOnWaiting: bool(stored?.notifyOnWaiting, DEFAULT_CONFIG.notifyOnWaiting),
-    // La keymap e' una mappa aperta, non un oggetto a forma fissa: le chiavi
-    // sono combinazioni che l'utente inventa, quindi qui si controlla solo che
-    // sia un oggetto di stringhe. Il resto lo valida `resolveKeymap`, che sa
-    // quali azioni esistono e riporta i problemi all'utente.
-    keymap: mappaDiStringhe(stored?.keymap)
+    // Keymap is an open map rather than a fixed-shape object: keys are
+    // arbitrary user-defined shortcut sequences, so here we only verify
+    // it is a Record<string, string>. The rest is validated by `resolveKeymap`.
+    keymap: stringMap(stored?.keymap)
   }
   return cached
 }

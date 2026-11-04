@@ -4,16 +4,14 @@ import MonitorWindow from './monitor/MonitorWindow'
 import './theme/claude-dark.css'
 
 const container = document.getElementById('root')
-if (!container) throw new Error('#root non trovato in index.html')
+if (!container) throw new Error('#root not found in index.html')
 
-// Le due finestre condividono lo stesso bundle e si distinguono dall'ancora.
-// È l'unica parte del percorso che non cambia fra il server di sviluppo e il
-// caricamento da file://, quindi funziona identica nei due casi.
+// Both windows share the same bundle and are distinguished by URL hash.
+// This is the only URL component consistent across the dev server and file:// loading.
 const isMonitor = window.location.hash === '#monitor'
 
-// Niente <StrictMode>: in sviluppo rimonta gli effetti due volte, e qui un
-// effetto fa nascere un processo reale (PowerShell + Claude). Il doppio giro
-// lascerebbe un processo spawnato e ucciso ad ogni avvio, più due record
-// in ~/.claude/sessions/. Il costo supera il beneficio in un'app che possiede
-// processi del sistema operativo.
+// No <StrictMode>: in development it remounts effects twice, and here an
+// effect spawns a real OS process (PowerShell + Claude). Double-mounting
+// would spawn and kill a process on every start, polluting ~/.claude/sessions/.
+// The cost outweighs the benefit in an application managing system processes.
 createRoot(container).render(isMonitor ? <MonitorWindow /> : <App />)

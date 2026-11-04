@@ -10,79 +10,61 @@ import { buildSshQuery, shellQuote } from './command'
 import { ptyEnv } from '../pty/env'
 
 /**
- * Interrogazioni non interattive del server.
+ * Non-interactive server queries.
  *
- * Tutto passa per `ssh -T -o BatchMode=yes`: se le chiavi non bastano ssh
- * fallisce invece di fermarsi su un prompt di password che nessuno vedrebbe,
- * lasciando l'interfaccia appesa a tempo indeterminato.
- *
- * Gli script remoti sono POSIX puri, senza dipendere da python o jq: l'unica
- * cosa che si può dare per scontata su un server è una shell.
+ * All executed via `ssh -T -o BatchMode=yes`: if authentication fails, ssh
+ * fails immediately rather than blocking on invisible password prompts.
+ * Remote scripts are pure POSIX shell without requiring python or jq.
  */
 
 const QUERY_TIMEOUT_MS = 20_000
-/** Un elenco di cartelle sterminato non serve a nessuno e satura l'IPC. */
 const MAX_OUTPUT_BYTES = 4 * 1024 * 1024
 
 export interface SshResult {
   ok: boolean
   stdout: string
-  /** Messaggio già leggibile, pronto da mostrare. */
+  /** Human-readable error message ready for display. */
   error?: string
-  /**
-   * Codice di uscita dello script remoto. Serve a distinguere un fallimento di
-   * connessione da un esito previsto: gli script usano codici propri (3, 4)
-   * per dire "cartella assente" o "mai usata con Claude", che non sono errori.
-   */
+  /** Exit code from remote script. */
   code: number | null
 }
 
-/**
- * Traduce i fallimenti di ssh in qualcosa di azionabile.
- *
- * Il testo grezzo di ssh finisce comunque nei dettagli, ma da solo non aiuta:
- * "Permission denied (publickey)" non dice a chi lo legge che deve copiare la
- * propria chiave sul server.
- */
+/** Translates raw ssh failures into actionable user guidance. */
 function describeFailure(code: number | null, stderr: string): string {
   const raw = stderr.trim()
   const lower = raw.toLowerCase()
 
   if (lower.includes('permission denied')) {
-    return 'Autenticazione rifiutata. Serve una chiave gia’ autorizzata sul server (ssh-copy-id) oppure un agent con la chiave caricata: ClaudeManager non chiede password.'
+    return 'Authentication failed. Requires an authorized key on the server (ssh-copy-id) or an ssh-agent with the key loaded: ClaudeManager does not prompt for passwords.'
   }
   if (lower.includes('host key verification failed') || lower.includes('remote host identification')) {
-    return 'Chiave del server non riconosciuta. Apri una volta la connessione a mano con ssh per accettarla, poi riprova.'
+    return 'Host key verification failed. Connect once manually via ssh to accept the host key, then retry.'
   }
   if (lower.includes('could not resolve hostname')) {
-    return 'Nome del server non risolto. Controlla l’indirizzo.'
+    return 'Could not resolve server hostname. Please verify the host address.'
   }
   if (lower.includes('connection refused')) {
-    return 'Connessione rifiutata: nessun servizio ssh sulla porta indicata.'
+    return 'Connection refused: no SSH service listening on specified port.'
   }
   if (
     lower.includes('connection timed out') ||
     lower.includes('operation timed out') ||
     lower.includes('etimedout')
   ) {
-    return 'Il server non ha risposto entro il tempo previsto. Potrebbe essere spento, irraggiungibile dalla rete, o molto lento.'
+    return 'Connection timed out. The server may be offline, unreachable, or under heavy load.'
   }
   if (lower.includes('enoent')) {
-    return 'Client ssh non trovato su questo computer. Si attiva da Impostazioni → App → Funzionalita’ facoltative → Client OpenSSH.'
+    return 'SSH client not found on this system. Enable it in Settings → Apps → Optional features → OpenSSH Client.'
   }
-  // Il primo rigo di stderr è quasi sempre quello utile; il resto è rumore.
   const first = raw.split('\n').find((l) => l.trim().length > 0)
   if (first) return first.trim()
-  // Senza nessun indizio si dice almeno cosa provare: un codice numerico da
-  // solo non suggerisce nessuna azione a chi legge.
-  return `Il server non ha risposto in modo comprensibile (codice ${code ?? 'ignoto'}). Prova ad aprire la connessione a mano con ssh per vedere l’errore completo.`
+  return `Server returned an unrecognized response (code ${code ?? 'unknown'}). Connect manually via ssh to inspect the full error.`
 }
 
-/** Codici che gli script remoti usano per esiti previsti, non per errori. */
 const EXIT_NO_DIR = 3
 const EXIT_NEVER_USED = 4
 
-/** Esegue uno script sul server e ne restituisce l'output. */
+/** Executes a shell script on remote server and returns stdout. */
 export function runRemote(
   target: SshTarget,
   script: string,
@@ -106,12 +88,7 @@ export function runRemote(
         const rawCode = (err as { code?: unknown }).code
         const code = typeof rawCode === 'number' ? rawCode : null
 
-        // Quando l'eseguibile non esiste, stderr e' vuoto e il motivo sta in
-        // `err.code` come stringa ('ENOENT'): cercandolo solo nello stderr il
-        // messaggio utile — quello che spiega come attivare il client OpenSSH
-        // — non compariva mai, proprio nel caso in cui serve. Stessa cosa per
-        // il timeout, che arriva come `killed`.
-        const indizio =
+        const clue =
           typeof rawCode === 'string'
             ? rawCode
             : (err as { killed?: boolean }).killed
@@ -122,21 +99,16 @@ export function runRemote(
           ok: false,
           stdout,
           code,
-          error: describeFailure(code, stderr || indizio)
+          error: describeFailure(code, stderr || clue)
         })
       }
     )
   })
 }
 
-/**
- * Separatore fra le colonne dell'output remoto. Esplicito perché dentro le
- * virgolette di una shell `\t` resterebbe letterale: il carattere di
- * tabulazione va incorporato qui.
- */
 const TAB = '\t'
 
-/** Righe non vuote dell'output, già divise in colonne. */
+/** Parses non-empty stdout lines into column arrays. */
 function rows(stdout: string): string[][] {
   return stdout
     .split('\n')
@@ -145,7 +117,7 @@ function rows(stdout: string): string[][] {
     .map((line) => line.split('\t'))
 }
 
-// --- Ricognizione ------------------------------------------------------------
+// --- Server Probing ---------------------------------------------------------
 
 const PROBE_SCRIPT = [
   `printf '%s\\n' "HOME${TAB}$HOME"`,
@@ -156,7 +128,7 @@ const PROBE_SCRIPT = [
   'fi'
 ].join('\n')
 
-/** Verifica raggiungibilità, home e presenza di Claude Code. */
+/** Verifies reachability, home directory, and Claude Code presence. */
 export async function probe(target: SshTarget): Promise<RemoteProbe> {
   const res = await runRemote(target, PROBE_SCRIPT)
   if (!res.ok) return { ok: false, error: res.error, home: '', claudePath: '', claudeVersion: '', os: '' }
@@ -171,12 +143,10 @@ export async function probe(target: SshTarget): Promise<RemoteProbe> {
   }
 }
 
-// --- Esplorazione delle cartelle remote --------------------------------------
+// --- Remote Directory Browsing ----------------------------------------------
 
 /**
- * Elenca le sottocartelle, segnalando quali sono repository git e quali hanno
- * istruzioni per Claude. Sono gli stessi due indizi che il selettore mostra in
- * locale, e servono a riconoscere un progetto senza entrarci.
+ * Lists subdirectories, detecting git repositories and Claude instructions.
  */
 function listScript(path: string): string {
   const target =
@@ -186,8 +156,6 @@ function listScript(path: string): string {
         ? `cd ~/${shellQuote(path.slice(2))}`
         : `cd ${shellQuote(path)}`
 
-  // Le righe sono unite da a capo: un for..do incollato al comando precedente
-  // da un semplice spazio è un errore di sintassi per la shell.
   return [
     `${target} 2>/dev/null || exit 3`,
     `printf '%s\\n' "PWD${TAB}$(pwd)"`,
@@ -207,8 +175,8 @@ export async function listDir(target: SshTarget, path: string): Promise<RemoteDi
   if (!res.ok) {
     const error =
       res.code === EXIT_NO_DIR
-        ? 'Cartella inesistente o non accessibile sul server.'
-        : (res.error ?? 'Errore sconosciuto')
+        ? 'Directory does not exist or is not accessible on the server.'
+        : (res.error ?? 'Unknown error')
     return { ok: false, error, path, parent: null, entries: [] }
   }
 
@@ -221,7 +189,6 @@ export async function listDir(target: SshTarget, path: string): Promise<RemoteDi
     } else if (cols[0] === 'D' && cols[3]) {
       entries.push({
         name: cols[3],
-        // pwd non ha lo slash finale salvo che per la radice.
         path: resolved === '/' ? `/${cols[3]}` : `${resolved}/${cols[3]}`,
         isGit: cols[1] === '1',
         hasInstructions: cols[2] === '1'
@@ -236,25 +203,17 @@ export async function listDir(target: SshTarget, path: string): Promise<RemoteDi
   return { ok: true, path: resolved, parent, entries }
 }
 
-// --- Sessioni remote riprendibili --------------------------------------------
+// --- Resumable Remote Sessions ----------------------------------------------
 
 /**
- * Su Linux la codifica cartella -> directory progetto è la stessa di Windows:
- * ogni carattere non alfanumerico diventa '-'. È duplicata qui invece di
- * riusare `encodeProjectDir` perché quella normalizza prima i separatori di
- * Windows, cosa che su un percorso POSIX non va fatta.
+ * Project directory encoding on POSIX systems: non-alphanumeric converted to hyphens.
  */
 function encodeRemoteProjectDir(path: string): string {
   return path.replace(/[^a-zA-Z0-9]/g, '-')
 }
 
-/**
- * Le etichette si ricavano con grep invece che con un parser JSON: sul server
- * non si può contare su python o jq. `ai-title` e `last-prompt` vengono
- * riemessi più volte nel transcript, quindi vale l'ultima occorrenza.
- */
+/** Generates shell script extracting session metadata via grep. */
 function sessionsScript(remotePath: string): string {
-  // $HOME non va quotato insieme al resto, altrimenti non viene espanso.
   const encoded = shellQuote(encodeRemoteProjectDir(remotePath))
   return [
     `d="$HOME/.claude/projects/"${encoded}`,
@@ -272,7 +231,7 @@ function sessionsScript(remotePath: string): string {
   ].join('\n')
 }
 
-/** Toglie gli apici e le sequenze di escape lasciate dal grep sul JSON. */
+/** Strips JSON quote escaping and normalizes whitespace. */
 function unquote(raw: string | undefined): string | null {
   if (!raw) return null
   const inner = raw.replace(/^"/, '').replace(/"$/, '')
@@ -284,20 +243,16 @@ function unquote(raw: string | undefined): string | null {
     .replace(/\\\\/g, '\\')
     .replace(/\s+/g, ' ')
     .trim()
-  // Stesso taglio delle etichette locali: un prompt intero come titolo
-  // sfonderebbe la riga.
   return text ? text.slice(0, 160) : null
 }
 
-/** Conversazioni già presenti sul server per una cartella remota. */
+/** Discovers resumable Claude Code sessions for a given remote directory. */
 export async function listSessions(
   target: SshTarget,
   remotePath: string
 ): Promise<{ ok: boolean; error?: string; sessions: RemoteSession[] }> {
   const res = await runRemote(target, sessionsScript(remotePath))
 
-  // Nessuna cartella progetto: non è un errore, è una cartella mai aperta con
-  // Claude Code. L'elenco vuoto è la risposta corretta.
   if (res.code === EXIT_NEVER_USED) return { ok: true, sessions: [] }
   if (!res.ok) return { ok: false, error: res.error, sessions: [] }
 
@@ -308,7 +263,6 @@ export async function listSessions(
     const lastPrompt = unquote(cols[5])
     sessions.push({
       sessionId: cols[1],
-      // stat -c %Y ritorna secondi, il resto dell'app ragiona in millisecondi.
       modifiedAt: Number(cols[2] ?? 0) * 1000,
       sizeBytes: Number(cols[3] ?? 0),
       aiTitle,
@@ -321,20 +275,10 @@ export async function listSessions(
   return { ok: true, sessions }
 }
 
-/** Tempo massimo concesso alla verifica fatta all'avvio dell'app. */
 const RESTORE_TIMEOUT_MS = 6000
 
 /**
- * Dice se una conversazione remota esiste ancora, per il ripristino del layout.
- *
- * Serve una domanda a parte invece di riusare `listSessions`: quella legge la
- * coda di ogni transcript per ricavarne l'etichetta, che all'avvio non serve e
- * su cartelle con decine di sessioni costa secondi. Qui basta l'esistenza di
- * un file.
- *
- * Il tempo è limitato e un fallimento vale "no": con il server spento l'app
- * deve aprirsi lo stesso, e un riquadro remoto senza ripresa è meglio di un
- * avvio che si blocca.
+ * Checks whether a remote session transcript exists for layout restoration.
  */
 export async function isRemoteResumable(
   target: SshTarget,
@@ -346,8 +290,8 @@ export async function isRemoteResumable(
   const file = `$HOME/.claude/projects/${encodeRemoteProjectDir(remotePath)}/${sessionId}.jsonl`
   const res = await runRemote(
     target,
-    `[ -s "${file}" ] && echo SI`,
+    `[ -s "${file}" ] && echo OK`,
     RESTORE_TIMEOUT_MS
   )
-  return res.ok && res.stdout.includes('SI')
+  return res.ok && res.stdout.includes('OK')
 }

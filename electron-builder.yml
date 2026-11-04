@@ -3,26 +3,23 @@ productName: ClaudeManager
 copyright: MIT
 
 directories:
-  # Una cartella per versione: gli artefatti di release diverse non si mescolano,
-  # e al momento di pubblicare si sa esattamente cosa caricare senza leggere i
-  # nomi dei file uno per uno.
+  # One folder per version: prevents mixing artifacts from different releases,
+  # ensuring a clear upload list for GitHub releases.
   output: release/v${version}
   buildResources: build
 
-# Solo l'output compilato e i moduli nativi. Il resto (sorgenti, config di
-# build, cache) non serve a runtime e gonfierebbe il pacchetto.
+# Only compiled output and native modules. Sources and build caches are omitted.
 files:
   - out/**/*
   - package.json
 
-# @lydell/node-pty distribuisce il binario in un pacchetto per piattaforma:
-# senza questo, electron-builder includerebbe anche quelli di macOS e Linux.
+# @lydell/node-pty distributes platform-specific binaries:
+# unpack only Windows x64 binaries.
 asarUnpack:
   - node_modules/@lydell/node-pty/**
   - node_modules/@lydell/node-pty-win32-x64/**
 
-# Nessun certificato configurato: gli eseguibili non sono firmati e al primo
-# avvio Windows mostrerà l'avviso SmartScreen. È atteso per una build locale.
+# No code-signing certificate configured: executables are unsigned.
 win:
   icon: build/icon.png
   target:
@@ -44,15 +41,13 @@ nsis:
 portable:
   artifactName: ${productName}-${version}-portable.${ext}
 
-# Le release vanno su GitHub. electron-updater legge lo stesso blocco a runtime
-# per sapere dove cercare gli aggiornamenti, quindi va tenuto qui e non solo
-# nel comando di pubblicazione.
+# Releases hosted on GitHub. electron-updater reads this block at runtime
+# to check for updates.
 publish:
   provider: github
   owner: Tha-Nixo
   repo: ClaudeCodeManager
-  # Le bozze non sono visibili all'updater: la release va pubblicata per essere
-  # vista. La si crea come bozza e la si pubblica quando e' pronta.
+  # Drafts are not visible to updater: published only when explicitly released.
   releaseType: draft
 
 extraMetadata:

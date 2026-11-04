@@ -4,25 +4,25 @@ import type { TranscriptSession } from '@shared/types'
 import { transcriptsFor } from './paths'
 
 /**
- * Sessioni riprendibili per una cartella, con un'etichetta leggibile.
+ * Resumable sessions for a folder, with a human-readable label.
  *
- * I transcript possono pesare megabyte, ma le informazioni che servono stanno
- * agli estremi del file: i record `ai-title` e `last-prompt` vengono riemessi
- * piu' volte e l'ultima occorrenza e' quella valida, quindi si legge la CODA;
- * il primo messaggio dell'utente, che serve solo come ultima spiaggia, sta in
- * TESTA. Non si carica mai il file intero.
+ * Transcripts can be megabytes in size, but the information needed is at the
+ * ends of the file: `ai-title` and `last-prompt` records are re-emitted
+ * multiple times and the last occurrence is the valid one, so we read the TAIL;
+ * the first user message, used only as a last resort, is at the HEAD.
+ * The full file is never loaded into memory.
  */
 
 const TAIL_BYTES = 192 * 1024
 const HEAD_BYTES = 96 * 1024
 
 /**
- * Una sessione è riprendibile solo se ha davvero un transcript su disco.
+ * A session is resumable only if it actually has a transcript on disk.
  *
- * Serve perché l'id viene assegnato con --session-id al momento dello spawn,
- * ma Claude Code scrive il file solo quando la sessione acquisisce contenuto.
- * Un riquadro aperto e mai usato lascia quindi un id che esiste per noi e non
- * per Claude: riprenderlo fa fallire l'avvio con "No conversation found".
+ * This is needed because the id is assigned with --session-id at spawn time,
+ * but Claude Code writes the file only when the session receives content.
+ * A pane opened and never used leaves an id that exists for us but not
+ * for Claude: resuming it would fail with "No conversation found".
  */
 export function isResumable(folder: string, sessionId: string): boolean {
   if (!sessionId) return false
@@ -44,12 +44,12 @@ export function sessionsForFolder(folder: string): TranscriptSession[] {
         file,
         aiTitle,
         lastPrompt,
-        label: clean(aiTitle ?? lastPrompt ?? firstUser ?? 'sessione senza titolo'),
+        label: clean(aiTitle ?? lastPrompt ?? firstUser ?? 'untitled session'),
         modifiedAt: stat.mtimeMs,
         sizeBytes: stat.size
       })
     } catch {
-      // Transcript illeggibile o cancellato nel frattempo: si salta.
+      // Unreadable or deleted transcript in the meantime: skip.
     }
   }
 
@@ -86,21 +86,21 @@ function scanTail(file: string): TailScan {
   const chunk = readChunk(file, TAIL_BYTES, true)
   if (!chunk) return { aiTitle: null, lastPrompt: null }
 
-  // La prima riga del blocco e' quasi certamente troncata a meta': si scarta.
+  // The first line of the chunk is almost certainly truncated: discard it.
   const lines = chunk.split('\n').slice(1)
 
   let aiTitle: string | null = null
   let lastPrompt: string | null = null
 
-  // Dal fondo verso l'alto: la prima occorrenza incontrata e' l'ultima scritta.
+  // From bottom to top: the first occurrence encountered is the last one written.
   for (let i = lines.length - 1; i >= 0; i--) {
     if (aiTitle && lastPrompt) break
 
     const line = lines[i].trim()
     if (!line) continue
 
-    // Filtro testuale prima di parsare: le righe interessanti sono poche fra
-    // migliaia, e JSON.parse su ognuna costerebbe molto di piu'.
+    // Text filter before parsing: interesting lines are few among
+    // thousands, and JSON.parse on each would be much slower.
     const maybeTitle = !aiTitle && (line.includes('"ai-title"') || line.includes('"custom-title"'))
     const maybePrompt = !lastPrompt && line.includes('"last-prompt"')
     if (!maybeTitle && !maybePrompt) continue
@@ -114,13 +114,13 @@ function scanTail(file: string): TailScan {
         lastPrompt?: string
       }
       if (!aiTitle && rec.type === 'ai-title' && rec.aiTitle) aiTitle = rec.aiTitle
-      // Un titolo scelto dall'utente vale quanto quello generato: e' anzi
-      // l'unica etichetta disponibile quando l'ultimo turno e' un comando
-      // slash, caso in cui il record last-prompt non porta il testo.
+      // A user-chosen title is as good as a generated one: in fact, it is the only
+      // label available when the last turn is a slash command, in which case the
+      // last-prompt record does not carry text.
       if (!aiTitle && rec.type === 'custom-title') aiTitle = rec.customTitle ?? rec.title ?? null
       if (!lastPrompt && rec.type === 'last-prompt' && rec.lastPrompt) lastPrompt = rec.lastPrompt
     } catch {
-      // Riga non valida: si prosegue.
+      // Invalid line: continue.
     }
   }
 
@@ -128,13 +128,12 @@ function scanTail(file: string): TailScan {
 }
 
 /**
- * Riconosce i messaggi che avvolgono un comando slash invece di essere testo
- * scritto da una persona.
+ * Detects messages that wrap a slash command instead of being text
+ * written by a human.
  *
- * Claude Code li scrive come messaggi utente, ma il contenuto e' markup
- * interno (`<command-name>`, `<local-command-stdout>`, `<command-message>`).
- * Preso come etichetta produceva righe illeggibili nell'elenco delle sessioni
- * da riprendere.
+ * Claude Code writes them as user messages, but the content is internal
+ * markup (`<command-name>`, `<local-command-stdout>`, `<command-message>`).
+ * Used as a label, it produced unreadable lines in the session resume list.
  */
 function isCommandWrapper(text: string): boolean {
   return /<\/?(command-(name|message|args|contents)|local-command-(stdout|stderr)|command-stdout)\b/i.test(
@@ -155,18 +154,17 @@ function scanHeadForFirstUserMessage(file: string): string | null {
         message?: { content?: unknown }
       }
       if (rec.type !== 'user' || rec.isMeta === true) continue
-      // Il contenuto e' una stringa per i prompt digitati e un array di
-      // blocchi per i risultati degli strumenti: qui interessa il primo caso.
+      // Content is a string for typed prompts and an array of blocks for tool results:
+      // here we care about the former.
       if (typeof rec.message?.content === 'string' && rec.message.content.trim()) {
-        // I messaggi che avvolgono un comando slash non sono prompt scritti da
-        // una persona: sono marcatori interni. Usati come etichetta,
-        // nell'elenco «riprendi conversazione» comparivano righe di markup
-        // incomprensibile, e l'utente non poteva capire quale sessione fosse.
+        // Messages that wrap a slash command are not user-written prompts:
+        // they are internal markers. Used as labels, confusing markup would appear
+        // in the resume list, making it impossible to identify the session.
         if (isCommandWrapper(rec.message.content)) continue
         return rec.message.content
       }
     } catch {
-      // Riga troncata dal limite di lettura: si prosegue.
+      // Line truncated by read chunk boundary: continue.
     }
   }
   return null

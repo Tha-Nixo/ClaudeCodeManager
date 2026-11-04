@@ -3,30 +3,29 @@ import { join } from 'node:path'
 import { app, BrowserWindow } from 'electron'
 
 /**
- * Ponte di sviluppo per pilotare e fotografare l'app da fuori.
+ * Development bridge to automate and take screenshots of the app externally.
  *
- * Serve a verificare il compositor senza dipendere dal focus del sistema
- * operativo: gli eventi vengono iniettati direttamente nel renderer e la
- * cattura passa da webContents.capturePage(), quindi non si ruba il fuoco
- * all'utente e non si fotografa nulla al di fuori dell'app.
+ * Used to verify the compositor without relying on OS window focus:
+ * events are injected directly into the renderer and screen captures use
+ * webContents.capturePage(), so user focus is not stolen and nothing outside
+ * the app is captured.
  *
- * Disattivato di default e comunque assente nel pacchetto: si abilita solo
- * impostando CM_DEV_BRIDGE=1 in sviluppo.
+ * Disabled by default and omitted from packaged builds: only enabled by
+ * setting CM_DEV_BRIDGE=1 during development.
  *
- * Protocollo: si scrive un file JSONL in <userData>/dev-bridge/in.jsonl, una
- * riga per comando; il file viene consumato ed eliminato.
+ * Protocol: JSONL lines written to <userData>/dev-bridge/in.jsonl,
+ * one command per line; the file is consumed and deleted.
  */
 
-/** Sottoinsieme dei modificatori accettati da webContents.sendInputEvent. */
+/** Subset of modifiers accepted by webContents.sendInputEvent. */
 type InputModifier = 'shift' | 'control' | 'alt' | 'meta'
 
 /**
- * Finestra a cui inviare il comando.
+ * Window to which the command should be dispatched.
  *
- * Da quando esiste il pannello staccabile le finestre sono due, e una che
- * non si può né fotografare né interrogare è una che nessun test copre.
- * Si indica per titolo, che è l'unico identificatore stabile fra un avvio e
- * l'altro; assente, vale la finestra principale.
+ * Since the detachable panel exists, there are two windows; an untested window
+ * cannot be photographed or queried. Targeted by title, the only stable identifier
+ * across launches; defaults to the main window when omitted.
  */
 type WindowTarget = { window?: string }
 
@@ -55,8 +54,8 @@ export function installDevBridge(getWindow: () => BrowserWindow | null): void {
 
     let lines: string[]
     try {
-      // PowerShell 5.1 scrive UTF-8 CON BOM: senza toglierlo il primo
-      // JSON.parse fallisce e il comando viene scartato in silenzio.
+      // PowerShell 5.1 writes UTF-8 with BOM: without stripping it,
+      // the initial JSON.parse fails and the command is silently discarded.
       lines = readFileSync(inbox, 'utf8')
         .replace(/^﻿/, '')
         .split('\n')
@@ -87,8 +86,8 @@ async function run(lines: string[], getWindow: () => BrowserWindow | null): Prom
     }
 
     const win = resolveWindow(cmd.window, getWindow)
-    // Una finestra chiesta e non trovata è un test che sta misurando altro:
-    // meglio saltare il comando che dirigerlo alla finestra sbagliata.
+    // A requested window that cannot be found indicates a mismatched test:
+    // skip the command rather than dispatching it to the wrong window.
     if (!win) continue
     const wc = win.webContents
 
@@ -116,9 +115,9 @@ async function run(lines: string[], getWindow: () => BrowserWindow | null): Prom
         break
       }
       case 'drag': {
-        // Il trascinamento va simulato a passi: il gestore reagisce ai
-        // pointermove, e un salto diretto dall'origine alla destinazione non
-        // passerebbe mai per la soglia che distingue un clic da un gesto.
+        // Dragging must be simulated in steps: the handler reacts to pointermove,
+        // and an instantaneous jump from origin to destination would never trigger
+        // the gesture threshold separating a click from a drag.
         const steps = Math.max(2, cmd.steps ?? 12)
         wc.sendInputEvent({ type: 'mouseDown', x: cmd.from.x, y: cmd.from.y, button: 'left', clickCount: 1 })
         await delay(40)
@@ -146,7 +145,7 @@ async function run(lines: string[], getWindow: () => BrowserWindow | null): Prom
           const value: unknown = await wc.executeJavaScript(cmd.js, true)
           writeFileSync(cmd.path, JSON.stringify(value, null, 2) ?? 'undefined', 'utf8')
         } catch (err) {
-          writeFileSync(cmd.path, `ERRORE: ${String(err)}`, 'utf8')
+          writeFileSync(cmd.path, `ERROR: ${String(err)}`, 'utf8')
         }
         break
       }
@@ -154,7 +153,7 @@ async function run(lines: string[], getWindow: () => BrowserWindow | null): Prom
   }
 }
 
-/** Finestra il cui titolo contiene il frammento indicato, o la principale. */
+/** Window whose title contains the specified substring, or main window. */
 function resolveWindow(
   match: string | undefined,
   getWindow: () => BrowserWindow | null

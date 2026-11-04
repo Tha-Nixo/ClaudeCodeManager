@@ -2,8 +2,8 @@ import { resolve } from 'node:path'
 import { defineConfig, externalizeDepsPlugin } from 'electron-vite'
 import react from '@vitejs/plugin-react'
 
-// `externalizeDepsPlugin` tiene fuori dal bundle tutto ciò che sta in `dependencies`:
-// serve a @lydell/node-pty, che è un addon nativo e va caricato da node_modules a runtime.
+// `externalizeDepsPlugin` keeps everything in `dependencies` external from the bundle:
+// needed for @lydell/node-pty, a native C++ addon loaded from node_modules at runtime.
 export default defineConfig({
   main: {
     plugins: [externalizeDepsPlugin()],
