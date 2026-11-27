@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { changelogEntryFor } from './changelog.mjs'
+import { changelogEntryFor } from './release-plan.mjs'
 import { signingConfig } from './signing.mjs'
 import { verifyRelease } from './verify-release.mjs'
 

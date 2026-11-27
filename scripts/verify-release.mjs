@@ -54,7 +54,17 @@ export function checkRelease(facts) {
     }
   }
 
-  const release = releases.find((r) => r.tag_name === tag)
+  // Two releases on one tag (1.2.0's first workflow run made two drafts): the
+  // checks below would read one of them, and the assets could be in the other.
+  const onTag = releases.filter((r) => r.tag_name === tag)
+  if (onTag.length > 1) {
+    problems.push(
+      `${onTag.length} releases on tag ${tag} (${onTag.map((r) => `"${r.name}"`).join(', ')}): ` +
+        'keep one, with all the assets'
+    )
+  }
+
+  const release = onTag[0]
   if (!release) {
     if (named.length === 0) problems.push(`no release found for ${tag}`)
     return { problems, notes }

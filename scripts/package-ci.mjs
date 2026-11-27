@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { releasePlan } from './changelog.mjs'
+import { draftAction, releasePlan } from './release-plan.mjs'
 import { signingConfig } from './signing.mjs'
 
 /**
@@ -21,11 +21,22 @@ import { signingConfig } from './signing.mjs'
  * signing is configured (see signing.mjs).
  */
 
+// Checked before anything touches GitHub. Elsewhere the installer step needs
+// wine, and a run on a developer machine would reach the real draft first.
+if (process.platform !== 'win32') {
+  console.error('package-ci.mjs packages on Windows only: it is the release workflow\'s step.')
+  process.exit(1)
+}
+
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
 
+// The repository the workflow runs in; the fallback is for a run by hand.
+const repo = process.env.GITHUB_REPOSITORY || 'Tha-Nixo/ClaudeCodeManager'
+
 let plan
 let signing
+let action
 try {
   plan = releasePlan({
     version: pkg.version,
@@ -33,10 +44,27 @@ try {
     changelog: readFileSync(join(root, 'CHANGELOG.md'), 'utf8')
   })
   signing = signingConfig(process.env)
+  const releases = JSON.parse(
+    execFileSync('gh', ['api', `repos/${repo}/releases?per_page=50`], { cwd: root, encoding: 'utf8' })
+  )
+  action = draftAction(releases, plan.tag)
 } catch (err) {
   console.error(err.message)
   process.exit(1)
 }
+
+// The draft exists before electron-builder starts (see draftAction), with the
+// title and notes of the earlier releases: "ClaudeManager <version>" and the
+// changelog section. --verify-tag: never let GitHub make the tag up (#17).
+const notesFile = join(root, 'release', 'notes.md')
+mkdirSync(dirname(notesFile), { recursive: true })
+writeFileSync(notesFile, `${plan.notes}\n`, 'utf8')
+const draftArgs =
+  action === 'create'
+    ? ['release', 'create', plan.tag, '--draft', '--verify-tag']
+    : ['release', 'edit', plan.tag]
+draftArgs.push('--title', plan.title, '--notes-file', notesFile)
+execFileSync('gh', ['-R', repo, ...draftArgs], { cwd: root, stdio: 'inherit' })
 
 const builderArgs = ['electron-builder', '--win', '--publish', 'always']
 if (signing) {
@@ -52,15 +80,6 @@ if (signing) {
 // npx is a .cmd wrapper on Windows: it only starts through a shell. The
 // arguments are fixed words, so the shell has nothing to mangle.
 execFileSync('npx', builderArgs, { cwd: root, stdio: 'inherit', shell: process.platform === 'win32' })
-
-// Title and notes as on the earlier releases: "ClaudeManager <version>" and
-// the changelog section. gh finds a draft by its tag too.
-const notesFile = join(root, 'release', 'notes.md')
-writeFileSync(notesFile, `${plan.notes}\n`, 'utf8')
-execFileSync('gh', ['release', 'edit', plan.tag, '--title', plan.title, '--notes-file', notesFile], {
-  cwd: root,
-  stdio: 'inherit'
-})
 
 console.log(`\nDraft ${plan.tag} uploaded. Remaining steps, in this order:`)
 console.log('  1. npm run release -- --verify     (checks the draft: tag, assets, latest.yml)')

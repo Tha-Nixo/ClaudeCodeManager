@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { changelogEntryFor, releasePlan } from '../scripts/changelog.mjs'
+import { changelogEntryFor, draftAction, releasePlan } from '../scripts/release-plan.mjs'
 import { signingConfig } from '../scripts/signing.mjs'
 import { checkRelease } from '../scripts/verify-release.mjs'
 
@@ -68,6 +68,18 @@ describe('release --verify (issue #17 regression)', () => {
     assert.equal(problems.length, 1)
     assert.match(problems[0], /untagged-ad400364ec09c0834247/)
     assert.match(problems[0], /gh release edit untagged-ad400364ec09c0834247 --tag v1\.1\.1/)
+  })
+
+  it('fails when two releases share the tag, as the first 1.2.0 workflow run left them', () => {
+    // The blockmap alone in one draft, everything else in the other.
+    const blockmapOnly = release({
+      name: '1.1.2',
+      draft: true,
+      assets: [asset('ClaudeManager-Setup-1.1.2.exe.blockmap')]
+    })
+    const rest = release({ draft: true })
+    const { problems } = checkRelease(facts({ releases: [blockmapOnly, rest] }))
+    assert.ok(problems.some((p) => p.startsWith('2 releases on tag v1.1.2')), problems.join('\n'))
   })
 
   it('fails when the tag is not on GitHub yet, before the draft is published', () => {
@@ -189,5 +201,23 @@ describe('release workflow: the tag and the notes (CI packaging)', () => {
       () => releasePlan({ version: '1.3.0', ref: 'v1.3.0', changelog: CHANGELOG }),
       /no "## 1\.3\.0 " section/
     )
+  })
+})
+
+describe('release workflow: one draft per tag (1.2.0 got two)', () => {
+  const draft = { tag_name: 'v1.2.0', draft: true }
+
+  it('creates the draft when the tag has none, and reuses a single one', () => {
+    assert.equal(draftAction([], 'v1.2.0'), 'create')
+    assert.equal(draftAction([{ tag_name: 'v1.1.1', draft: false }], 'v1.2.0'), 'create')
+    assert.equal(draftAction([draft], 'v1.2.0'), 'update')
+  })
+
+  it('never uploads over a published release', () => {
+    assert.throws(() => draftAction([{ tag_name: 'v1.2.0', draft: false }], 'v1.2.0'), /already published/)
+  })
+
+  it('stops on duplicate drafts instead of picking one', () => {
+    assert.throws(() => draftAction([draft, draft], 'v1.2.0'), /2 draft releases on v1\.2\.0/)
   })
 })
