@@ -14,8 +14,9 @@ import {
 } from '../src/renderer/src/keys/bindings'
 
 /**
- * Mock event: `signature` reads these properties. Constructing them manually
- * allows testing varied keyboard layouts without depending on runner layout.
+ * Fake event: `signature` reads only these fields, and building them by hand
+ * reproduces keyboards that are not here (Italian, French) without depending
+ * on the layout of whoever runs the tests.
  */
 interface MockKeyEvent {
   ctrlKey: boolean
@@ -31,6 +32,7 @@ interface MockKeyEvent {
 
 function keyEvent(spec: {
   key: string
+  /** Absent when the key has no interesting `code` (arrows, F11...). */
   code?: string
   ctrl?: boolean
   alt?: boolean
@@ -53,14 +55,21 @@ function keyEvent(spec: {
   return e
 }
 
+/** `signature` takes a real KeyboardEvent; its shape is enough here. */
 function eventSignature(e: MockKeyEvent): string {
   return signature(e as unknown as KeyboardEvent)
 }
 
 describe('normalizeCombo: preserving keys during normalization (issue #7 regression)', () => {
+  /**
+   * Whoever assigned Alt+Space or Alt+Shift++ lost the old shortcut and did not
+   * get a new one: the key was dropped and the last modifier taken for the key.
+   * Both combinations must survive whole.
+   */
   it('preserves space bar key', () => {
     assert.equal(normalizeCombo('alt+ '), 'alt+ ')
     assert.equal(normalizeCombo('ctrl+shift+ '), 'ctrl+shift+ ')
+    // Without modifiers it is still a key, not an empty string.
     assert.equal(normalizeCombo(' '), ' ')
   })
 
@@ -71,6 +80,8 @@ describe('normalizeCombo: preserving keys during normalization (issue #7 regress
   })
 
   it('never collapses combo down to just modifier', () => {
+    // The visible symptom of the defect: the panel showed "Alt" as the assigned
+    // key, and the user was left with a useless shortcut.
     for (const raw of ['alt+ ', 'alt++', 'alt+shift++', 'ctrl+shift+ ']) {
       const combo = normalizeCombo(raw)
       assert.notEqual(combo, 'alt', `${raw} collapsed to modifier`)
@@ -81,7 +92,10 @@ describe('normalizeCombo: preserving keys during normalization (issue #7 regress
   })
 
   it('saved combo matches keyboard event signature', () => {
+    // The real purpose of normalization: what the panel writes to the file must
+    // match the signature the event will produce when the key is pressed.
     assert.equal(normalizeCombo('alt+ '), eventSignature(keyEvent({ key: ' ', code: 'Space', alt: true })))
+    // On an Italian keyboard '+' is typed with Shift and the ']' key.
     assert.equal(
       normalizeCombo('alt+shift++'),
       eventSignature(keyEvent({ key: '+', code: 'BracketRight', alt: true, shift: true }))
@@ -89,16 +103,23 @@ describe('normalizeCombo: preserving keys during normalization (issue #7 regress
   })
 
   it('remapping an action to Alt+Space sets it cleanly', () => {
+    // The exact sequence the panel writes when remapping: the old entry is freed
+    // and the new one added. Before the fix the first half worked and the second
+    // landed on 'alt', leaving the action without a key.
     const { keymap, problems } = resolveKeymap({ 'alt+z': '', 'alt+ ': 'toggle-zoom' })
 
     assert.deepEqual(problems, [])
     assert.equal(keymap['alt+ '], 'toggle-zoom')
     assert.equal(keymap['alt+z'], undefined)
+    // No ghost entry on the bare modifier: it would intercept Alt on its own.
     assert.equal(keymap['alt'], undefined)
     assert.equal(keyForAction('toggle-zoom', keymap), prettyKey('alt+ '))
   })
 
   it('displays readable label for space bar', () => {
+    // Found while writing this suite: prettyKey('alt+ ') returned 'Alt+ ', which
+    // on screen reads "Alt+", the same as a broken shortcut. Whoever assigned
+    // Alt+Space had no way to see that the key was there.
     assert.equal(prettyKey('alt+ '), 'Alt+Space')
   })
 })
@@ -108,6 +129,8 @@ describe('ACTION_LABELS: all actions visible and remappable (issue #14 regressio
   const assigned = new Set<Action>(Object.values(DEFAULT_KEYMAP))
 
   it('every action in default map appears in panel', () => {
+    // The nine focus-1..focus-9 were missing: they could not be discovered,
+    // remapped or freed, and nothing revealed it.
     const missing = [...assigned].filter((a) => !labeled.has(a))
     assert.deepEqual(missing, [], `actions missing from panel: ${missing.join(', ')}`)
   })
@@ -121,11 +144,14 @@ describe('ACTION_LABELS: all actions visible and remappable (issue #14 regressio
   })
 
   it('every panel row corresponds to an existing action', () => {
+    // A row without an action would show a shortcut that does nothing.
     const orphans = [...labeled].filter((a) => !assigned.has(a))
     assert.deepEqual(orphans, [], `panel rows without corresponding action: ${orphans.join(', ')}`)
   })
 
   it('no duplicate rows or ambiguous labels', () => {
+    // Two rows with the same action or the same text are indistinguishable: the
+    // user remaps one and sees the other change.
     assert.equal(labeled.size, ACTION_LABELS.length, 'duplicate action in panel')
     const labels = new Set(ACTION_LABELS.map((v) => v.label))
     assert.equal(labels.size, ACTION_LABELS.length, 'duplicate label in panel')
@@ -137,6 +163,8 @@ describe('ACTION_LABELS: all actions visible and remappable (issue #14 regressio
 
 describe('default keymap: no collisions and canonical form', () => {
   it('no combination maps to multiple actions', () => {
+    // A duplicate in the literal would vanish silently: the symptom is fewer
+    // assigned actions than declared combinations.
     const combos = Object.keys(DEFAULT_KEYMAP)
     const actions = new Set(Object.values(DEFAULT_KEYMAP))
     assert.equal(
@@ -147,12 +175,17 @@ describe('default keymap: no collisions and canonical form', () => {
   })
 
   it('every default combination is already canonical', () => {
+    // If it were not, the combination the panel saves (normalized) would never
+    // match the default one, and the action would stay mute.
     for (const combo of Object.keys(DEFAULT_KEYMAP)) {
       assert.equal(normalizeCombo(combo), combo, `${combo} is not in canonical form`)
     }
   })
 
   it('no combination binds Ctrl and Alt simultaneously', () => {
+    // On an Italian keyboard AltGr produces ctrlKey+altKey: intercepting one of
+    // those combinations would take characters such as @ # [ ] { } away from
+    // whoever types them.
     for (const combo of Object.keys(DEFAULT_KEYMAP)) {
       const mods = combo.split('+')
       assert.ok(
@@ -165,8 +198,11 @@ describe('default keymap: no collisions and canonical form', () => {
 
 describe('signature: layout-independent key identification', () => {
   it('letters and digits derive from code, not produced character', () => {
+    // On non-QWERTY keyboards the character changes but the position does not:
+    // Alt+B must stay Alt+B, otherwise the shortcut moves with the layout.
     assert.equal(eventSignature(keyEvent({ key: 'ß', code: 'KeyB', alt: true })), 'alt+b')
     assert.equal(eventSignature(keyEvent({ key: 'B', code: 'KeyB', alt: true, shift: true })), 'alt+shift+b')
+    // Digits: on a French layout Alt+1 produces '&'.
     assert.equal(eventSignature(keyEvent({ key: '&', code: 'Digit1', alt: true })), 'alt+1')
     assert.equal(DEFAULT_KEYMAP[eventSignature(keyEvent({ key: '&', code: 'Digit1', alt: true }))], 'focus-1')
   })
@@ -182,6 +218,8 @@ describe('signature: layout-independent key identification', () => {
   })
 
   it('modifiers appear in consistent canonical order', () => {
+    // The order is the contract between event and map: changing it would mute
+    // every shortcut with more than one modifier.
     assert.equal(
       eventSignature(keyEvent({ key: 'x', code: 'KeyX', meta: true, shift: true, alt: true, ctrl: true })),
       'ctrl+alt+shift+meta+x'
@@ -191,6 +229,9 @@ describe('signature: layout-independent key identification', () => {
   })
 
   it('AltGr never triggers default shortcuts', () => {
+    // On an Italian keyboard AltGr = ctrlKey + altKey. If one of these ended up
+    // in the map, the user could no longer type that character: the compositor
+    // would intercept it and the terminal would never see it.
     const altgr = [
       keyEvent({ key: '@', code: 'Semicolon', ctrl: true, alt: true }),
       keyEvent({ key: '#', code: 'Quote', ctrl: true, alt: true }),
@@ -198,7 +239,9 @@ describe('signature: layout-independent key identification', () => {
       keyEvent({ key: ']', code: 'BracketRight', ctrl: true, alt: true }),
       keyEvent({ key: '{', code: 'BracketLeft', ctrl: true, alt: true, shift: true }),
       keyEvent({ key: '}', code: 'BracketRight', ctrl: true, alt: true, shift: true }),
+      // AltGr on a letter (€ on many layouts): the code turns it into 'e'.
       keyEvent({ key: '€', code: 'KeyE', ctrl: true, alt: true }),
+      // AltGr on a digit, for the same reason.
       keyEvent({ key: '~', code: 'Digit1', ctrl: true, alt: true })
     ]
 
@@ -211,6 +254,7 @@ describe('signature: layout-independent key identification', () => {
 })
 
 describe('installKeyHandler: interception and passthrough to terminal', () => {
+  /** Fake window: the listener is called by hand, without a DOM. */
   function withWindow(testFn: (press: (e: MockKeyEvent) => void, verifyDetached: () => void) => void): void {
     const listeners: ((e: KeyboardEvent) => void)[] = []
     const mockWindow = {
@@ -246,6 +290,7 @@ describe('installKeyHandler: interception and passthrough to terminal', () => {
       assert.deepEqual(executed, ['split-h'])
       assert.equal(inMap.blocked, true, 'mapped shortcut must be blocked')
 
+      // Any letter, and an AltGr, must reach Claude Code intact.
       for (const e of [
         keyEvent({ key: 'a', code: 'KeyA' }),
         keyEvent({ key: '@', code: 'Semicolon', ctrl: true, alt: true }),
@@ -267,6 +312,8 @@ describe('installKeyHandler: interception and passthrough to terminal', () => {
 
       const e = keyEvent({ key: 'b', code: 'KeyB', alt: true })
       press(e)
+      // With an overlay open the combination must reach the text field below, not
+      // move the panes behind it.
       assert.deepEqual(executed, [])
       assert.equal(e.blocked, false)
     })
@@ -284,6 +331,7 @@ describe('installKeyHandler: interception and passthrough to terminal', () => {
 
       const unbound = keyEvent({ key: 'b', code: 'KeyB', alt: true })
       press(unbound)
+      // A freed Alt+B must go back to readline, not stay intercepted.
       assert.deepEqual(executed, [])
       assert.equal(unbound.blocked, false)
 
@@ -300,9 +348,12 @@ describe('installKeyHandler: interception and passthrough to terminal', () => {
 
 describe('normalizeCombo: canonical ordering and unknown modifiers', () => {
   it('reorders modifiers to match event signature output', () => {
+    // The file is written by hand: nobody guesses the order the first time, and
+    // a combination out of order would never match anything.
     assert.equal(normalizeCombo('shift+alt+b'), 'alt+shift+b')
     assert.equal(normalizeCombo('meta+shift+alt+ctrl+x'), 'ctrl+alt+shift+meta+x')
     assert.equal(normalizeCombo('shift+ctrl+q'), 'ctrl+shift+q')
+    // And the result equals the signature of the matching event.
     assert.equal(normalizeCombo('shift+alt+b'), eventSignature(keyEvent({ key: 'b', code: 'KeyB', alt: true, shift: true })))
   })
 
@@ -314,6 +365,8 @@ describe('normalizeCombo: canonical ordering and unknown modifiers', () => {
   })
 
   it('rejects unsupported modifiers', () => {
+    // Nothing is better than a plausible, wrong combination: 'super' would be
+    // taken for the key, and the shortcut would fire at random.
     for (const raw of ['super+b', 'ctrl+super+b', 'cmd+k', 'option+b', 'alt+ctrlx+b', 'win+shift+b']) {
       assert.equal(normalizeCombo(raw), null, `${raw} should have been rejected`)
     }
@@ -333,6 +386,8 @@ describe('resolveKeymap: malformed custom keymap handling', () => {
   })
 
   it('never mutates default keymap across calls', () => {
+    // If the default map were mutated, a wrong change would stay in force even
+    // after cleaning up the configuration file.
     resolveKeymap({ 'alt+n': '', 'alt+z': 'quit' })
     assert.equal(DEFAULT_KEYMAP['alt+n'], 'new-session')
     assert.equal(DEFAULT_KEYMAP['alt+z'], 'toggle-zoom')
@@ -347,6 +402,7 @@ describe('resolveKeymap: malformed custom keymap handling', () => {
     })
 
     assert.equal(keymap['alt+k'], undefined)
+    // Actions are case-sensitive: better to reject than to guess.
     assert.equal(keymap['alt+h'], undefined)
     assert.equal(keymap['alt+j'], 'focus-1')
 
@@ -358,6 +414,8 @@ describe('resolveKeymap: malformed custom keymap handling', () => {
   })
 
   it('discards malformed combinations and reports clearly', () => {
+    // They must be listed, not ignored: whoever wrote 'super+b' needs to
+    // understand why the shortcut does not work.
     const { keymap, problems } = resolveKeymap({ 'super+b': 'quit', 'cmd+k': 'close-pane' })
 
     assert.equal(problems.length, 2)
@@ -365,12 +423,16 @@ describe('resolveKeymap: malformed custom keymap handling', () => {
       problems.map((p) => p.combo).sort(),
       ['cmd+k', 'super+b']
     )
+    // No fallback reading: no 'b' or 'k' ended up in the map.
     assert.equal(keymap['b'], undefined)
     assert.equal(keymap['k'], undefined)
     assert.equal(keymap['ctrl+shift+q'], 'quit')
   })
 
   it('explains accurate reason for malformed combinations', () => {
+    // Found while writing this suite: 'super+b' was rejected with the reason
+    // "empty combination", which is not what the user wrote. The message sent
+    // them looking for the problem in the wrong place.
     const { problems } = resolveKeymap({ 'super+b': 'quit' })
     assert.ok(
       /modifier/i.test(problems[0].reason),
@@ -379,6 +441,10 @@ describe('resolveKeymap: malformed custom keymap handling', () => {
   })
 
   it('rejects empty combination string', () => {
+    // Found while writing this suite: normalizeCombo('') returned '+', so an
+    // empty line in the file silently bound the '+' key to an action. Whoever
+    // typed '+' in the terminal saw it eaten without knowing why, and the entry
+    // did not show up among the problems.
     assert.equal(normalizeCombo(''), null)
     const { keymap, problems } = resolveKeymap({ '': 'quit' })
     assert.equal(keymap['+'], undefined)
@@ -386,6 +452,7 @@ describe('resolveKeymap: malformed custom keymap handling', () => {
   })
 
   it('merges customizations on top of defaults rather than replacing', () => {
+    // Whoever moves a single combination must not redeclare the other twenty.
     const { keymap, problems } = resolveKeymap({ 'alt+z': 'toggle-usage' })
     assert.deepEqual(problems, [])
     assert.equal(keymap['alt+z'], 'toggle-usage')
@@ -394,6 +461,7 @@ describe('resolveKeymap: malformed custom keymap handling', () => {
   })
 
   it('empty action unbinds combination', () => {
+    // The only way to give Alt+B back to readline without replacing it.
     const { keymap, problems } = resolveKeymap({ 'alt+b': '' })
     assert.deepEqual(problems, [])
     assert.equal(keymap['alt+b'], undefined)
@@ -407,6 +475,8 @@ describe('resolveKeymap: malformed custom keymap handling', () => {
   })
 
   it('out-of-order combination overrides default counterpart', () => {
+    // Without normalization a dead entry would be added next to the old one, and
+    // the user would see the original action still respond.
     const { keymap } = resolveKeymap({ 'SHIFT+Alt+left': 'toggle-usage' })
     assert.equal(keymap['alt+shift+left'], 'toggle-usage')
     assert.equal(keymap['shift+alt+left'], undefined)
@@ -414,6 +484,9 @@ describe('resolveKeymap: malformed custom keymap handling', () => {
   })
 
   it('different casings/orderings of same combination do not create duplicates', () => {
+    // 'shift+alt+b' and 'alt+shift+b' are the same key: only one may remain,
+    // with the last one written winning, otherwise which one acts would depend
+    // on the map's internal order.
     const { keymap } = resolveKeymap({ 'shift+alt+b': 'toggle-usage', 'alt+shift+b': 'quit' })
     const matching = Object.keys(keymap).filter(
       (c) => normalizeCombo(c) === 'alt+shift+b'
@@ -423,6 +496,8 @@ describe('resolveKeymap: malformed custom keymap handling', () => {
   })
 
   it('resolved map remains compatible with real events', () => {
+    // Whole-picture proof: after a customization, every combination in the map
+    // is still canonical and none uses Ctrl+Alt (AltGr).
     const { keymap } = resolveKeymap({ 'Shift+ALT+b': 'toggle-usage', 'alt+ ': 'search-pane' })
     for (const combo of Object.keys(keymap)) {
       assert.equal(normalizeCombo(combo), combo, `${combo} is not canonical`)

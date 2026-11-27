@@ -7,14 +7,24 @@ import { contextWindowFor, costOf, priceFor, type TokenCounts } from '../src/mai
 import { scan, sessionUsage, summarize } from '../src/main/usage/scanner'
 
 /**
- * Token accounting: prices, context windows, and transcript parsing.
+ * Token accounting: prices, context windows and transcript parsing.
  *
- * `projectsDir()` uses `CLAUDE_CONFIG_DIR`, so the scanner runs against
- * an isolated temporary directory. No test touches ~/.claude on the host.
+ * `projectsDir()` goes through `CLAUDE_CONFIG_DIR`, so the scanner can be
+ * pointed at a temporary root and tested end to end, from the JSONL file to
+ * the numbers that end up in the panel. No case reads the real ~/.claude of
+ * whoever runs the tests.
  */
 
 // --- Test Fixtures ----------------------------------------------------------
 
+/**
+ * Fake ~/.claude root for a single case.
+ *
+ * Every case gets its own folder: the scanner cache is keyed by absolute path
+ * and drops files that no longer exist, so switching root makes the previous
+ * case's contribution disappear on its own, and the execution order does not
+ * matter.
+ */
 function fakeRoot(): string {
   const home = mkdtempSync(join(tmpdir(), 'cm-usage-'))
   const project = join(home, 'projects', 'C--fake-project')
@@ -31,7 +41,7 @@ interface UsageData {
   cacheWrite1h?: number
 }
 
-/** Formats a JSONL transcript line matching Claude Code structure. */
+/** A transcript line in the shape Claude Code writes. */
 function makeRow(opts: {
   id?: string
   model?: string
@@ -68,6 +78,10 @@ function writeTranscript(dir: string, name: string, lines: string[]): string {
   return file
 }
 
+/**
+ * Forced rescan: `scan()` alone rescans at most every 2 seconds, and far less
+ * time than that passes between one case and the next.
+ */
 function rescan(): void {
   scan(true)
 }
@@ -76,6 +90,10 @@ function rescan(): void {
 
 describe('pricing: context window (issue #11 regression)', () => {
   it('recognizes id with date suffix without marking it approximate', () => {
+    // The ids written in transcripts ALWAYS carry the date suffix: if only the
+    // exact match counted, every pane would show "approx" next to a percentage
+    // that is in fact exact, and the warning would stop meaning anything where
+    // it really matters.
     assert.deepEqual(contextWindowFor('claude-haiku-4-5-20251001'), {
       window: 200_000,
       approximate: false
@@ -95,6 +113,8 @@ describe('pricing: context window (issue #11 regression)', () => {
   })
 
   it('Haiku remains 200K without inheriting 1M from other models', () => {
+    // The only family with a smaller window: getting it wrong would show the
+    // context 20 % full when it is really 100 % full.
     assert.equal(contextWindowFor('claude-haiku-4-5').window, 200_000)
   })
 
@@ -106,6 +126,8 @@ describe('pricing: context window (issue #11 regression)', () => {
   })
 
   it('unknown model does not produce fabricated percentage', () => {
+    // No indicator is better than a random denominator: the fill bar would be
+    // believable and false.
     assert.deepEqual(contextWindowFor('gpt-5-turbo'), { window: 0, approximate: false })
     assert.deepEqual(contextWindowFor(null), { window: 0, approximate: false })
     assert.deepEqual(contextWindowFor(undefined), { window: 0, approximate: false })
@@ -113,7 +135,9 @@ describe('pricing: context window (issue #11 regression)', () => {
   })
 
   it('marks approximate for future models matched by family heuristic', () => {
-    // Unknown Haiku ids fall back to the newest Haiku (5.5, 1M), flagged as a guess.
+    // Here the window really is inferred, so the warning is due: this is the
+    // case that tells an inferred window from a known one. Unknown Haiku ids fall
+    // back to the newest Haiku (5.5, 1M).
     assert.deepEqual(contextWindowFor('claude-haiku-9-0-20270101'), {
       window: 1_000_000,
       approximate: true
@@ -139,6 +163,7 @@ describe('pricing: token cost computation', () => {
   })
 
   it('applies model rate including date suffix', () => {
+    // One million input and one million output tokens on Haiku 4.5: $1 + $5.
     const cost = costOf('claude-haiku-4-5-20251001', {
       input: 1_000_000,
       output: 1_000_000,
@@ -150,6 +175,9 @@ describe('pricing: token cost computation', () => {
   })
 
   it('cache read costs less and cache write costs more', () => {
+    // The multipliers make the difference between a "cheap" long session and an
+    // "expensive" one: in a session lasting hours, cache is the dominant item,
+    // not input.
     const base = costOf('claude-opus-5', onlyInput(1_000_000))
     assert.equal(base, 5)
     assert.equal(
@@ -191,6 +219,9 @@ describe('pricing: token cost computation', () => {
   })
 
   it('large numbers remain finite without NaN or Infinity', () => {
+    // A corrupted transcript can declare absurd figures. If the computation
+    // overflows, the panel prints "$Infinity" or "$NaN" and every total next to
+    // it becomes useless.
     const huge = {
       input: 1e15,
       output: 1e15,
@@ -201,6 +232,7 @@ describe('pricing: token cost computation', () => {
     const cost = costOf('claude-opus-5', huge)
     assert.ok(Number.isFinite(cost), `non-finite cost: ${cost}`)
     assert.ok(cost > 0)
+    // 46.75e15 token-dollars / 1e6 = 4.675e10.
     assert.ok(cost > 4.6e10 && cost < 4.8e10, `unexpected magnitude: ${cost}`)
 
     const doubleCost = costOf('claude-opus-5', {
@@ -388,6 +420,9 @@ describe('pricing: matches Claude Code cost-state (issue #16 regression)', () =>
 
 describe('scanner: core parser logic', () => {
   it('deduplicates lines sharing message.id using latest values', () => {
+    // Claude Code writes several records for the same API response, and only the
+    // last one carries the final totals. Summing them all inflated the cost of
+    // every long session; keeping the first underestimated it.
     const project = fakeRoot()
     writeTranscript(project, 'dedup-session', [
       makeRow({ id: 'msg_A', uso: { output: 100 }, at: '2026-01-15T10:00:00.000Z' }),
@@ -402,6 +437,8 @@ describe('scanner: core parser logic', () => {
   })
 
   it('preserves distinct turns when message.id is absent', () => {
+    // With no way to deduplicate, the error to avoid is the opposite one: two
+    // real responses cancelling each other out and vanishing from the total.
     const project = fakeRoot()
     writeTranscript(project, 'anonymous-session', [
       makeRow({ uso: { output: 100 } }),
@@ -414,6 +451,10 @@ describe('scanner: core parser logic', () => {
   })
 
   it('malformed line does not drop the rest of the file', () => {
+    // Transcripts are read while Claude Code is writing them: the last line is
+    // often cut in half. If one broken line threw the file away, the active
+    // session, the one the user is looking at, would be exactly the one without
+    // numbers.
     const project = fakeRoot()
     writeTranscript(project, 'broken-session', [
       makeRow({ id: 'm1', uso: { output: 10 } }),
@@ -434,6 +475,8 @@ describe('scanner: core parser logic', () => {
   })
 
   it('counts only assistant records', () => {
+    // The user record carries the usage of the request it answers: counting it
+    // would double every turn.
     const project = fakeRoot()
     writeTranscript(project, 'types-session', [
       makeRow({ id: 'u1', type: 'user', uso: { output: 9000 } }),
@@ -447,6 +490,9 @@ describe('scanner: core parser logic', () => {
   })
 
   it('discards zero-token turns and synthetic models', () => {
+    // Claude Code emits service records with all-zero usage, and responses from
+    // internal models: counting them would fill the session list with entries
+    // that match nothing the user did.
     const project = fakeRoot()
     writeTranscript(project, 'empty-session', [
       makeRow({ id: 'z1', uso: {} }),
@@ -461,6 +507,8 @@ describe('scanner: core parser logic', () => {
   })
 
   it('legacy cache write without 5m/1h breakdown defaults to 5m', () => {
+    // The oldest format, still present in archived transcripts: attributing it
+    // to 1 hour would make it cost 60 % more.
     const project = fakeRoot()
     writeTranscript(project, 'cache-session', [
       JSON.stringify({
@@ -477,10 +525,13 @@ describe('scanner: core parser logic', () => {
     rescan()
     const totals = summarize()
     assert.equal(totals.totalTokens, 1_000_000)
+    // 1M of 5-minute writes on Opus 5: $5 * 1.25 = $6.25.
     assert.equal(totals.totalCost, 6.25)
   })
 
   it('prices each turn on its own prompt size, not on the session total (issue #16)', () => {
+    // These are the panel's two tables: with the wrong key, two sessions in the
+    // same folder would show up as two different projects.
     const project = fakeRoot()
     writeTranscript(project, 'haiku55-session', [
       makeRow({ id: 'k1', model: 'claude-haiku-5-5', uso: { input: 50_000 } }),
@@ -529,6 +580,7 @@ describe('scanner: core parser logic', () => {
     assert.equal(totals.byProject[0].tokens, 3000)
 
     assert.equal(totals.byModel.length, 2)
+    // Sorted by cost: 1000 Opus tokens ($0.025) beat 2000 Haiku tokens ($0.01).
     assert.equal(totals.byModel[0].model, 'claude-opus-5')
     assert.equal(totals.byModel[0].tokens, 1000)
     assert.equal(totals.byModel[1].tokens, 2000)
@@ -537,6 +589,10 @@ describe('scanner: core parser logic', () => {
 
 describe('scanner: session context tracking', () => {
   it('lastContext reflects the latest turn, not maximum or sum', () => {
+    // This is the indicator of how full the context is NOW. Taking the maximum
+    // would leave it stuck high after one big turn; summing the turns would push
+    // it past 100 % in any long session, because every request sends the whole
+    // conversation again.
     const project = fakeRoot()
     writeTranscript(project, 'context-session', [
       makeRow({ id: 't1', uso: { input: 100, cacheRead: 900, output: 50 } }),
@@ -549,11 +605,14 @@ describe('scanner: session context tracking', () => {
     assert.equal(session.contextTokens, 300)
     assert.notEqual(session.contextTokens, 50_000)
     assert.notEqual(session.contextTokens, 51_300)
+    // Output is not part of the next turn's input context.
     assert.equal(session.turns, 3)
     assert.equal(session.tokens, 51_480)
   })
 
   it('context window tracks model of latest turn (issue #11)', () => {
+    // The link between the model table and the pane: this is where the user saw
+    // "approx" on a percentage that was exact.
     const project = fakeRoot()
     writeTranscript(project, 'haiku-session', [
       makeRow({ id: 'h1', model: 'claude-opus-5', uso: { input: 1000 } }),
@@ -568,6 +627,9 @@ describe('scanner: session context tracking', () => {
   })
 
   it('deleted transcript is removed from totals', () => {
+    // Claude Code periodically cleans up old transcripts. Summing them anyway
+    // would grow forever a total that matches no existing file, and so cannot
+    // be checked.
     const project = fakeRoot()
     writeTranscript(project, 'session-remaining', [makeRow({ id: 'r1', uso: { output: 1000 } })])
     const toDelete = writeTranscript(project, 'session-to-delete', [
@@ -605,6 +667,15 @@ describe('scanner: session context tracking', () => {
 
 describe('scanner: local day tracking (issue #3 regression)', () => {
   it('assigns today turn to today even when UTC is a different calendar day', () => {
+    // The day was derived from toISOString(), that is, from Greenwich: in Italy,
+    // work done between midnight and two in the morning was counted in the day
+    // before, and "Today", the most visible number in the app, did not match what
+    // the user had just done.
+    //
+    // The instant is built from the current local day, not from the time the
+    // test runs: at 03:00 as at 23:00 the case is the same. The chosen time is
+    // the one that, in the current time zone, falls on a different UTC day:
+    // 00:30 east of Greenwich, 23:30 west of it.
     const now = new Date()
     const isEast = -now.getTimezoneOffset() > 0
     const instant = new Date(
@@ -629,6 +700,7 @@ describe('scanner: local day tracking (issue #3 regression)', () => {
       )
     }
 
+    // Local noon, so daylight saving time does not move the day.
     const threeDaysAgo = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 3, 12)
     const tenDaysAgo = new Date(
       now.getFullYear(),
@@ -650,12 +722,21 @@ describe('scanner: local day tracking (issue #3 regression)', () => {
     assert.equal(totals.todayTokens, 1000)
     assert.equal(totals.weekTokens, 1200)
     assert.equal(totals.totalTokens, 1230)
+    // Costs follow the same sets: 1000 output tokens of Opus 5 = $0.025.
     assert.equal(totals.todayCost, 0.025)
     assert.ok(totals.weekCost > totals.todayCost)
     assert.ok(totals.totalCost > totals.weekCost)
   })
 
   it('yesterday evening turn is not counted in today', () => {
+    // The flip side of the defect: moving the key to the local day must not let
+    // into "today" what is not today.
+    //
+    // It also covers the previous case in the hours when that one is not enough:
+    // with the UTC key, between midnight and two in the morning in Italy "today"
+    // also becomes the previous UTC day, and the two mistakes cancel out. In that
+    // window this case is the one that fails, because yesterday's 23:30 local
+    // time is the UTC day the defect calls "today".
     const now = new Date()
     const yesterdayEvening = new Date(
       now.getFullYear(),
@@ -679,6 +760,8 @@ describe('scanner: local day tracking (issue #3 regression)', () => {
   })
 
   it('turn missing timestamp remains in grand total but excluded from today', () => {
+    // Better to lose it from the time-based tiles than to attribute it to the
+    // wrong day: the grand total can still be checked.
     const project = fakeRoot()
     writeTranscript(project, 'dateless-session', [makeRow({ id: 'n1', uso: { output: 800 } })])
 
