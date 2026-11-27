@@ -363,6 +363,11 @@ Design choices not immediately obvious from the code:
   confirm trust for that folder, just like it does locally. You must respond
   directly inside the terminal tile.
 
+## Roadmap
+
+Planned fixes and features, with their order and milestones, are in
+[ROADMAP.md](ROADMAP.md). Each item is tracked as a GitHub issue.
+
 ## License
 
 MIT
