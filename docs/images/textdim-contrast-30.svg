@@ -1,0 +1,175 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="920" height="916" font-family="Segoe UI, Helvetica, Arial, sans-serif">
+<rect width="920" height="916" fill="#FFFFFF"/>
+<text x="12" y="24" font-size="15" font-weight="600" fill="#222">ui.textDim before / after (#30): sample text on each background, WCAG contrast ratio</text>
+<text x="160" y="46" font-size="12" fill="#555">desktop</text>
+<text x="410" y="46" font-size="12" fill="#555">panel</text>
+<text x="660" y="46" font-size="12" fill="#555">panelRaised</text>
+<text x="12" y="84" font-size="13" font-weight="600" fill="#222">Claude Dark</text>
+<text x="12" y="104" font-size="12" fill="#666">before #8C8B87</text>
+<rect x="150" y="60" width="242" height="62" fill="#1F1E1D" rx="4"/>
+<text x="160" y="82" font-size="13" fill="#F0EEE6">ClaudeManager</text>
+<text x="160" y="102" font-size="12" fill="#8C8B87">~/projects/app · 2 min ago · 12.4k tok</text>
+<text x="344" y="82" font-size="12" font-weight="600" fill="#2E7D32">4.88 ✓</text>
+<rect x="400" y="60" width="242" height="62" fill="#262625" rx="4"/>
+<text x="410" y="82" font-size="13" fill="#F0EEE6">ClaudeManager</text>
+<text x="410" y="102" font-size="12" fill="#8C8B87">~/projects/app · 2 min ago · 12.4k tok</text>
+<text x="594" y="82" font-size="12" font-weight="600" fill="#C62828">4.44 ✗</text>
+<rect x="650" y="60" width="242" height="62" fill="#2E2D2B" rx="4"/>
+<text x="660" y="82" font-size="13" fill="#F0EEE6">ClaudeManager</text>
+<text x="660" y="102" font-size="12" fill="#8C8B87">~/projects/app · 2 min ago · 12.4k tok</text>
+<text x="844" y="82" font-size="12" font-weight="600" fill="#C62828">4.03 ✗</text>
+<text x="12" y="154" font-size="13" font-weight="600" fill="#222">Claude Dark</text>
+<text x="12" y="174" font-size="12" fill="#666">after #949490</text>
+<rect x="150" y="130" width="242" height="62" fill="#1F1E1D" rx="4"/>
+<text x="160" y="152" font-size="13" fill="#F0EEE6">ClaudeManager</text>
+<text x="160" y="172" font-size="12" fill="#949490">~/projects/app · 2 min ago · 12.4k tok</text>
+<text x="344" y="152" font-size="12" font-weight="600" fill="#2E7D32">5.47 ✓</text>
+<rect x="400" y="130" width="242" height="62" fill="#262625" rx="4"/>
+<text x="410" y="152" font-size="13" fill="#F0EEE6">ClaudeManager</text>
+<text x="410" y="172" font-size="12" fill="#949490">~/projects/app · 2 min ago · 12.4k tok</text>
+<text x="594" y="152" font-size="12" font-weight="600" fill="#2E7D32">4.98 ✓</text>
+<rect x="650" y="130" width="242" height="62" fill="#2E2D2B" rx="4"/>
+<text x="660" y="152" font-size="13" fill="#F0EEE6">ClaudeManager</text>
+<text x="660" y="172" font-size="12" fill="#949490">~/projects/app · 2 min ago · 12.4k tok</text>
+<text x="844" y="152" font-size="12" font-weight="600" fill="#2E7D32">4.52 ✓</text>
+<text x="12" y="224" font-size="13" font-weight="600" fill="#222">Claude Light</text>
+<text x="12" y="244" font-size="12" fill="#666">before #6E6B62</text>
+<rect x="150" y="200" width="242" height="62" fill="#EDEAE2" rx="4"/>
+<text x="160" y="222" font-size="13" fill="#26251F">ClaudeManager</text>
+<text x="160" y="242" font-size="12" fill="#6E6B62">~/projects/app · 2 min ago · 12.4k tok</text>
+<text x="344" y="222" font-size="12" font-weight="600" fill="#C62828">4.43 ✗</text>
+<rect x="400" y="200" width="242" height="62" fill="#F7F5EF" rx="4"/>
+<text x="410" y="222" font-size="13" fill="#26251F">ClaudeManager</text>
+<text x="410" y="242" font-size="12" fill="#6E6B62">~/projects/app · 2 min ago · 12.4k tok</text>
+<text x="594" y="222" font-size="12" font-weight="600" fill="#2E7D32">4.89 ✓</text>
+<rect x="650" y="200" width="242" height="62" fill="#E8E4DA" rx="4"/>
+<text x="660" y="222" font-size="13" fill="#26251F">ClaudeManager</text>
+<text x="660" y="242" font-size="12" fill="#6E6B62">~/projects/app · 2 min ago · 12.4k tok</text>
+<text x="844" y="222" font-size="12" font-weight="600" fill="#C62828">4.20 ✗</text>
+<text x="12" y="294" font-size="13" font-weight="600" fill="#222">Claude Light</text>
+<text x="12" y="314" font-size="12" fill="#666">after #69665E</text>
+<rect x="150" y="270" width="242" height="62" fill="#EDEAE2" rx="4"/>
+<text x="160" y="292" font-size="13" fill="#26251F">ClaudeManager</text>
+<text x="160" y="312" font-size="12" fill="#69665E">~/projects/app · 2 min ago · 12.4k tok</text>
+<text x="344" y="292" font-size="12" font-weight="600" fill="#2E7D32">4.77 ✓</text>
+<rect x="400" y="270" width="242" height="62" fill="#F7F5EF" rx="4"/>
+<text x="410" y="292" font-size="13" fill="#26251F">ClaudeManager</text>
+<text x="410" y="312" font-size="12" fill="#69665E">~/projects/app · 2 min ago · 12.4k tok</text>
+<text x="594" y="292" font-size="12" font-weight="600" fill="#2E7D32">5.26 ✓</text>
+<rect x="650" y="270" width="242" height="62" fill="#E8E4DA" rx="4"/>
+<text x="660" y="292" font-size="13" fill="#26251F">ClaudeManager</text>
+<text x="660" y="312" font-size="12" fill="#69665E">~/projects/app · 2 min ago · 12.4k tok</text>
+<text x="844" y="292" font-size="12" font-weight="600" fill="#2E7D32">4.52 ✓</text>
+<text x="12" y="364" font-size="13" font-weight="600" fill="#222">Mezzanotte</text>
+<text x="12" y="384" font-size="12" fill="#666">before #6B7394</text>
+<rect x="150" y="340" width="242" height="62" fill="#16181D" rx="4"/>
+<text x="160" y="362" font-size="13" fill="#C0CAF5">ClaudeManager</text>
+<text x="160" y="382" font-size="12" fill="#6B7394">~/projects/app · 2 min ago · 12.4k tok</text>
+<text x="344" y="362" font-size="12" font-weight="600" fill="#C62828">3.81 ✗</text>
+<rect x="400" y="340" width="242" height="62" fill="#1E2128" rx="4"/>
+<text x="410" y="362" font-size="13" fill="#C0CAF5">ClaudeManager</text>
+<text x="410" y="382" font-size="12" fill="#6B7394">~/projects/app · 2 min ago · 12.4k tok</text>
+<text x="594" y="362" font-size="12" font-weight="600" fill="#C62828">3.46 ✗</text>
+<rect x="650" y="340" width="242" height="62" fill="#272B34" rx="4"/>
+<text x="660" y="362" font-size="13" fill="#C0CAF5">ClaudeManager</text>
+<text x="660" y="382" font-size="12" fill="#6B7394">~/projects/app · 2 min ago · 12.4k tok</text>
+<text x="844" y="362" font-size="12" font-weight="600" fill="#C62828">3.04 ✗</text>
+<text x="12" y="434" font-size="13" font-weight="600" fill="#222">Mezzanotte</text>
+<text x="12" y="454" font-size="12" fill="#666">after #8A91AB</text>
+<rect x="150" y="410" width="242" height="62" fill="#16181D" rx="4"/>
+<text x="160" y="432" font-size="13" fill="#C0CAF5">ClaudeManager</text>
+<text x="160" y="452" font-size="12" fill="#8A91AB">~/projects/app · 2 min ago · 12.4k tok</text>
+<text x="344" y="432" font-size="12" font-weight="600" fill="#2E7D32">5.68 ✓</text>
+<rect x="400" y="410" width="242" height="62" fill="#1E2128" rx="4"/>
+<text x="410" y="432" font-size="13" fill="#C0CAF5">ClaudeManager</text>
+<text x="410" y="452" font-size="12" fill="#8A91AB">~/projects/app · 2 min ago · 12.4k tok</text>
+<text x="594" y="432" font-size="12" font-weight="600" fill="#2E7D32">5.15 ✓</text>
+<rect x="650" y="410" width="242" height="62" fill="#272B34" rx="4"/>
+<text x="660" y="432" font-size="13" fill="#C0CAF5">ClaudeManager</text>
+<text x="660" y="452" font-size="12" fill="#8A91AB">~/projects/app · 2 min ago · 12.4k tok</text>
+<text x="844" y="432" font-size="12" font-weight="600" fill="#2E7D32">4.54 ✓</text>
+<text x="12" y="504" font-size="13" font-weight="600" fill="#222">Gruvbox</text>
+<text x="12" y="524" font-size="12" fill="#666">before #928374</text>
+<rect x="150" y="480" width="242" height="62" fill="#1D2021" rx="4"/>
+<text x="160" y="502" font-size="13" fill="#EBDBB2">ClaudeManager</text>
+<text x="160" y="522" font-size="12" fill="#928374">~/projects/app · 2 min ago · 12.4k tok</text>
+<text x="344" y="502" font-size="12" font-weight="600" fill="#C62828">4.47 ✗</text>
+<rect x="400" y="480" width="242" height="62" fill="#282828" rx="4"/>
+<text x="410" y="502" font-size="13" fill="#EBDBB2">ClaudeManager</text>
+<text x="410" y="522" font-size="12" fill="#928374">~/projects/app · 2 min ago · 12.4k tok</text>
+<text x="594" y="502" font-size="12" font-weight="600" fill="#C62828">4.02 ✗</text>
+<rect x="650" y="480" width="242" height="62" fill="#32302F" rx="4"/>
+<text x="660" y="502" font-size="13" fill="#EBDBB2">ClaudeManager</text>
+<text x="660" y="522" font-size="12" fill="#928374">~/projects/app · 2 min ago · 12.4k tok</text>
+<text x="844" y="502" font-size="12" font-weight="600" fill="#C62828">3.58 ✗</text>
+<text x="12" y="574" font-size="13" font-weight="600" fill="#222">Gruvbox</text>
+<text x="12" y="594" font-size="12" fill="#666">after #A39689</text>
+<rect x="150" y="550" width="242" height="62" fill="#1D2021" rx="4"/>
+<text x="160" y="572" font-size="13" fill="#EBDBB2">ClaudeManager</text>
+<text x="160" y="592" font-size="12" fill="#A39689">~/projects/app · 2 min ago · 12.4k tok</text>
+<text x="344" y="572" font-size="12" font-weight="600" fill="#2E7D32">5.68 ✓</text>
+<rect x="400" y="550" width="242" height="62" fill="#282828" rx="4"/>
+<text x="410" y="572" font-size="13" fill="#EBDBB2">ClaudeManager</text>
+<text x="410" y="592" font-size="12" fill="#A39689">~/projects/app · 2 min ago · 12.4k tok</text>
+<text x="594" y="572" font-size="12" font-weight="600" fill="#2E7D32">5.11 ✓</text>
+<rect x="650" y="550" width="242" height="62" fill="#32302F" rx="4"/>
+<text x="660" y="572" font-size="13" fill="#EBDBB2">ClaudeManager</text>
+<text x="660" y="592" font-size="12" fill="#A39689">~/projects/app · 2 min ago · 12.4k tok</text>
+<text x="844" y="572" font-size="12" font-weight="600" fill="#2E7D32">4.55 ✓</text>
+<text x="12" y="644" font-size="13" font-weight="600" fill="#222">Nord</text>
+<text x="12" y="664" font-size="12" fill="#666">before #8894A8</text>
+<rect x="150" y="620" width="242" height="62" fill="#2E3440" rx="4"/>
+<text x="160" y="642" font-size="13" fill="#ECEFF4">ClaudeManager</text>
+<text x="160" y="662" font-size="12" fill="#8894A8">~/projects/app · 2 min ago · 12.4k tok</text>
+<text x="344" y="642" font-size="12" font-weight="600" fill="#C62828">4.07 ✗</text>
+<rect x="400" y="620" width="242" height="62" fill="#3B4252" rx="4"/>
+<text x="410" y="642" font-size="13" fill="#ECEFF4">ClaudeManager</text>
+<text x="410" y="662" font-size="12" fill="#8894A8">~/projects/app · 2 min ago · 12.4k tok</text>
+<text x="594" y="642" font-size="12" font-weight="600" fill="#C62828">3.28 ✗</text>
+<rect x="650" y="620" width="242" height="62" fill="#434C5E" rx="4"/>
+<text x="660" y="642" font-size="13" fill="#ECEFF4">ClaudeManager</text>
+<text x="660" y="662" font-size="12" fill="#8894A8">~/projects/app · 2 min ago · 12.4k tok</text>
+<text x="844" y="642" font-size="12" font-weight="600" fill="#C62828">2.81 ✗</text>
+<text x="12" y="714" font-size="13" font-weight="600" fill="#222">Nord</text>
+<text x="12" y="734" font-size="12" fill="#666">after #B4BCC8</text>
+<rect x="150" y="690" width="242" height="62" fill="#2E3440" rx="4"/>
+<text x="160" y="712" font-size="13" fill="#ECEFF4">ClaudeManager</text>
+<text x="160" y="732" font-size="12" fill="#B4BCC8">~/projects/app · 2 min ago · 12.4k tok</text>
+<text x="344" y="712" font-size="12" font-weight="600" fill="#2E7D32">6.52 ✓</text>
+<rect x="400" y="690" width="242" height="62" fill="#3B4252" rx="4"/>
+<text x="410" y="712" font-size="13" fill="#ECEFF4">ClaudeManager</text>
+<text x="410" y="732" font-size="12" fill="#B4BCC8">~/projects/app · 2 min ago · 12.4k tok</text>
+<text x="594" y="712" font-size="12" font-weight="600" fill="#2E7D32">5.26 ✓</text>
+<rect x="650" y="690" width="242" height="62" fill="#434C5E" rx="4"/>
+<text x="660" y="712" font-size="13" fill="#ECEFF4">ClaudeManager</text>
+<text x="660" y="732" font-size="12" fill="#B4BCC8">~/projects/app · 2 min ago · 12.4k tok</text>
+<text x="844" y="712" font-size="12" font-weight="600" fill="#2E7D32">4.51 ✓</text>
+<text x="12" y="784" font-size="13" font-weight="600" fill="#222">Alto contrasto</text>
+<text x="12" y="804" font-size="12" fill="#666">before #B3B3B3</text>
+<rect x="150" y="760" width="242" height="62" fill="#000000" rx="4"/>
+<text x="160" y="782" font-size="13" fill="#FFFFFF">ClaudeManager</text>
+<text x="160" y="802" font-size="12" fill="#B3B3B3">~/projects/app · 2 min ago · 12.4k tok</text>
+<text x="344" y="782" font-size="12" font-weight="600" fill="#2E7D32">10.02 ✓</text>
+<rect x="400" y="760" width="242" height="62" fill="#0D0D0D" rx="4"/>
+<text x="410" y="782" font-size="13" fill="#FFFFFF">ClaudeManager</text>
+<text x="410" y="802" font-size="12" fill="#B3B3B3">~/projects/app · 2 min ago · 12.4k tok</text>
+<text x="594" y="782" font-size="12" font-weight="600" fill="#2E7D32">9.27 ✓</text>
+<rect x="650" y="760" width="242" height="62" fill="#1A1A1A" rx="4"/>
+<text x="660" y="782" font-size="13" fill="#FFFFFF">ClaudeManager</text>
+<text x="660" y="802" font-size="12" fill="#B3B3B3">~/projects/app · 2 min ago · 12.4k tok</text>
+<text x="844" y="782" font-size="12" font-weight="600" fill="#2E7D32">8.30 ✓</text>
+<text x="12" y="854" font-size="13" font-weight="600" fill="#222">Alto contrasto</text>
+<text x="12" y="874" font-size="12" fill="#666">after #B3B3B3</text>
+<rect x="150" y="830" width="242" height="62" fill="#000000" rx="4"/>
+<text x="160" y="852" font-size="13" fill="#FFFFFF">ClaudeManager</text>
+<text x="160" y="872" font-size="12" fill="#B3B3B3">~/projects/app · 2 min ago · 12.4k tok</text>
+<text x="344" y="852" font-size="12" font-weight="600" fill="#2E7D32">10.02 ✓</text>
+<rect x="400" y="830" width="242" height="62" fill="#0D0D0D" rx="4"/>
+<text x="410" y="852" font-size="13" fill="#FFFFFF">ClaudeManager</text>
+<text x="410" y="872" font-size="12" fill="#B3B3B3">~/projects/app · 2 min ago · 12.4k tok</text>
+<text x="594" y="852" font-size="12" font-weight="600" fill="#2E7D32">9.27 ✓</text>
+<rect x="650" y="830" width="242" height="62" fill="#1A1A1A" rx="4"/>
+<text x="660" y="852" font-size="13" fill="#FFFFFF">ClaudeManager</text>
+<text x="660" y="872" font-size="12" fill="#B3B3B3">~/projects/app · 2 min ago · 12.4k tok</text>
+<text x="844" y="852" font-size="12" font-weight="600" fill="#2E7D32">8.30 ✓</text>
+</svg>

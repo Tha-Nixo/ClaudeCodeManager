@@ -176,7 +176,7 @@ export class TerminalHost {
     // themes are rejected rather than silently completed with fallbacks.
     const activeColor = readVar('--cm-accent') || '#d97757'
     const otherMatches = readVar('--cm-panel-raised') || '#2e2d2b'
-    const rulerColor = readVar('--cm-text-dim') || '#8c8b87'
+    const rulerColor = readVar('--cm-text-dim') || '#949490'
 
     const options = {
       decorations: {

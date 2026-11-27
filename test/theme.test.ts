@@ -524,23 +524,23 @@ describe('readability: text and background contrast', () => {
   })
 
   /**
-   * Known defect, tracked in #30: dimmed text (ui.textDim) is below 4.5:1 in
-   * five built-in themes out of six. Measured on src/shared/themes/builtin.ts,
-   * ratio of textDim on panel / desktop / panelRaised:
+   * Issue #30: dimmed text (ui.textDim) was below 4.5:1 in five built-in themes
+   * out of six. textDim is not decorative: session paths, times, states and
+   * token counts use it, that is, text people really read. Measured on
+   * panel / desktop / panelRaised before the fix:
    *
    *   claude-dark     4.44  4.88  4.03
    *   claude-light    4.89  4.43  4.20
    *   mezzanotte      3.46  3.81  3.04
    *   gruvbox         4.02  4.47  3.58
-   *   nord            3.28  4.07  2.81
+   *   nord            3.28  4.07  2.81   (the row under the pointer)
    *   alto-contrasto  9.27 10.02  8.30
    *
-   * textDim is not decorative: session paths, times and states use it, that
-   * is, text people really read. The worst case is nord on the raised panel
-   * (2.81:1), which is the row under the pointer. Skipped because the fix means
-   * retouching the palettes: a design decision, not a line of code.
+   * Each color kept its hue and saturation and moved in lightness only as far
+   * as needed to reach 4.5:1 on all three backgrounds, so every palette keeps
+   * its character and dim text stays visibly dimmer than text.
    */
-  it.skip('dim text exceeds 4.5:1 ratio', () => {
+  it('dim text reaches 4.5:1 on every background (issue #30)', () => {
     for (const theme of BUILTIN_THEMES) {
       for (const bg of ['desktop', 'panel', 'panelRaised'] as const) {
         const r = contrastRatio(theme.ui.textDim, theme.ui[bg])
@@ -563,6 +563,16 @@ describe('readability: text and background contrast', () => {
     for (const theme of BUILTIN_THEMES) {
       const r = contrastRatio(theme.terminal.ansi[0], theme.terminal.background)
       assert.ok(r > 1.01, `${theme.id}: ansi[0] on terminal background is ${r.toFixed(2)}:1`)
+    }
+  })
+})
+
+describe('readability: dim text stays dimmer than text (issue #30)', () => {
+  it('raising textDim to AA did not make it as strong as text', () => {
+    for (const theme of BUILTIN_THEMES) {
+      const dim = contrastRatio(theme.ui.textDim, theme.ui.panel)
+      const text = contrastRatio(theme.ui.text, theme.ui.panel)
+      assert.ok(text - dim >= 3, `${theme.id}: text ${text.toFixed(2)} vs dim ${dim.toFixed(2)}`)
     }
   })
 })
