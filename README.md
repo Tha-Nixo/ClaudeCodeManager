@@ -203,6 +203,22 @@ as it remains a draft, no clients receive it—by design, since auto-updates rea
 every installed user, so making a release live must be an intentional decision
 rather than the side effect of running a script.
 
+**Releasing without a Windows machine.** The `Release` workflow
+(`.github/workflows/release.yml`) does the packaging on a GitHub Windows runner.
+Bump the version (`npm version <x.y.z> --no-git-tag-version`) and write its
+`## <x.y.z> ` section in `CHANGELOG.md` on main, then push an annotated tag:
+
+```sh
+git tag -a v1.2.0 -m v1.2.0 && git push origin v1.2.0
+```
+
+The workflow runs typecheck, tests and build, refuses a tag that disagrees with
+`package.json` or a version without a changelog section, and uploads the
+packages to a **draft** release on that tag, titled and described like the
+others. It signs them when the `CM_SIGN_*` and `AZURE_*` values above are set as
+repository secrets. Then, as for a local release: `npm run release -- --verify`,
+publish the draft, `--verify` again.
+
 Useful environment variables during development:
 
 | Variable | Effect |

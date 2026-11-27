@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { changelogEntryFor } from './changelog.mjs'
 import { signingConfig } from './signing.mjs'
 import { verifyRelease } from './verify-release.mjs'
 
@@ -72,22 +73,12 @@ function changesSinceLastTag() {
     .map((line) => `- ${line}`)
 }
 
-/** Changelog section for a given version to reuse as release notes. */
-function changelogEntryFor(version) {
-  const md = readFileSync(join(root, 'CHANGELOG.md'), 'utf8')
-  const lines = md.split('\n')
-  const start = lines.findIndex((l) => l.startsWith(`## ${version} `))
-  if (start === -1) return ''
-  const rest = lines.slice(start + 1)
-  const end = rest.findIndex((l) => l.startsWith('## '))
-  return [lines[start], ...(end === -1 ? rest : rest.slice(0, end))].join('\n').trim()
-}
-
 // Reorganize release folder without modifying version or tags:
 // useful after a manual `npm run dist` or to regenerate upload instructions.
 if (args.includes('--tidy')) {
   const version = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version
-  const result = reorganize(join(root, 'release', `v${version}`), version, changelogEntryFor(version))
+  const entry = changelogEntryFor(readFileSync(join(root, 'CHANGELOG.md'), 'utf8'), version)
+  const result = reorganize(join(root, 'release', `v${version}`), version, entry)
   if (!result) {
     console.error(`No folder release/v${version}: build packages first.`)
     process.exit(1)

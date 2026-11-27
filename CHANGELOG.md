@@ -4,6 +4,23 @@ All versions follow [SemVer](https://semver.org/): the first number changes when
 
 <!-- new versions below -->
 
+## 1.2.0 — 2026-11-27
+
+Remote panes come alive, costs match what Claude Code itself reports, and a crash no longer leaves sessions running where nothing can reach them.
+
+- **A notification when a session finishes.** Besides "waiting for your input", a session that ends its turn now raises a notification too, so a long task can run in a pane you are not watching. Several sessions finishing together make one notification, not a burst. It can be turned off in Settings.
+- **Live status for remote panes.** A pane running Claude Code on a server used to say "remote" and nothing else. It now shows the session's status, cost and context usage like a local pane, through one ssh connection per server. When the network drops, the status clears instead of freezing on the last value, and the connection comes back on its own.
+- **Attach to tmux on a server.** For a remote connection, the session picker lists the server's tmux panes and marks those running Claude Code. Choosing one opens that exact pane, so work started on the server, or left running there, continues in ClaudeManager.
+- **Costs match `/cost`.** The price table was out of date and overstated every current model, while presenting the result as exact. It now covers the current models, the Haiku long-prompt rate, fast mode, US-only inference and web searches. Where Claude Code records its own totals, those are used, including background calls that never appear in the transcript. Figures that are still estimates are marked `≈` or `~`.
+- **No orphaned sessions after a crash.** If ClaudeManager was killed or crashed, every pane's shell and the Claude Code inside it kept running with no window to reach them. They now end together with the app.
+- **Restoring a pane whose folder is gone.** A saved layout pointing at a deleted or renamed folder could resume the session in a different folder. The pane now says the folder no longer exists and offers to choose another.
+- **Folder search ignores accents.** "citta" finds "città", and Turkish dotted capitals match too.
+- **Readable dim text.** Secondary text was below the WCAG AA contrast minimum in five of the six built-in themes. It now meets it in all of them.
+- **Folder trust follows `CLAUDE_CONFIG_DIR`.** The trust badge read the default configuration file even when Claude Code was set to use another one.
+- **Security.** Electron 45 with its security fixes, and updated build tools and terminal library. DevTools (`F12`) no longer open in the installed app: set `CM_DEVTOOLS=1` to enable them for troubleshooting.
+
+Under the hood: over 450 automated tests run on Windows for every change; releases are packaged on a GitHub Windows runner and checked against their tag before going live; the executables can be code-signed once a signing identity is configured.
+
 ## 1.1.1 — 2026-08-05
 
 Bug fixes only: 24 issues resolved, 15 found during a systematic test campaign and 9 by the regression suite written immediately afterward. Nothing new to learn.
