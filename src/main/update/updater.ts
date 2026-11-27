@@ -104,7 +104,7 @@ export function initUpdater(send: (s: UpdateState) => void): void {
     return
   }
 
-  // Portable builds only check for updates without auto-downloading.
+  // The portable build only checks: see the note at the top of this file.
   const manual = isPortable()
 
   autoUpdater.autoDownload = !manual
@@ -112,6 +112,7 @@ export function initUpdater(send: (s: UpdateState) => void): void {
   autoUpdater.logger = null
 
   if (devOverride()) {
+    // Without this, electron-updater refuses to start outside a package.
     autoUpdater.forceDevUpdateConfig = true
   }
 
@@ -145,6 +146,8 @@ export function initUpdater(send: (s: UpdateState) => void): void {
   )
 
   autoUpdater.on('error', (err) =>
+    // A failed update must not get in the way: it is noted and retried at the
+    // next check. No modal dialog.
     setState({ status: 'error', message: err?.message || 'Update check failed.' })
   )
 

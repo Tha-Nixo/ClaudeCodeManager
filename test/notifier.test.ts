@@ -4,12 +4,18 @@ import { decideNotices } from '../src/main/notify/notifier'
 import type { LiveSession, MonitorPane } from '@shared/types'
 
 /**
- * `decideNotices` is the core of M11: it determines when the user should be alerted.
+ * `decideNotices` is the core of M11: it decides whether the user gets
+ * interrupted or not.
  *
- * It manages edge cases: detecting state transitions, silencing first sightings,
- * throttling repeat alerts, ignoring non-owned sessions.
+ * Everything that can go wrong is here (recognizing the transition, staying
+ * quiet on the first sighting, not insisting, not intruding on other people's
+ * sessions), while showing the notification is a single line. If this
+ * function gets it wrong, either the alert does not come when it is needed
+ * (and the feature might as well not exist) or it comes in bursts (and the
+ * user turns it off).
  */
 
+/** Per-session memory: the same content as the notifier's internal memory. */
 interface MemoryEntry {
   status: string
   missing: number
@@ -31,14 +37,17 @@ function monitorPane(claudeSessionId: string | null, label = 'pane'): MonitorPan
   }
 }
 
-/** Labels of notified panes: what the user actually sees. */
+/** Labels of the notified panes: the only thing the user really sees. */
 function notifiedLabels(notices: { pane: MonitorPane }[]): string[] {
   return notices.map((n) => n.pane.label)
 }
 
 describe('notifier: memory across polling cycles — Regression test for issue #2', () => {
   it('notifies on return after a single cycle absence from registry', () => {
-    // The registry is rewritten when status changes, so a session might briefly vanish for 1 cycle.
+    // The registry is REWRITTEN exactly when the status changes, so for one poll
+    // the session can be missing. Forgetting it at once made its return with
+    // 'waiting' look like a first sighting, and no alert went out: the feature
+    // failed in the most likely case, that is, always.
     const memory = new Map<string, MemoryEntry>()
     const panes = [monitorPane('s1', 'API')]
 
@@ -50,6 +59,8 @@ describe('notifier: memory across polling cycles — Regression test for issue #
   })
 
   it('survives up to four consecutive absent cycles', () => {
+    // The margin is more than one poll: several close rewrites of the registry
+    // must not be enough to lose track.
     const memory = new Map<string, MemoryEntry>()
     const panes = [monitorPane('s1', 'API')]
 
@@ -60,6 +71,8 @@ describe('notifier: memory across polling cycles — Regression test for issue #
   })
 
   it('forgets sessions gone permanently', () => {
+    // The other half of the issue: if the memory never expired, the map would
+    // grow with every closed session for as long as the app stays open.
     const memory = new Map<string, MemoryEntry>()
     const panes = [monitorPane('s1', 'API')]
 
@@ -71,6 +84,8 @@ describe('notifier: memory across polling cycles — Regression test for issue #
   })
 
   it('does not accumulate memory of transient sessions', () => {
+    // Thirty short sessions, one at a time: if each left a trace, memory would
+    // grow without limit over a normal working day.
     const memory = new Map<string, MemoryEntry>()
     for (let i = 0; i < 30; i++) {
       decideNotices([liveSession(`s${i}`, 'busy')], [], memory)
@@ -80,6 +95,8 @@ describe('notifier: memory across polling cycles — Regression test for issue #
   })
 
   it('absence counts from the last sighting, not the first', () => {
+    // A long session that flickers several times must not be forgotten by adding
+    // up absences far apart from each other.
     const memory = new Map<string, MemoryEntry>()
     const panes = [monitorPane('s1', 'API')]
 
@@ -96,6 +113,7 @@ describe('notifier: memory across polling cycles — Regression test for issue #
 
 describe('notifier: when to notify', () => {
   it('notifies on direct transition from busy to waiting', () => {
+    // The base case that justifies the whole feature.
     const memory = new Map<string, MemoryEntry>()
     const panes = [monitorPane('s1', 'API')]
 
@@ -108,6 +126,8 @@ describe('notifier: when to notify', () => {
   })
 
   it('does not repeat notice while session remains in waiting', () => {
+    // The registry is rewritten often: a burst of notifications for a single wait
+    // is the fastest way to get the user to turn the feature off.
     const memory = new Map<string, MemoryEntry>()
     const panes = [monitorPane('s1', 'API')]
 
@@ -124,6 +144,8 @@ describe('notifier: when to notify', () => {
   })
 
   it('re-notifies if waiting resumes after session became busy again', () => {
+    // Answering and then being called again is a new event: the alert is needed
+    // again here, otherwise the second wait would go unnoticed.
     const memory = new Map<string, MemoryEntry>()
     const panes = [monitorPane('s1', 'API')]
 
@@ -135,6 +157,8 @@ describe('notifier: when to notify', () => {
   })
 
   it('silences on first sighting even if session is already waiting', () => {
+    // When the app starts, every live session is "new": alerting on the first
+    // poll would produce a burst for waits the user already knows about.
     const memory = new Map<string, MemoryEntry>()
     const panes = [monitorPane('s1', 'API'), monitorPane('s2', 'Web')]
 
@@ -148,6 +172,7 @@ describe('notifier: when to notify', () => {
   })
 
   it('does not notify for transitions to states other than waiting', () => {
+    // Only waiting needs the user: idle or busy are the app's business.
     const memory = new Map<string, MemoryEntry>()
     const panes = [monitorPane('s1', 'API')]
 
@@ -157,6 +182,8 @@ describe('notifier: when to notify', () => {
   })
 
   it('notifies for every session transitioning to waiting in the same cycle', () => {
+    // Three panes stopping together are three things to do: missing two of them
+    // would be worse than not alerting at all.
     const memory = new Map<string, MemoryEntry>()
     const panes = [monitorPane('s1', 'API'), monitorPane('s2', 'Web'), monitorPane('s3', 'Docs')]
     const busy = [liveSession('s1', 'busy'), liveSession('s2', 'busy'), liveSession('s3', 'busy')]
@@ -188,6 +215,9 @@ describe('notifier: when to notify', () => {
 
 describe('notifier: external sessions', () => {
   it('does not notify for a session not belonging to any pane', () => {
+    // The registry lists every live Claude Code on the machine, including those
+    // opened in another terminal: interrupting the user for them would intrude on
+    // work the app neither shows nor controls.
     const memory = new Map<string, MemoryEntry>()
     const panes = [monitorPane('s1', 'API')]
 
@@ -209,6 +239,8 @@ describe('notifier: external sessions', () => {
   })
 
   it('ignores panes with no attached session', () => {
+    // A pane with a null `claudeSessionId` is a terminal without Claude: it must
+    // not latch on to the first session that comes by.
     const memory = new Map<string, MemoryEntry>()
     const panes = [monitorPane(null, 'Terminal')]
 
@@ -217,6 +249,8 @@ describe('notifier: external sessions', () => {
   })
 
   it('notifies previously external session once attached to a pane', () => {
+    // Ownership is evaluated on every poll: linking a pane to a session already
+    // seen must not exclude it from alerts forever.
     const memory = new Map<string, MemoryEntry>()
 
     decideNotices([liveSession('s1', 'busy')], [], memory)
@@ -228,6 +262,8 @@ describe('notifier: external sessions', () => {
 
 describe('notifier: sessions without status', () => {
   it('does not notify for a session missing status', () => {
+    // An incomplete registry, or one from a different version, must not produce
+    // alerts: an unknown status is not a wait.
     const memory = new Map<string, MemoryEntry>()
     const panes = [monitorPane('s1', 'API')]
 
@@ -238,6 +274,8 @@ describe('notifier: sessions without status', () => {
   })
 
   it('notifies when session without status transitions to waiting', () => {
+    // The transition counts even from an unknown status, otherwise a session seen
+    // before the registry was complete would stay mute.
     const memory = new Map<string, MemoryEntry>()
     const panes = [monitorPane('s1', 'API')]
 
@@ -256,6 +294,8 @@ describe('notifier: sessions without status', () => {
 
 describe('notifier: passed memory is updated in-place', () => {
   it('writes into passed map instead of retaining internal state', () => {
+    // The caller owns the memory: if the function did not update it, every poll
+    // would be a first sighting and no alert would ever go out.
     const memory = new Map<string, MemoryEntry>()
 
     decideNotices([liveSession('s1', 'busy'), liveSession('s2')], [], memory)
@@ -270,6 +310,7 @@ describe('notifier: passed memory is updated in-place', () => {
   })
 
   it('starts clean with a new map, with no state shared across calls', () => {
+    // Two different maps are two different stories: no hidden global state.
     const panes = [monitorPane('s1', 'API')]
     const first = new Map<string, MemoryEntry>()
 

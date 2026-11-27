@@ -2,17 +2,25 @@ import type { LaunchOptions, SshTarget } from '@shared/types'
 import { buildClaudeArgs } from '../claude/cli'
 
 /**
- * SSH command construction.
+ * Building the ssh command.
  *
- * Deals with TWO levels of quoting: PowerShell (which spawns ssh) and the
- * remote shell (which receives the command as a single string).
+ * TWO levels of quoting are crossed here: PowerShell, which starts ssh, and
+ * the remote shell, which receives the command as a single string. Getting
+ * either one wrong breaks every path with a space in it, and nobody notices
+ * until they open a folder that has one.
  *
- * All remote commands strictly use single quotes. PowerShell wraps arguments
- * containing spaces in double quotes, so single-quoted arguments pass through
- * intact.
+ * The rule that holds it all together: the remote command uses ONLY single
+ * quotes. PowerShell wraps arguments with spaces in double quotes, and an
+ * argument without double quotes crosses that level intact.
  */
 
-/** Escapes a string safely for a POSIX shell literal. */
+/**
+ * Turns a string into a safe literal for a POSIX shell.
+ *
+ * A single quote cannot be protected inside single quotes: the string is
+ * closed, an escaped quote is added, and the string is reopened. It is the
+ * standard way, and the reason the result is full of `'\''`.
+ */
 export function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`
 }
@@ -20,9 +28,11 @@ export function shellQuote(value: string): string {
 /** SSH connection arguments, excluding destination and remote command. */
 function connectionArgs(target: SshTarget): string[] {
   const args: string[] = [
-    // Allocate a pseudo-terminal so Claude Code can render its UI
+    // Without -t ssh allocates no terminal, and Claude Code cannot draw its
+    // interface: only raw output without a prompt would show.
     '-t',
-    // Keep connection alive so hung sessions drop cleanly
+    // A terminal that freezes mid-session would otherwise hang forever with
+    // nothing to signal it.
     '-o',
     'ServerAliveInterval=30',
     '-o',
@@ -31,6 +41,8 @@ function connectionArgs(target: SshTarget): string[] {
   if (target.port && target.port !== 22) args.push('-p', String(target.port))
   if (target.identityFile) {
     args.push('-i', target.identityFile)
+    // With an explicitly given key, ssh does not try all the others first and
+    // hit the server's limit on attempts.
     args.push('-o', 'IdentitiesOnly=yes')
   }
   return args
@@ -42,15 +54,36 @@ export function sshDestination(target: SshTarget): string {
 }
 
 /**
- * Changes into remote directory and runs claude.
+ * There used to be an absolute ban on double quotes in the remote command
+ * here: PowerShell 5.1 could not hand them to a native executable, so the
+ * only way to stay correct was never to use them. The ban, however, made
+ * opening the pane fail with an exception as soon as the user wrote a
+ * perfectly normal prompt such as `fix the "login" bug`.
  *
- * `exec` replaces the shell with claude directly: exiting claude drops the connection.
- * If the remote directory does not exist, an informative error is displayed.
+ * Arguments are now protected upstream (see `pty/winargs.ts`), so double
+ * quotes cross PowerShell intact and the ban is no longer needed. The remote
+ * command still uses single quotes by choice, because they are the simplest
+ * way to make a value literal for a POSIX shell.
+ */
+
+/**
+ * Enters the remote folder and starts claude.
+ *
+ * `exec` replaces the shell with claude instead of leaving one in between:
+ * when claude exits the connection drops at once, with no inert layer keeping
+ * the terminal open. If the folder does not exist the command says which one,
+ * instead of falling back to the home directory and pretending all went well.
  */
 export function remoteCommand(opts: LaunchOptions, sessionId: string): string {
   const path = opts.remote?.path?.trim() || '~'
   const args = buildClaudeArgs(opts, sessionId)
 
+  // A quoted '~' is not expanded by the shell: it would stay a literal folder
+  // name. For paths starting with ~ only the rest is quoted.
+  //
+  // The '--' is not decorative: quotes make the value literal for the shell,
+  // but do not stop `cd` from reading it as an option. A folder named '-'
+  // would lead to $OLDPWD, that is, somewhere else, silently.
   const cd =
     path === '~'
       ? 'cd -- ~'
@@ -61,14 +94,19 @@ export function remoteCommand(opts: LaunchOptions, sessionId: string): string {
   const claude = ['claude', ...args].map(shellQuote).join(' ')
 
   return [
+    // cd's own error is silenced: the shell prints one of its own, and two
+    // messages for the same problem confuse instead of helping.
     `${cd} 2>/dev/null || { echo ${shellQuote(`ClaudeManager: remote directory unreachable: ${path}`)} >&2; exit 1; }`,
+    // Without claude on the server the connection would drop at once, leaving
+    // only a flashing error. Better to stay on the remote shell: Claude Code can
+    // be installed from there without opening another terminal.
     `command -v claude >/dev/null 2>&1 || { echo ${shellQuote('ClaudeManager: Claude Code does not appear to be installed on this remote server.')} >&2; exec ${'${SHELL:-sh}'} -l; }`,
     `exec ${claude}`
   ].join('; ')
 }
 
 export interface SshInvocation {
-  /** Executable: always ssh from PATH. */
+  /** Executable: always ssh, resolved from PATH. */
   file: string
   args: string[]
 }
@@ -84,13 +122,14 @@ export function buildSshInvocation(opts: LaunchOptions, sessionId: string): SshI
   }
 }
 
-/** Non-interactive SSH query command for probing remote host. */
+/** Non-interactive ssh command, to query the server. */
 export function buildSshQuery(target: SshTarget, remoteScript: string): SshInvocation {
   const args: string[] = [
     '-o',
     'BatchMode=yes',
     '-o',
     'ConnectTimeout=10',
+    // No terminal: the output is to be read, not shown.
     '-T'
   ]
   if (target.port && target.port !== 22) args.push('-p', String(target.port))

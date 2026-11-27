@@ -140,6 +140,11 @@ for (const { text } of MAIN) {
 const sorted = (s: Iterable<string>): string[] => [...s].sort()
 
 describe('IPC Contract: source extraction', () => {
+  /**
+   * Without this safety net, a regex that stops matching (a comma in the style,
+   * a renamed `ipcMain`, a moved file) would make every following check pass
+   * on nothing, and the suite would stay green while checking nothing at all.
+   */
   it('finds channels on both sides', () => {
     assert.ok(HANDLE.size > 0, 'no ipcMain.handle found in src/main/ipc.ts')
     assert.ok(ON.size > 0, 'no ipcMain.on found in src/main/ipc.ts')
@@ -151,6 +156,9 @@ describe('IPC Contract: source extraction', () => {
   })
 
   it('does not register the same channel with both handle and on', () => {
+    // The two registrations would coexist without errors, but the channel would
+    // answer one way or the other depending on the caller: behavior nobody can
+    // work out by reading the preload.
     const dupes = sorted(HANDLE).filter((c) => ON.has(c))
     assert.deepEqual(dupes, [], `channels registered twice with different handlers: ${dupes.join(', ')}`)
   })
@@ -163,6 +171,9 @@ describe('IPC Contract: renderer requests to main', () => {
 
     for (const channel of sorted(INVOKE)) {
       if (HANDLE.has(channel)) continue
+      // `invoke` on a channel registered with `on` does not end in a visible error:
+      // the promise never resolves, and the part of the interface waiting for it
+      // keeps loading forever.
       if (ON.has(channel)) mismatched.push(channel)
       else missing.push(channel)
     }
@@ -185,6 +196,8 @@ describe('IPC Contract: renderer requests to main', () => {
 
     for (const channel of sorted(SEND)) {
       if (ON.has(channel)) continue
+      // `send` to an `ipcMain.handle` reaches nobody and raises nothing: the user's
+      // command vanishes without a trace.
       if (HANDLE.has(channel)) mismatched.push(channel)
       else missing.push(channel)
     }

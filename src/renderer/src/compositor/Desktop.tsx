@@ -63,9 +63,10 @@ export function Desktop({
   const [stageSize, setStageSize] = useState({ w: 0, h: 0 })
   const [drag, setDrag] = useState<DragState | null>(null)
   /**
-   * Synchronous copy of drag state. Needed because on release the decision
-   * must be made immediately: reading it from inside a setState updater
-   * runs a side effect during render that React may discard.
+   * Synchronous copy of the drag state. Needed because on release the decision
+   * must be made at once: reading it from inside a setState updater runs a side
+   * effect during render, which React is free to discard, and that is exactly
+   * what used to happen.
    */
   const dragRef = useRef<DragState | null>(null)
   const updateDrag = useCallback((next: DragState | null) => {
@@ -124,11 +125,13 @@ export function Desktop({
   const stage: Rect = { x: 0, y: 0, w: stageSize.w, h: stageSize.h }
   const { panes, gutters } = computeLayout(layout, stage)
 
-  // Drag handlers persist for gesture duration; read the latest computed panes.
+  // Drag handlers live for the whole gesture and would capture the panes as
+  // they were when it started: here they always read the latest computed ones.
   const panesRef = useRef(panes)
   panesRef.current = panes
 
-  // Publishes geometries for directional focus and tiled -> floating transitions.
+  // Publishes the geometries: directional focus needs them, and so does the
+  // tiled -> floating switch, which must start from the current position.
   useEffect(() => {
     const rects: Record<string, Rect> = {}
     for (const p of panes) rects[p.id] = { x: p.x, y: p.y, w: p.w, h: p.h }
@@ -153,7 +156,8 @@ export function Desktop({
 
       const move = (ev: PointerEvent): void => {
         if (!started) {
-          // Below threshold remains a click to avoid accidental drags.
+          // Below the threshold it stays a click: otherwise selecting a pane would
+          // start a drag at every twitch of the mouse.
           if (Math.abs(ev.clientX - startX) + Math.abs(ev.clientY - startY) < DRAG_THRESHOLD) return
           started = true
           interacting.current = true
@@ -232,7 +236,9 @@ export function Desktop({
   /** Drag gesture moving a floating pane by its header. */
   const onFloatDragStart = useCallback(
     (e: React.PointerEvent, paneId: string) => {
-      // Origin must be read from layout.floating, not computed rects which zoom overrides.
+      // The origin must be read from layout.floating, not from the computed rects:
+      // under zoom those were overwritten with the stage's size, and starting from
+      // there would destroy the pane's stored geometry.
       const pane = layout.floating.find((f) => f.id === paneId)
       if (!pane) return
       e.preventDefault()
@@ -299,8 +305,9 @@ export function Desktop({
   const dropRect = dropTarget && drag?.target ? dropPreviewRect(dropTarget, drag.target.side) : null
 
   const ordered = [...panes].sort((a, b) => a.z - b.z)
-  // Numbering over ALL panes in tree order, matching Alt+1..9 shortcuts.
-  // Excluding panes hidden by zoom would renumber remaining ones inconsistently.
+  // Numbering over ALL panes, in tree order: the same one Alt+1..9 uses.
+  // Leaving out the panes hidden by zoom would renumber them, and the number
+  // shown would no longer match the key to press.
   const indexOf = new Map(panes.map((p, i) => [p.id, i + 1]))
 
   return (

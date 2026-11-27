@@ -13,9 +13,11 @@ import {
 /**
  * Keybindings editor.
  *
- * Combinations are recorded by pressing keys directly.
+ * A combination is recorded by pressing it, not by typing it: a key's
+ * signature depends on `code` and on the order of the modifiers, and nobody
+ * guesses it by hand the first time. The pressed combination is shown exactly
+ * as captured, so what you see is exactly what the app will compare.
  */
-
 interface KeymapEditorProps {
   config: AppConfig
   onPatch: (patch: Partial<AppConfig>) => void
@@ -23,7 +25,7 @@ interface KeymapEditorProps {
   problems: KeymapProblem[]
 }
 
-/** Combinations reserved for terminal input. */
+/** Keys that must not be stolen from the terminal. */
 const RESERVED = new Set(['escape', 'enter', 'tab', 'backspace', 'space'])
 
 export function KeymapEditor({ config, onPatch, problems }: KeymapEditorProps): React.JSX.Element {
@@ -47,12 +49,16 @@ export function KeymapEditor({ config, onPatch, problems }: KeymapEditorProps): 
     (action: Action, combo: string) => {
       const custom = { ...config.keymap }
 
+      // The combination may already belong to another action: it is freed,
+      // otherwise two actions would answer to it and the reading order would win.
       const owner = keymap[combo]
       if (owner && owner !== action) {
         const ownerCombo = comboFor(owner)
         if (ownerCombo) custom[ownerCombo] = ''
       }
 
+      // The action's old combination must be removed explicitly: otherwise the
+      // default one would remain and the action would answer to two keys.
       const previous = comboFor(action)
       if (previous && previous !== combo) custom[previous] = ''
 
@@ -62,6 +68,8 @@ export function KeymapEditor({ config, onPatch, problems }: KeymapEditorProps): 
     [config.keymap, keymap, comboFor, onPatch]
   )
 
+  // Capture is in the capture phase on window: it must see the key before
+  // anyone else, the panel's own text fields included.
   useEffect(() => {
     if (!recording) return
 
@@ -69,6 +77,7 @@ export function KeymapEditor({ config, onPatch, problems }: KeymapEditorProps): 
       e.preventDefault()
       e.stopPropagation()
 
+      // A modifier alone is not a combination: wait for the key.
       if (['Control', 'Alt', 'Shift', 'Meta'].includes(e.key)) return
 
       if (e.key === 'Escape') {
@@ -80,6 +89,8 @@ export function KeymapEditor({ config, onPatch, problems }: KeymapEditorProps): 
       const combo = signature(e)
       const bare = combo.split('+').pop() ?? ''
 
+      // Without modifiers a normal key would be stolen from the terminal, and
+      // Claude would stop receiving it.
       if (!/^(ctrl|alt|shift|meta)\+/.test(combo)) {
         setError('At least one modifier required: otherwise key will not reach terminal.')
         return

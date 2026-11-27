@@ -1,10 +1,13 @@
 /**
  * Theme definition format.
  *
- * A theme configures both application UI styling and terminal ANSI palettes.
- * Storing both concurrently guarantees visual harmony between interface and terminal.
+ * A theme describes two things that must stay consistent with each other: the
+ * app's interface and the terminal's ANSI colors. Keeping them in the same
+ * file avoids the very visible case of a light frame around a dark terminal.
+ *
+ * It is also the format of personal themes: a JSON file of this shape in
+ * %APPDATA%\claudemanager\themes\ is loaded at startup.
  */
-
 export interface ThemeUi {
   /** Desktop canvas background behind panes. */
   desktop: string
@@ -37,7 +40,7 @@ export interface ThemeTerminal {
 }
 
 export interface Theme {
-  /** Stable identifier saved in user config. */
+  /** Stable identifier: it is what gets saved in the configuration. */
   id: string
   name: string
   /** Brief description shown in Settings. */
@@ -46,14 +49,14 @@ export interface Theme {
   dark: boolean
   ui: ThemeUi
   terminal: ThemeTerminal
-  /** Present on custom themes loaded from user directory. */
+  /** Present only on themes loaded from a file, to tell them apart in the UI. */
   custom?: boolean
   /** Source file path for error reporting. */
   source?: string
 }
 
 export interface ThemeLoadError {
-  /** File basename displayed to user. */
+  /** File name, not the full path: it is what the user sees. */
   file: string
   error: string
 }
@@ -92,8 +95,9 @@ export interface ThemeValidation {
 }
 
 /**
- * Validates a theme loaded from disk. Themes with missing fields are rejected
- * rather than filled with fallback defaults to prevent unreadable color mismatches.
+ * Validates a theme loaded from a file. An incomplete theme is not "repaired"
+ * with fallback values: half a theme applied is worse than a rejected one,
+ * because it produces unreadable combinations without saying why.
  */
 export function validateTheme(raw: unknown, source?: string): ThemeValidation {
   if (!raw || typeof raw !== 'object') return { theme: null, error: 'file does not contain an object' }
@@ -110,6 +114,8 @@ export function validateTheme(raw: unknown, source?: string): ThemeValidation {
     return { theme: null, error: "missing 'terminal' section" }
   }
 
+  // The cast goes through unknown because `t.ui` is still unverified data here:
+  // it has the declared type but no guarantee that the fields are really there.
   const ui = t.ui as unknown as Record<string, unknown>
   for (const key of UI_KEYS) {
     if (!isColor(ui[key])) {
@@ -124,6 +130,9 @@ export function validateTheme(raw: unknown, source?: string): ThemeValidation {
     }
   }
 
+  // `every` SKIPS positions never assigned, so an array with a hole
+  // (`delete ansi[7]`) passed the check and reached xterm with an undefined
+  // color. The explicit loop below looks at every position.
   if (!Array.isArray(term.ansi) || term.ansi.length !== 16) {
     return { theme: null, error: 'terminal.ansi must contain exactly 16 hex colors' }
   }
@@ -133,6 +142,11 @@ export function validateTheme(raw: unknown, source?: string): ThemeValidation {
     }
   }
 
+  // `dark` was the only field left unchecked: `"dark": "false"` with quotes too
+  // many (a trivial JSON mistake) was enough for the string to differ from the
+  // boolean false, and the light theme was applied as a dark one, with black
+  // shadows on the light background and inverted scrollbars. Every other field
+  // rejects a wrong type: this one must too.
   if (t.dark !== undefined && typeof t.dark !== 'boolean') {
     return { theme: null, error: 'dark must be boolean true or false, unquoted' }
   }

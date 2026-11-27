@@ -14,12 +14,14 @@ import {
 import { isRemoteResumable } from '../src/main/ssh/remote'
 
 /**
- * None of these tests open real network connections: they verify the command
- * strings and arguments delivered to ssh and the remote shell.
+ * No test here opens a connection: they only check the strings that would be
+ * handed to ssh and to the remote shell. This is where defects hurt most,
+ * because a wrong result raises nothing: it reaches its destination and does
+ * something other than what was asked.
  */
-
 const SID = '11111111-2222-3333-4444-555555555555'
 
+/** Minimal target; each test overrides only what it cares about. */
 function dummyTarget(extra: Partial<SshTarget> = {}): SshTarget {
   return { host: 'server.example.invalid', user: 'nicola', ...extra }
 }
@@ -43,9 +45,12 @@ function dummyOptions(
 
 // --- Verification helpers ----------------------------------------------------
 
+// --- Verification helpers ----------------------------------------------------
+
 /**
- * Inverse of `shellQuote`: strips outer quotes and replaces `'\''` with `'`.
- * Checks that the remote shell receives the exact string intended.
+ * Inverse of `shellQuote`: strips the outer quotes and turns every `'\''` back
+ * into a single quote. It checks the only thing that really matters: that the
+ * remote shell sees exactly the string the user wrote.
  */
 function unquote(quoted: string): string {
   assert.ok(
@@ -59,8 +64,10 @@ function unquote(quoted: string): string {
 }
 
 /**
- * Minimal POSIX tokenizer handling single quotes, backslashes, and spaces.
- * Simulates what the remote server shell hands to `cd` and `claude`.
+ * POSIX tokenizer reduced to the constructs we generate: single quotes,
+ * backslashes and spaces. It reproduces what the server's shell would hand to
+ * `cd` and to `claude` as separate arguments, which is what the user sees
+ * break when quoting goes wrong.
  */
 function tokenizePosix(line: string): string[] {
   const tokens: string[] = []
@@ -108,7 +115,11 @@ function cdPart(command: string): string {
   return command.split(' 2>/dev/null')[0]
 }
 
-/** The `exec claude ...` portion at the end. */
+/**
+ * The `exec claude ...` part, at the end. It anchors on the branch that falls
+ * back to the remote shell, which is fixed text: looking for the last `exec`
+ * would also catch an `exec` written inside the user's prompt.
+ */
 const FALLBACK_SENTINEL = 'exec ${SHELL:-sh} -l; }; '
 function claudePart(command: string): string {
   const i = command.indexOf(FALLBACK_SENTINEL)
@@ -118,6 +129,7 @@ function claudePart(command: string): string {
 
 // --- shellQuote --------------------------------------------------------------
 
+/** Strings a POSIX shell would interpret, if they were not protected. */
 const CORPUS = [
   'simple',
   'with regular spaces',
@@ -170,6 +182,9 @@ describe('shellQuote: POSIX literal for any string', () => {
   })
 
   it('shell sees a single argument regardless of content', () => {
+    // The roundtrip alone is not enough: if the result were two literals
+    // separated by a space, the inverse would still come back equal, but the
+    // remote command would receive two arguments.
     for (const val of CORPUS) {
       assert.deepEqual(
         tokenizePosix(shellQuote(val)),
@@ -180,6 +195,8 @@ describe('shellQuote: POSIX literal for any string', () => {
   })
 
   it('no unprotected single quotes remain within quotes', () => {
+    // An unprotected quote would close the literal and let the shell interpret
+    // everything after it: that is how a prompt becomes a command.
     for (const val of CORPUS) {
       const inner = shellQuote(val).slice(1, -1)
       assert.ok(
@@ -196,6 +213,14 @@ describe('shellQuote: POSIX literal for any string', () => {
 
 // --- remoteCommand -----------------------------------------------------------
 
+/**
+ * Regression of issue #1, remote side.
+ *
+ * An assert forbade double quotes in the remote command: a perfectly normal
+ * prompt such as `fix the "login" bug` was enough to make opening the pane
+ * fail with an exception, and the user could not tell what they had done
+ * wrong. Arguments are now protected upstream, and double quotes are fine.
+ */
 describe('remoteCommand: double quotes in prompt (regression for issue #1)', () => {
   const PROMPT = 'fix bug with "login"'
 
@@ -226,10 +251,19 @@ describe('remoteCommand: double quotes in prompt (regression for issue #1)', () 
     const cmd = remoteCommand(dummyOptions('/srv/app', { initialPrompt: prompt }), SID)
     const tokens = tokenizePosix(claudePart(cmd))
     assert.equal(tokens.at(-1), prompt)
+    // The prompt stays a single argument: if it split, the tail would reach the
+    // remote shell as a command to run.
     assert.deepEqual(tokens, ['exec', 'claude', '--session-id', SID, '--', prompt])
   })
 })
 
+/**
+ * Fix related to issue #1.
+ *
+ * Without `--`, a folder whose name starts with a dash was read by `cd` as an
+ * option: with `-` you ended up in $OLDPWD, a place other than the one chosen,
+ * with no message at all. Claude started in the wrong folder.
+ */
 describe('remoteCommand: cd guarded with --', () => {
   it("directory named '-' produces cd -- '-'", () => {
     const cd = cdPart(remoteCommand(dummyOptions('-'), SID))
@@ -253,6 +287,8 @@ describe('remoteCommand: remote paths', () => {
   it('defaults to home when path is empty, leaving tilde unquoted', () => {
     for (const path of ['', '   ', undefined as unknown as string]) {
       const cmd = remoteCommand(dummyOptions(path), SID)
+      // A quoted tilde would stay a literal folder name: the shell only expands it
+      // when it sees it bare.
       assert.equal(cdPart(cmd), 'cd -- ~')
     }
   })
@@ -275,6 +311,8 @@ describe('remoteCommand: remote paths', () => {
   })
 
   it('absolute path is not mistaken for home subpath', () => {
+    // '~something' is nobody's home for us: it is treated as a literal folder
+    // name, not expanded at random.
     assert.deepEqual(tokenizePosix(cdPart(remoteCommand(dummyOptions('~weird'), SID))), [
       'cd',
       '--',
@@ -283,6 +321,8 @@ describe('remoteCommand: remote paths', () => {
   })
 
   it('unreachable directory error message names the requested path', () => {
+    // It is the only clue the reader has: without the path, the error does not
+    // tell a typo from a server with a different tree.
     const path = '/srv/my project'
     const cmd = remoteCommand(dummyOptions(path), SID)
     assert.ok(cmd.includes(shellQuote(`ClaudeManager: remote directory unreachable: ${path}`)))
@@ -341,6 +381,8 @@ describe('buildSshInvocation: ssh arguments', () => {
   })
 
   it('omits -p on default port 22', () => {
+    // An explicit port must not appear when it is the default one: adding it
+    // would override a Port written in the user's ~/.ssh/config.
     for (const port of [undefined, 22]) {
       const { args } = buildSshInvocation(dummyOptions('/srv/app', {}, { port }), SID)
       assert.ok(!args.includes('-p'), `-p added for port ${String(port)}`)
@@ -355,6 +397,8 @@ describe('buildSshInvocation: ssh arguments', () => {
   })
 
   it('identity file with spaces in path remains single argument unquoted here', () => {
+    // Quoting for PowerShell happens downstream: if it also happened here, ssh
+    // would look for a key with quotes in its name and not find it.
     const dir = mkdtempSync(join(tmpdir(), 'cm keys '))
     const key = join(dir, 'my key')
 
@@ -365,6 +409,8 @@ describe('buildSshInvocation: ssh arguments', () => {
     const i = args.indexOf('-i')
     assert.notEqual(i, -1)
     assert.equal(args[i + 1], key)
+    // With a hand-picked key ssh must not try others first, or the server closes
+    // the connection for too many attempts.
     assert.ok(args.includes('IdentitiesOnly=yes'))
   })
 
@@ -412,6 +458,8 @@ describe('buildSshQuery: non-interactive queries', () => {
       const { args } = buildSshQuery(target, 'echo hello')
       const i = args.indexOf('BatchMode=yes')
       assert.notEqual(i, -1, `BatchMode missing for ${JSON.stringify(target)}`)
+      // It must stay attached to its own -o: detached, ssh would read it as the
+      // destination and try to connect to a host that does not exist.
       assert.equal(args[i - 1], '-o')
       assert.ok(args.includes('ConnectTimeout=10'))
     }
@@ -430,6 +478,8 @@ describe('buildSshQuery: non-interactive queries', () => {
   })
 
   it('passes remote script intact at end including newlines', () => {
+    // Scripts span several lines: if they were flattened or truncated, the
+    // for..do would become a syntax error on the server.
     const script = ["cd 'my folder' || exit 3", 'for e in *; do', '  echo "$e"', 'done'].join('\n')
     const { file, args } = buildSshQuery(dummyTarget(), script)
     assert.equal(file, 'ssh')
@@ -440,6 +490,16 @@ describe('buildSshQuery: non-interactive queries', () => {
 
 // --- remote.ts ---------------------------------------------------------------
 
+/**
+ * `describeFailure` is not exported from src/main/ssh/remote.ts: it can only
+ * be reached through `runRemote`, which really starts ssh. No connection is
+ * opened here, so the 'ENOENT' case stays uncovered on purpose.
+ *
+ * The only part of `remote.ts` that can be checked without a network is the
+ * session id filter, which is also the only defense: that id is interpolated
+ * into a double-quoted path inside a remote script, without going through
+ * shellQuote.
+ */
 describe('isRemoteResumable: session ID validation', () => {
   it('rejects invalid session IDs without contacting server', async () => {
     const malformed = [

@@ -2,10 +2,13 @@ import { useCallback, useEffect, useState } from 'react'
 import type { RemoteDirListing, RemoteEntry, RemoteProbe, SshConnection } from '@shared/types'
 
 /**
- * Remote selector panel: saved connections list, editor form,
- * and remote server directory browser.
+ * Remote side of the picker: the list of saved connections, the edit form,
+ * and browsing of the folders on the server.
+ *
+ * Remote browsing costs a network round trip per folder, so there is no fuzzy
+ * search: you navigate, and whoever already knows where to go types the path
+ * in the field at the top.
  */
-
 interface RemotePanelProps {
   /** Active connection; null when selecting a server. */
   connection: SshConnection | null
@@ -15,10 +18,12 @@ interface RemotePanelProps {
   onSelect: (connection: SshConnection | null, path: string) => void
   onPathChange: (path: string) => void
   /**
-   * Visible remote folders, or null when not exploring directories.
+   * Folders shown, or null when the panel is not browsing (server list or edit
+   * form). The picker uses it to know whether the arrow keys and Enter should
+   * navigate or stay with the text fields.
    */
   onBrowsing: (entries: RemoteEntry[] | null) => void
-  /** Double-click on remote folder launches session. */
+  /** Double click on a remote folder: opens the session directly. */
   onLaunch: () => void
 }
 
@@ -46,7 +51,9 @@ export function RemotePanel({
     void reload()
   }, [reload])
 
-  // Cancel in-flight SSH directory listings when navigating to another folder.
+  // Every folder change is an ssh call: the incoming result is discarded if the
+  // user has navigated elsewhere in the meantime, otherwise a slow answer would
+  // overwrite a more recent one.
   useEffect(() => {
     if (!connection) {
       setListing(null)
@@ -58,6 +65,8 @@ export function RemotePanel({
       if (cancelled) return
       setListing(res)
       onCursor(0)
+      // The server resolves '~' and relative paths: its answer is adopted, so the
+      // path shown is the real one.
       if (res.ok && res.path !== path) onPathChange(res.path)
     })
     return () => {
@@ -65,6 +74,7 @@ export function RemotePanel({
     }
   }, [connection, path, onPathChange, onCursor])
 
+  // The picker's arrow keys act on the folders only while browsing.
   const browsing = Boolean(connection) && !editing
   useEffect(() => {
     onBrowsing(browsing && listing?.ok ? listing.entries : browsing ? [] : null)
@@ -181,10 +191,11 @@ export function RemotePanel({
 }
 
 /**
- * Server connection configuration form.
+ * Form for one connection.
  *
- * Password authentication is intentionally omitted: SSH key authentication is
- * delegated to the system ssh agent.
+ * There is no password field, on purpose: ssh handles authentication with the
+ * keys already configured on the system. Saving a password here would mean
+ * writing it in plain text into a JSON file.
  */
 function ConnectionForm({
   draft,
@@ -201,6 +212,8 @@ function ConnectionForm({
 
   const set = (patch: Partial<SshConnection>): void => {
     setForm((f) => ({ ...f, ...patch }))
+    // A test result about parameters other than the ones on screen would be
+    // worse than no result.
     setResult(null)
   }
 

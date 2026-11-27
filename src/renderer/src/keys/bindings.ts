@@ -1,14 +1,14 @@
 /**
  * Compositor keybindings.
  *
- * Golden rule: the compositor intercepts ONLY combinations registered in the
- * active keymap. Everything else passes directly to the terminal, and thus to Claude Code.
+ * Golden rule: the compositor intercepts ONLY the combinations in the map.
+ * Everything else reaches the terminal intact, and with it Claude Code.
  *
- * On international keyboards (e.g. Italian), AltGr generates both ctrlKey and altKey
- * (needed for @, #, [, ], {, }). Since signatures always include all modifiers,
- * AltGr combinations produce 'ctrl+alt+…' which are omitted from the keymap and pass through.
+ * On an Italian keyboard AltGr generates ctrlKey AND altKey together (needed
+ * for @, #, [, ], {, }). Since the signature always includes every modifier,
+ * AltGr+ù produces 'ctrl+alt+…', which is not in the map and passes through:
+ * no character is ever taken away from whoever is typing.
  */
-
 export type Action =
   | 'new-session'
   | 'new-session-here'
@@ -82,9 +82,11 @@ export const DEFAULT_KEYMAP: Readonly<Record<string, Action>> = {
 }
 
 /**
- * Actions in presentation order, paired with user-facing labels.
+ * Actions in presentation order, with their labels.
  *
- * Grouped logically rather than alphabetically for Settings display.
+ * The order is the one of the list in Settings: grouped by topic, not
+ * alphabetical, because whoever looks for "move focus" expects to find it
+ * next to the other movements.
  */
 export const ACTION_LABELS: { action: Action; label: string }[] = [
   { action: 'new-session', label: 'New session (picker)' },
@@ -102,6 +104,10 @@ export const ACTION_LABELS: { action: Action; label: string }[] = [
   { action: 'move-right', label: 'Move pane right' },
   { action: 'move-up', label: 'Move pane up' },
   { action: 'move-down', label: 'Move pane down' },
+  // The nine numeric shortcuts were missing from this list: they did not show
+  // up in the panel, so they could not be discovered, remapped or freed, and
+  // reassigning Alt+1 left focus-on-pane-1 without a key with no row to reveal
+  // it.
   { action: 'focus-1', label: 'Focus pane 1' },
   { action: 'focus-2', label: 'Focus pane 2' },
   { action: 'focus-3', label: 'Focus pane 3' },
@@ -127,7 +133,7 @@ export function editableActions(devTools: boolean): { action: Action; label: str
   return devTools ? ACTION_LABELS : ACTION_LABELS.filter((a) => a.action !== 'toggle-devtools')
 }
 
-/** Set of recognized actions for validating user keymaps. */
+/** Every known action, to validate a hand-written map. */
 const ACTIONS = new Set<string>(Object.values(DEFAULT_KEYMAP))
 
 export interface KeymapProblem {
@@ -137,16 +143,21 @@ export interface KeymapProblem {
 
 export interface ResolvedKeymap {
   keymap: Record<string, Action>
-  /** Rejected key combinations with user-facing reasons. */
+  /** Rejected entries, to be shown plainly instead of silently ignored. */
   problems: KeymapProblem[]
 }
 
 /**
- * Merges custom shortcuts with the default keymap.
+ * Merges the custom shortcuts with the default ones.
  *
- * Custom entries overlay defaults: remapping one shortcut does not require
- * redefining the entire set. An empty action string removes the shortcut,
- * freeing the combination.
+ * It OVERLAYS instead of replacing: whoever wants to move a single combination
+ * must not redeclare the other twenty. An entry with an empty action REMOVES
+ * the shortcut, which is the only way to free a combination without replacing
+ * it: it is what gives `Alt+B` back to readline.
+ *
+ * Invalid entries are dropped with a reason, not completed with a fallback
+ * value: a shortcut that does something other than what was written is worse
+ * than one that does not work.
  *
  * With `devTools: false` (packaged builds, #19) every combination bound to
  * `toggle-devtools` is dropped, default or custom, so the key reaches the
@@ -162,6 +173,8 @@ export function resolveKeymap(
   for (const [rawCombo, action] of Object.entries(custom ?? {})) {
     const combo = normalizeCombo(rawCombo)
     if (!combo) {
+      // The reason must be told apart: saying "empty combination" to whoever wrote
+      // `super+b` sends them looking for the problem where it is not.
       problems.push({
         combo: rawCombo,
         reason: rawCombo.trim() === '' ? 'empty combination' : 'invalid modifier or key'
@@ -169,7 +182,8 @@ export function resolveKeymap(
       continue
     }
 
-    // Empty action = remove shortcut.
+    // Empty action = removal. It is handled before validation, because the empty
+    // string is not a valid action.
     if (action === '') {
       delete keymap[combo]
       continue
@@ -193,21 +207,33 @@ export function resolveKeymap(
 }
 
 /**
- * Normalizes modifier ordering and sanitizes the target key.
+ * Puts the modifiers in canonical order and normalizes the key.
  *
- * Ensures combinations like `shift+alt+b` resolve to canonical `alt+shift+b`.
+ * Without this, `shift+alt+b` would never match anything, because the
+ * signature produced by the event is always `alt+shift+b`: the file is written
+ * by hand, and nobody guesses the right order the first time.
  */
 export function normalizeCombo(raw: string): string | null {
   const text = raw.toLowerCase()
 
+  // An empty string is not a combination. Without this check it was read as
+  // "the + key", and an empty key in the configuration file silently bound '+'
+  // to an action, taking it away from the terminal.
   if (text === '') return null
 
-  // Split on the LAST '+' so '+' itself remains valid as a key.
+  // The key is split off at the LAST '+', not with a split on all of them.
+  // `split('+')` followed by `filter(Boolean)` used to drop exactly the '+' and
+  // space keys, and the last remaining modifier was taken for the key: whoever
+  // assigned Alt+Space lost the old shortcut, did not get a new one, and the app
+  // showed "Alt" as the assigned key.
   const splitIdx = text.lastIndexOf('+')
 
+  // A '+' in last position means the key is '+' itself.
   const rawKey = splitIdx === -1 ? text : text.slice(splitIdx + 1)
   const modifiers = splitIdx === -1 ? '' : text.slice(0, splitIdx)
 
+  // Space is a legitimate key, so surrounding whitespace is trimmed only when
+  // something is left: `alt + b` written with spaces must keep working.
   const key = rawKey.trim() || (rawKey === '' ? '+' : rawKey)
   if (!key) return null
 
@@ -219,12 +245,14 @@ export function normalizeCombo(raw: string): string | null {
   )
   const order = ['ctrl', 'alt', 'shift', 'meta'].filter((m) => mods.has(m))
 
+  // An unknown modifier in the middle would be taken for the key: better to
+  // reject than to produce a plausible, wrong combination.
   if (order.length !== mods.size) return null
 
   return [...order, key].join('+')
 }
 
-/** Layout-independent key normalization: `code` for letters and digits. */
+/** Like `signature`, but for the key alone: `code` for letters and digits. */
 function normalizeKey(e: KeyboardEvent): string {
   if (/^Key[A-Z]$/.test(e.code)) return e.code.slice(3).toLowerCase()
   if (/^Digit[0-9]$/.test(e.code)) return e.code.slice(5)
@@ -248,7 +276,8 @@ function normalizeKey(e: KeyboardEvent): string {
 }
 
 /**
- * Computes a normalized keyboard event signature.
+ * Layout-independent key name: letters and digits use `code`, so Alt+B stays
+ * Alt+B even on non-QWERTY keyboards.
  */
 export function signature(e: KeyboardEvent): string {
   const parts: string[] = []
@@ -282,6 +311,8 @@ export function prettyKey(sig: string): string {
           return '↓'
         case 'enter':
           return 'Enter'
+        // Without a name, "Alt+ " on screen reads "Alt+" and looks like a truncated
+        // shortcut instead of one assigned to the space bar.
         case ' ':
           return 'Space'
         case 'escape':
@@ -307,8 +338,9 @@ export interface KeyHandlerOptions {
 }
 
 /**
- * Installs keydown listener during window CAPTURE phase to intercept
- * shortcuts before xterm processes them.
+ * Registers the listener in the CAPTURE phase on window: it intercepts before
+ * xterm sees the event. Combinations not in the map are left untouched, so
+ * they go on to the terminal as usual.
  */
 export function installKeyHandler(options: KeyHandlerOptions): () => void {
   const keymap = options.keymap ?? DEFAULT_KEYMAP

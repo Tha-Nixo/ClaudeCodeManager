@@ -242,6 +242,7 @@ run('npx', ['electron-builder', '--publish', publish], true)
 const outDir = join(root, 'release', tag)
 const reorganized = dryRun ? null : reorganize(outDir, version, entry)
 
+// git starts directly: no shell, so no hand-written quotes.
 run('git', ['add', 'package.json', 'CHANGELOG.md'])
 run('git', ['commit', '-m', tag])
 run('git', ['tag', '-a', tag, '-m', tag])
