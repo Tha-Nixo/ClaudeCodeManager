@@ -23,8 +23,10 @@ or detached as floating windows, each with its own terminal and `claude` process
 - **Real-time status.** The indicator dot on each tile shows whether Claude is
   working or waiting for input, read directly from the session registry that
   Claude Code maintains in `~/.claude/sessions/`.
-- **Usage statistics.** Tokens and list-price costs by day, model, and folder,
-  calculated from session transcripts.
+- **Usage statistics.** Tokens and costs by day, model, and folder, calculated
+  from session transcripts and calibrated with the cost records Claude Code
+  writes itself, so a session's total matches what `/cost` shows. Figures not
+  yet covered by those records are estimated from list prices and marked `~`.
 - **Layout restoration.** Reopening the app restores the exact tiling layout,
   resuming conversations right where they were left off.
 - **Themes.** Six built-in themes (Claude Dark and Light, Midnight, Gruvbox,

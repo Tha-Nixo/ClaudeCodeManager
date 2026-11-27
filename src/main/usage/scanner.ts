@@ -5,12 +5,18 @@ import type { SessionUsage, UsageSummary } from '@shared/types'
 import { projectsDir } from '../claude/paths'
 import { readJson, writeJsonAtomic } from '../store/config'
 import {
+  addUsage,
+  calibrateSession,
+  snapshotModels,
+  type CostSnapshot,
+  type DayBuckets
+} from './calibrate'
+import {
   PRICING_FINGERPRINT,
-  ZERO_TOKENS,
-  addTokens,
   contextWindowFor,
   costOf,
   isBillable,
+  priceFor,
   totalTokens,
   type TokenCounts
 } from './pricing'
@@ -33,30 +39,39 @@ import {
  * prompt tokens), and summed tokens no longer know which request was which.
  * The cache therefore stores costs, and it is rebuilt whenever the price table
  * changes (`PRICING_FINGERPRINT`).
+ *
+ * The figures shown are then calibrated, per session, with the `cost-state`
+ * records Claude Code writes itself (#25, see calibrate.ts). Calibration runs
+ * when the totals are asked for, not here: a session's subagent transcripts are
+ * separate files, cached separately, and only the whole session can be
+ * compared with its snapshot.
  */
 
 // Raise it whenever the cached data changes shape (4: last-turn fields; 5:
-// per-turn costs, #16). The full rescan that follows happens once.
-const CACHE_VERSION = 5
-
-/** Tokens and their cost, for one model in one bucket (file or day). */
-interface ModelUsage {
-  tokens: TokenCounts
-  cost: number
-}
+// per-turn costs, #16; 6: snapshots and the before/after split, #25). The
+// full rescan that follows happens once.
+const CACHE_VERSION = 6
 
 interface FileContribution {
   mtimeMs: number
   size: number
+  /** The file's own name: the session id, or `agent-…` for a subagent. */
   sessionId: string
+  /**
+   * The session this transcript belongs to. A subagent's records carry the
+   * parent session's id, and `/cost` counts subagents with their parent.
+   */
+  ownerSessionId: string
   cwd: string | null
   turns: number
   firstAt: number
   lastAt: number
-  /** Usage per model: the price depends on the model, so models are never merged. */
-  byModel: Record<string, ModelUsage>
-  /** Usage per local day (YYYY-MM-DD) and model. */
-  byDay: Record<string, Record<string, ModelUsage>>
+  /** The last `cost-state` record, main transcripts only. */
+  snapshot: CostSnapshot | null
+  /** Turns written before the last snapshot (none without a snapshot). */
+  before: DayBuckets
+  /** Turns after the last snapshot, or every turn without one. */
+  after: DayBuckets
   /**
    * Input tokens of the LATEST assistant turn, cache included.
    *
@@ -112,28 +127,25 @@ function findTranscripts(dir: string, out: string[] = []): string[] {
 }
 
 interface Turn {
-  model: string | null
+  model: string
   tokens: TokenCounts
   cost: number
   timestamp: number
-}
-
-function addUsage(a: ModelUsage | undefined, turn: Turn): ModelUsage {
-  return {
-    tokens: addTokens(a?.tokens ?? ZERO_TOKENS, turn.tokens),
-    cost: (a?.cost ?? 0) + turn.cost
-  }
+  /** Line of the record that last wrote this turn: places it around a snapshot. */
+  line: number
 }
 
 function parseTranscript(file: string): Omit<FileContribution, 'mtimeMs' | 'size'> {
   const contribution: Omit<FileContribution, 'mtimeMs' | 'size'> = {
     sessionId: basename(file, '.jsonl'),
+    ownerSessionId: basename(file, '.jsonl'),
     cwd: null,
     turns: 0,
     firstAt: 0,
     lastAt: 0,
-    byModel: {},
-    byDay: {},
+    snapshot: null,
+    before: {},
+    after: {},
     lastContext: 0,
     lastModel: null
   }
@@ -149,14 +161,22 @@ function parseTranscript(file: string): Omit<FileContribution, 'mtimeMs' | 'size
   // only the last one carries the final totals. Summing them all inflates the
   // numbers.
   const byMessageId = new Map<string, Turn>()
+  let owner: string | null = null
+  let snapshotLine = -1
+  let lastTimestamp = 0
 
-  for (const line of raw.split('\n')) {
-    if (!line.trim() || !line.includes('"usage"')) continue
+  const lines = raw.split('\n')
+  for (let index = 0; index < lines.length; index++) {
+    const line = lines[index]
+    const isSnapshot = line.includes('"cost-state"')
+    if (!line.trim() || (!isSnapshot && !line.includes('"usage"'))) continue
 
     let rec: {
       type?: string
       cwd?: string
+      sessionId?: string
       timestamp?: string
+      modelUsage?: unknown
       message?: {
         id?: string
         model?: string
@@ -181,8 +201,17 @@ function parseTranscript(file: string): Omit<FileContribution, 'mtimeMs' | 'size
       continue
     }
 
+    // Cumulative for the session: only the last one matters. It has no
+    // timestamp, so it takes the one of the last turn written before it.
+    if (rec.type === 'cost-state') {
+      contribution.snapshot = { at: lastTimestamp, models: snapshotModels(rec.modelUsage) }
+      snapshotLine = index
+      continue
+    }
+
     if (rec.type !== 'assistant') continue
     if (rec.cwd && !contribution.cwd) contribution.cwd = rec.cwd
+    if (!owner && typeof rec.sessionId === 'string' && rec.sessionId) owner = rec.sessionId
 
     const usage = rec.message?.usage
     if (!usage) continue
@@ -207,16 +236,17 @@ function parseTranscript(file: string): Omit<FileContribution, 'mtimeMs' | 'size
     if (sum === 0) continue
 
     const model = rec.message?.model ?? null
-    if (!isBillable(model)) continue
+    if (!model || !isBillable(model)) continue
 
     const timestamp = rec.timestamp ? Date.parse(rec.timestamp) : 0
+    if (timestamp > 0) lastTimestamp = timestamp
     const key = rec.message?.id
     const cost = costOf(model, tokens, {
       webSearches: usage.server_tool_use?.web_search_requests ?? 0,
       fast: usage.speed === 'fast',
       usOnly: usage.inference_geo === 'us'
     })
-    const turn: Turn = { model, tokens, cost, timestamp }
+    const turn: Turn = { model, tokens, cost, timestamp, line: index }
 
     // File order, not timestamp order: the last turn written is the one that
     // describes the context now, and timestamps across subagents and the main
@@ -229,15 +259,16 @@ function parseTranscript(file: string): Omit<FileContribution, 'mtimeMs' | 'size
     byMessageId.set(key || `anon-${byMessageId.size}`, turn)
   }
 
+  if (owner) contribution.ownerSessionId = owner
+
   for (const turn of byMessageId.values()) {
-    const model = turn.model ?? 'unknown'
     contribution.turns += 1
-    contribution.byModel[model] = addUsage(contribution.byModel[model], turn)
+    const side = turn.line < snapshotLine ? contribution.before : contribution.after
+    const day = turn.timestamp > 0 ? localDayKey(new Date(turn.timestamp)) : ''
+    side[day] ??= {}
+    side[day][turn.model] = addUsage(side[day][turn.model], turn)
 
     if (turn.timestamp > 0) {
-      const day = localDayKey(new Date(turn.timestamp))
-      contribution.byDay[day] ??= {}
-      contribution.byDay[day][model] = addUsage(contribution.byDay[day][model], turn)
       contribution.firstAt =
         contribution.firstAt === 0
           ? turn.timestamp
@@ -294,6 +325,41 @@ export function scan(force = false): void {
   if (changed) writeJsonAtomic(cachePath(), state)
 }
 
+/** One session as the totals see it: its transcripts merged and calibrated. */
+interface SessionTotals {
+  id: string
+  /** The main transcript, when it is still on disk. */
+  main: FileContribution | null
+  files: FileContribution[]
+  byDay: DayBuckets
+  cost: number
+  reportedCost: number
+  turns: number
+}
+
+/** Groups transcripts by session and calibrates each session (#25). */
+function sessions(): SessionTotals[] {
+  const groups = new Map<string, FileContribution[]>()
+  for (const file of Object.values(loadCache().files)) {
+    const list = groups.get(file.ownerSessionId) ?? []
+    list.push(file)
+    groups.set(file.ownerSessionId, list)
+  }
+
+  const out: SessionTotals[] = []
+  for (const [id, files] of groups) {
+    const calibrated = calibrateSession(files, (at) => localDayKey(new Date(at)))
+    out.push({
+      id,
+      main: files.find((f) => f.sessionId === id) ?? null,
+      files,
+      ...calibrated,
+      turns: files.reduce((n, f) => n + f.turns, 0)
+    })
+  }
+  return out
+}
+
 /**
  * Usage per session, indexed by sessionId.
  *
@@ -303,32 +369,35 @@ export function scan(force = false): void {
  */
 export function sessionUsage(): Record<string, SessionUsage> {
   scan()
-  const state = loadCache()
   const out: Record<string, SessionUsage> = {}
 
-  for (const file of Object.values(state.files)) {
+  for (const session of sessions()) {
     let tokens = 0
-    let cost = 0
-    for (const usage of Object.values(file.byModel)) {
-      tokens += totalTokens(usage.tokens)
-      cost += usage.cost
+    for (const models of Object.values(session.byDay)) {
+      for (const usage of Object.values(models)) tokens += totalTokens(usage.tokens)
     }
 
-    const { window, approximate } = contextWindowFor(file.lastModel)
+    // The context is the main conversation's: a subagent's last turn says how
+    // full ITS context is, not the pane's.
+    const latest =
+      session.main ??
+      session.files.reduce((a, b) => (b.lastAt > a.lastAt ? b : a), session.files[0])
+    const { window, approximate } = contextWindowFor(latest.lastModel)
 
-    // A subagent has its own transcript, and its id does not exist elsewhere, so
-    // the map has no collisions: one entry per file.
-    out[file.sessionId] = {
-      sessionId: file.sessionId,
-      cwd: file.cwd,
-      turns: file.turns,
+    // Subagents are counted with their session, as /cost does: one entry per
+    // session, keyed by the id the pane knows.
+    out[session.id] = {
+      sessionId: session.id,
+      cwd: session.main?.cwd ?? session.files.find((f) => f.cwd)?.cwd ?? null,
+      turns: session.turns,
       tokens,
-      cost,
-      lastAt: file.lastAt,
-      contextTokens: file.lastContext,
+      cost: session.cost,
+      reportedCost: session.reportedCost,
+      lastAt: Math.max(...session.files.map((f) => f.lastAt)),
+      contextTokens: latest.lastContext,
       contextWindow: window,
       contextApproximate: approximate,
-      model: file.lastModel
+      model: latest.lastModel
     }
   }
 
@@ -358,7 +427,6 @@ function dayKey(offsetDays: number): string {
 
 export function summarize(): UsageSummary {
   scan()
-  const state = loadCache()
 
   const today = dayKey(0)
   const last7 = new Set(Array.from({ length: 7 }, (_, i) => dayKey(i)))
@@ -366,40 +434,38 @@ export function summarize(): UsageSummary {
   let todayCost = 0
   let weekCost = 0
   let totalCost = 0
+  let reportedCost = 0
   let todayTokens = 0
   let weekTokens = 0
   let totalTokensAll = 0
-  let sessions = 0
+  let sessionCount = 0
 
   const byModel: Record<string, { tokens: number; cost: number }> = {}
   const byProject: Record<string, { tokens: number; cost: number }> = {}
 
-  for (const contribution of Object.values(state.files)) {
-    if (contribution.turns === 0) continue
-    sessions += 1
+  for (const session of sessions()) {
+    if (session.turns === 0 && session.cost === 0) continue
+    sessionCount += 1
+    reportedCost += session.reportedCost
 
-    const project = contribution.cwd ?? 'unknown'
+    const project = session.main?.cwd ?? session.files.find((f) => f.cwd)?.cwd ?? 'unknown'
 
-    for (const [model, usage] of Object.entries(contribution.byModel)) {
-      const cost = usage.cost
-      const count = totalTokens(usage.tokens)
-
-      totalCost += cost
-      totalTokensAll += count
-
-      byModel[model] ??= { tokens: 0, cost: 0 }
-      byModel[model].tokens += count
-      byModel[model].cost += cost
-
-      byProject[project] ??= { tokens: 0, cost: 0 }
-      byProject[project].tokens += count
-      byProject[project].cost += cost
-    }
-
-    for (const [day, models] of Object.entries(contribution.byDay)) {
-      for (const usage of Object.values(models)) {
+    for (const [day, models] of Object.entries(session.byDay)) {
+      for (const [model, usage] of Object.entries(models)) {
         const cost = usage.cost
         const count = totalTokens(usage.tokens)
+
+        totalCost += cost
+        totalTokensAll += count
+
+        byModel[model] ??= { tokens: 0, cost: 0 }
+        byModel[model].tokens += count
+        byModel[model].cost += cost
+
+        byProject[project] ??= { tokens: 0, cost: 0 }
+        byProject[project].tokens += count
+        byProject[project].cost += cost
+
         if (day === today) {
           todayCost += cost
           todayTokens += count
@@ -418,10 +484,11 @@ export function summarize(): UsageSummary {
     weekCost,
     weekTokens,
     totalCost,
+    reportedCost,
     totalTokens: totalTokensAll,
-    sessions,
+    sessions: sessionCount,
     byModel: Object.entries(byModel)
-      .map(([model, v]) => ({ model, ...v }))
+      .map(([model, v]) => ({ model, ...v, approximate: priceFor(model)?.approximate ?? false }))
       .sort((a, b) => b.cost - a.cost),
     byProject: Object.entries(byProject)
       .map(([path, v]) => ({ path, ...v }))

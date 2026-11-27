@@ -1,5 +1,5 @@
 import type { MonitorPane, MonitorState } from '@shared/types'
-import { formatCost, formatTokens } from '../usage/UsagePanel'
+import { costOrigin, formatCost, formatTokens } from '../usage/UsagePanel'
 
 /**
  * Contents of the monitor panel.
@@ -79,7 +79,7 @@ function Row({
         <span className={`cm-pane__dot cm-pane__dot--${pane.status}`} />
         {pane.remote && <span className="cm-monitor__remote">☁</span>}
         <span className="cm-monitor__label">{pane.label}</span>
-        {usage && <span className="cm-monitor__cost">{formatCost(usage.cost)}</span>}
+        {usage && <SessionCost cost={usage.cost} reportedCost={usage.reportedCost} />}
       </div>
 
       {fill !== null && usage ? (
@@ -106,5 +106,16 @@ function Row({
         </div>
       )}
     </div>
+  )
+}
+
+/** A session's cost, marked with ~ when part of it is estimated (#25). */
+function SessionCost({ cost, reportedCost }: { cost: number; reportedCost: number }): React.JSX.Element {
+  const { estimated, title } = costOrigin(cost, reportedCost)
+  return (
+    <span className="cm-monitor__cost" title={title}>
+      {estimated ? '~' : ''}
+      {formatCost(cost)}
+    </span>
   )
 }

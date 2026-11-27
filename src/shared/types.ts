@@ -236,10 +236,16 @@ export interface UsageSummary {
   weekCost: number
   weekTokens: number
   totalCost: number
+  /**
+   * The part of totalCost that comes from Claude Code's own cost records
+   * (`/cost`). The rest is estimated from the price table (#25).
+   */
+  reportedCost: number
   totalTokens: number
   /** Number of transcripts with at least one counted turn. */
   sessions: number
-  byModel: { model: string; tokens: number; cost: number }[]
+  /** `approximate`: the model is not in the price table and is priced as its family's newest. */
+  byModel: { model: string; tokens: number; cost: number; approximate: boolean }[]
   byProject: { path: string; tokens: number; cost: number }[]
   generatedAt: number
 }
@@ -250,7 +256,10 @@ export interface SessionUsage {
   cwd: string | null
   turns: number
   tokens: number
+  /** Includes the session's subagents, as `/cost` does. */
   cost: number
+  /** The part of `cost` reported by Claude Code itself; the rest is estimated. */
+  reportedCost: number
   lastAt: number
   /**
    * Latest turn input tokens including cache: estimates current context fullness.
