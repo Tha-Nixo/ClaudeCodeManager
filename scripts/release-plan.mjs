@@ -1,6 +1,7 @@
 /**
- * Release notes come from CHANGELOG.md: the section of a version is the text
- * between its `## <version> ` heading and the next `## `.
+ * What a release publishes and where. Release notes come from CHANGELOG.md:
+ * the section of a version is the text between its `## <version> ` heading and
+ * the next `## `.
  *
  * Pure functions, shared by the local release script and the release workflow.
  */
@@ -51,4 +52,28 @@ export function releasePlan({ version, ref, changelog }) {
   // The release page has its own title: the notes start below the heading.
   const notes = entry.split('\n').slice(1).join('\n').trim()
   return { tag, title: `ClaudeManager ${version}`, notes }
+}
+
+/**
+ * What to do with the GitHub release of a tag before electron-builder uploads.
+ *
+ * Left alone, electron-builder creates the draft itself, but the installer and
+ * the portable executable upload at the same time: both can find no release
+ * and both create one. 1.2.0 got two drafts that way, with the installer's
+ * blockmap alone in the second, and `--verify` read the wrong one. Creating
+ * the draft first leaves electron-builder a single release to find.
+ *
+ * @param {{ tag_name: string, draft: boolean }[]} releases GitHub release objects
+ * @param {string} tag e.g. 'v1.2.0'
+ * @returns {'create' | 'update'}
+ */
+export function draftAction(releases, tag) {
+  const same = releases.filter((r) => r.tag_name === tag)
+  if (same.some((r) => !r.draft)) {
+    throw new Error(`${tag} is already published: uploading again would change a live release.`)
+  }
+  if (same.length > 1) {
+    throw new Error(`${same.length} draft releases on ${tag}: delete all but one first.`)
+  }
+  return same.length === 0 ? 'create' : 'update'
 }
