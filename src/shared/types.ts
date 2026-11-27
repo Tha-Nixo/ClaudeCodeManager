@@ -51,6 +51,8 @@ export interface RemoteLaunch extends SshTarget {
   path: string
   /** Connection name for pane header. */
   name: string
+  /** Attach to this tmux pane instead of starting claude (#27). */
+  tmux?: TmuxTarget
 }
 
 /** Server reconnaissance probe result. */
@@ -90,6 +92,38 @@ export interface RemoteSession {
   lastPrompt: string | null
   modifiedAt: number
   sizeBytes: number
+}
+
+/** A tmux pane on a server, and the Claude Code session running in it, if any (#27). */
+export interface RemoteTmuxPane {
+  session: string
+  /** tmux window id, e.g. '@1'. */
+  windowId: string
+  /** tmux pane id, e.g. '%1': unique on the server while the pane lives. */
+  paneId: string
+  windowName: string
+  /** What the pane runs now (`pane_current_command`). */
+  command: string
+  path: string
+  /** Another client is attached to the session. */
+  attached: boolean
+  /** From the server's registry, whose `tmux` field names this pane. */
+  claude: { sessionId: string; status?: string; name?: string } | null
+}
+
+export interface RemoteTmuxListing {
+  ok: boolean
+  error?: string
+  panes: RemoteTmuxPane[]
+}
+
+/** Where a remote pane attaches instead of starting claude (#27). */
+export interface TmuxTarget {
+  session: string
+  windowId: string
+  paneId: string
+  /** Claude session in that pane when it was picked; the live registry has the last word. */
+  claudeSessionId?: string
 }
 
 export interface LaunchOptions {
@@ -160,6 +194,8 @@ export interface LiveSession {
   version?: string
   /** "<session>:@<window>.%<pane>" when Claude Code runs inside tmux (#27). */
   tmux?: string
+  /** Connection id, for sessions reported by a server's watch stream (#26). */
+  remote?: string
 }
 
 /** Past session parsed from disk transcript. */

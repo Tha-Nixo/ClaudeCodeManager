@@ -7,6 +7,7 @@ import type {
   ModelAlias,
   PermissionMode,
   RemoteEntry,
+  RemoteTmuxPane,
   SshConnection
 } from '@shared/types'
 import { basename, shortenPath } from '../util/path'
@@ -89,6 +90,7 @@ export function Selector({
   const [remoteEntries, setRemoteEntries] = useState<RemoteEntry[] | null>(null)
 
   const [pastSessions, setPastSessions] = useState<PastSession[]>([])
+  const [tmuxPanes, setTmuxPanes] = useState<RemoteTmuxPane[]>([])
   /** null = new session; otherwise id to resume. */
   const [resumeId, setResumeId] = useState<string | null>(null)
   const [fork, setFork] = useState(false)
@@ -164,6 +166,51 @@ export function Selector({
       cancelled = true
     }
   }, [currentPath, mode, remoteConn])
+
+  // tmux panes of the selected server (#27): sessions that outlive a dropped
+  // connection, which a pane can attach to instead of starting a new claude.
+  // Panes running Claude come first: they are what this list is for.
+  useEffect(() => {
+    if (mode !== 'remote' || !remoteConn) {
+      setTmuxPanes([])
+      return
+    }
+    let cancelled = false
+    void window.cm.ssh.tmuxPanes(remoteConn).then((res) => {
+      if (cancelled) return
+      const panes = res.ok ? res.panes : []
+      setTmuxPanes([...panes.filter((p) => p.claude), ...panes.filter((p) => !p.claude)])
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [mode, remoteConn])
+
+  const attachTmux = useCallback(
+    (pane: RemoteTmuxPane) => {
+      if (!remoteConn) return
+      onOpen({
+        cwd: startPath,
+        name: pane.claude?.name ?? pane.windowName,
+        remote: {
+          connectionId: remoteConn.id,
+          name: remoteConn.name,
+          host: remoteConn.host,
+          user: remoteConn.user,
+          port: remoteConn.port,
+          identityFile: remoteConn.identityFile,
+          path: pane.path,
+          tmux: {
+            session: pane.session,
+            windowId: pane.windowId,
+            paneId: pane.paneId,
+            claudeSessionId: pane.claude?.sessionId
+          }
+        }
+      })
+    },
+    [remoteConn, startPath, onOpen]
+  )
 
   const launch = useCallback(
     (path: string) => {
@@ -441,6 +488,32 @@ export function Selector({
                 >
                   <span className="cm-resume__label">{s.label}</span>
                   <span className="cm-resume__when">{relativeTime(s.modifiedAt)}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {mode === 'remote' && tmuxPanes.length > 0 && (
+          <div className="cm-resume">
+            <div className="cm-resume__head">
+              <span className="cm-field__label">Attach to tmux on {remoteConn?.name}</span>
+            </div>
+            <div className="cm-resume__list">
+              {tmuxPanes.slice(0, 8).map((p) => (
+                <button
+                  key={p.paneId}
+                  className="cm-resume__item"
+                  onClick={() => attachTmux(p)}
+                  title={`${p.session}:${p.windowId}.${p.paneId}\n${p.path}`}
+                >
+                  <span className="cm-resume__label">
+                    {p.session} · {p.claude ? (p.claude.name ?? 'Claude') : p.windowName}
+                  </span>
+                  <span className="cm-resume__when">
+                    {p.claude ? (p.claude.status ?? 'claude') : p.command}
+                    {p.attached ? ' · attached' : ''}
+                  </span>
                 </button>
               ))}
             </div>

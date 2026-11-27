@@ -39,7 +39,14 @@ export class PtyManager extends EventEmitter<PtyManagerEvents> {
 
   create(opts: LaunchOptions): CreateSessionResult {
     const id = randomUUID()
-    const claudeSessionId = expectedClaudeSessionId(opts, id)
+    // A tmux pane runs whatever Claude session lives in it (#27): its id is the
+    // one seen when the pane was picked, and the renderer follows the registry.
+    const tmux = opts.remote?.tmux
+    const claudeSessionId = tmux
+      ? tmux.claudeSessionId && /^[0-9a-f-]{36}$/i.test(tmux.claudeSessionId)
+        ? tmux.claudeSessionId
+        : null
+      : expectedClaudeSessionId(opts, id)
 
     const cwd = spawnCwd(opts)
     const script = ensureBootstrapScript()
@@ -66,7 +73,9 @@ export class PtyManager extends EventEmitter<PtyManagerEvents> {
         // at the next space.
         commandLine: buildCommandLine(invocation.args),
         label: remote
-          ? `Connecting to ${sshDestination(remote)} — ${remote.path}`
+          ? remote.tmux
+            ? `Attaching to tmux "${remote.tmux.session}" on ${sshDestination(remote)}`
+            : `Connecting to ${sshDestination(remote)} — ${remote.path}`
           : undefined,
         ownerPid: process.pid
       })

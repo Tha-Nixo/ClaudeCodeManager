@@ -34,6 +34,7 @@ import {
   isRemoteResumable,
   listDir as listRemoteDir,
   listSessions as listRemoteSessions,
+  listTmux,
   probe
 } from './ssh/remote'
 import { getConfig, setConfig } from './store/config'
@@ -154,6 +155,9 @@ export function registerIpc(
         stored.panes.map(async (pane) => {
           const id = typeof pane.claudeSessionId === 'string' ? pane.claudeSessionId : null
           if (!id) return { ...pane, claudeSessionId: null }
+          // A tmux pane re-attaches (#27): nothing is resumed, so there is no
+          // transcript to look for, and no reason to wait for the server.
+          if (pane.launch?.remote?.tmux) return pane
 
           const remote = pane.launch?.remote
           const alive = remote
@@ -231,6 +235,7 @@ export function registerIpc(
   ipcMain.handle('ssh:listDir', (_e, target: SshTarget, path: string) =>
     listRemoteDir(target, path)
   )
+  ipcMain.handle('ssh:tmuxPanes', (_e, target: SshTarget) => listTmux(target))
   ipcMain.handle('ssh:sessionsFor', (_e, target: SshTarget, path: string) =>
     listRemoteSessions(target, path)
   )

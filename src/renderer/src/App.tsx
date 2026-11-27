@@ -25,6 +25,7 @@ import { installKeyHandler, resolveKeymap, type Action } from './keys/bindings'
 import { Selector } from './selector/Selector'
 import { SettingsPanel } from './settings/SettingsPanel'
 import { fromPersisted, toPersisted } from './state/persistence'
+import { liveFor, remoteWhere } from './state/live'
 import { paneStatusFromLive, type SessionMeta } from './state/types'
 import { applyTheme } from './theme/apply'
 import { UsagePanel, formatCost, formatTokens } from './usage/UsagePanel'
@@ -354,27 +355,38 @@ export default function App(): React.JSX.Element {
    */
   const applyLive = useCallback(
     (liveSessions: LiveSession[]) => {
-      const byId = new Map(liveSessions.map((s) => [s.sessionId, s]))
       setSessions((prev) => {
         let changed = false
         const next: Record<string, SessionMeta> = {}
 
         for (const [paneId, meta] of Object.entries(prev)) {
+          const tmux = Boolean(meta.launch.remote?.tmux)
           // A pane whose shell has exited does not revive from a stale registry record.
-          if (meta.status === 'exited' || meta.status === 'error' || !meta.claudeSessionId) {
+          if (
+            meta.status === 'exited' ||
+            meta.status === 'error' ||
+            (!meta.claudeSessionId && !tmux)
+          ) {
             next[paneId] = meta
             continue
           }
 
-          const live = byId.get(meta.claudeSessionId)
+          const live = liveFor(meta, liveSessions)
           // Disappeared from registry means that claude process ended
           // (typically via /exit, leaving the shell alive). Keeping last state
           // would leave the pane "working" forever: shell is still alive, so 'running' is correct.
           const status = live ? paneStatusFromLive(live.status) : 'running'
           const waitingFor = live?.waitingFor ?? null
+          // A tmux pane takes the id of whoever runs in it now, so the drawer
+          // and the notifications follow it; without one it keeps the last.
+          const claudeSessionId = tmux && live ? live.sessionId : meta.claudeSessionId
 
-          if (status !== meta.status || waitingFor !== (meta.waitingFor ?? null)) {
-            next[paneId] = { ...meta, status, waitingFor }
+          if (
+            status !== meta.status ||
+            waitingFor !== (meta.waitingFor ?? null) ||
+            claudeSessionId !== meta.claudeSessionId
+          ) {
+            next[paneId] = { ...meta, status, waitingFor, claudeSessionId }
             changed = true
           } else {
             next[paneId] = meta
@@ -536,7 +548,7 @@ export default function App(): React.JSX.Element {
           paneId,
           index: i + 1,
           label: meta?.title ?? basename(remote ? remote.path : (meta?.cwd ?? '')),
-          where: remote ? `${remote.user}@${remote.host}:${remote.path}` : (meta?.cwd ?? ''),
+          where: remote ? remoteWhere(remote) : (meta?.cwd ?? ''),
           // Without the server's registry (watch stream down), reporting
           // "ready" would be guesswork, as in the pane header.
           status: remote && meta?.status === 'running' ? 'remote' : (meta?.status ?? 'starting'),

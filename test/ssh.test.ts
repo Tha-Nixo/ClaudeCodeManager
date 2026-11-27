@@ -9,9 +9,11 @@ import {
   buildSshQuery,
   remoteCommand,
   shellQuote,
-  sshDestination
+  sshDestination,
+  tmuxAttachCommand
 } from '../src/main/ssh/command'
-import { isRemoteResumable } from '../src/main/ssh/remote'
+import { isRemoteResumable, parseTmuxListing } from '../src/main/ssh/remote'
+import { liveFor } from '../src/renderer/src/state/live'
 
 /**
  * No test here opens a connection: they only check the strings that would be
@@ -521,5 +523,101 @@ describe('isRemoteResumable: session ID validation', () => {
         `id accepted: ${JSON.stringify(id)}`
       )
     }
+  })
+})
+
+// --- tmux (issue #27) ---------------------------------------------------------
+
+/**
+ * Issue #27: on a server, Claude Code often lives inside tmux so that it
+ * survives disconnects. A remote pane can now attach to such a pane instead of
+ * starting a new claude, and follow the Claude session running in it.
+ */
+describe('tmux: attach command (issue #27)', () => {
+  const target = { session: 'my work', windowId: '@3', paneId: '%7' }
+
+  it('checks the session, then attaches and brings up the picked pane', () => {
+    const [check, attach] = tmuxAttachCommand(target).split('\n')
+    assert.match(check, /^tmux has-session -t '=my work' 2>\/dev\/null \|\| \{/)
+    assert.deepEqual(tokenizePosix(attach), [
+      'exec', 'tmux', 'attach-session', '-t', '=my work',
+      ';', 'select-window', '-t', '@3',
+      ';', 'select-pane', '-t', '%7'
+    ])
+  })
+
+  it('ids from a tampered layout are left out, the session name stays quoted', () => {
+    const attach = tmuxAttachCommand({
+      session: "x'; rm -rf ~; '",
+      windowId: '@1; reboot',
+      paneId: '$(id)'
+    }).split('\n')[1]
+    assert.deepEqual(tokenizePosix(attach), ['exec', 'tmux', 'attach-session', '-t', "=x'; rm -rf ~; '"])
+  })
+
+  it('a tmux pane runs tmux, not claude', () => {
+    const opts = dummyOptions('/srv/app')
+    opts.remote!.tmux = target
+    const { args } = buildSshInvocation(opts, SID)
+    const command = args[args.length - 1]
+    assert.ok(command.includes('attach-session'))
+    assert.ok(!command.includes('claude'))
+    // Detaching must return to the local shell: exec replaces the remote shell.
+    assert.match(command, /\nexec 'tmux' /)
+  })
+})
+
+describe('tmux: listing panes (issue #27)', () => {
+  it('matches each pane with the Claude session the registry puts in it', () => {
+    const T = '\t'
+    const stdout = [
+      ['P', 'work', '@1', '%1', 'claude', 'claude', '/srv/app', '1'].join(T),
+      ['P', 'work', '@2', '%2', 'bash', 'bash', '/srv', '1'].join(T),
+      ['P', 'logs', '@3', '%3', 'tail', 'tail', '/var/log', '0'].join(T),
+      `R${T}${JSON.stringify({ sessionId: 's-1', tmux: 'work:@1.%1', status: 'busy', name: 'api' })}`,
+      `R${T}${JSON.stringify({ sessionId: 's-2', status: 'idle' })}`,
+      `R${T}{"broken`
+    ].join('\n')
+
+    const panes = parseTmuxListing(stdout)
+    assert.equal(panes.length, 3)
+    assert.deepEqual(panes[0].claude, { sessionId: 's-1', status: 'busy', name: 'api' })
+    assert.equal(panes[1].claude, null)
+    assert.equal(panes[0].attached, true)
+    assert.equal(panes[2].attached, false)
+  })
+})
+
+describe('tmux: a pane follows whoever runs in its tmux pane (issue #27)', () => {
+  const tmuxMeta = {
+    claudeSessionId: 'old-session',
+    launch: {
+      cwd: 'C:\\x',
+      remote: {
+        connectionId: 'c1',
+        name: 'srv',
+        host: 'h',
+        user: 'u',
+        path: '/srv',
+        tmux: { session: 'work', windowId: '@1', paneId: '%1' }
+      }
+    }
+  }
+
+  it('by tmux target and server, not by the id it started with', () => {
+    const sessions = [
+      { pid: 1, sessionId: 'old-session', cwd: '/srv', status: 'idle' },
+      // The same tmux name on another server must not match.
+      { pid: 2, sessionId: 'elsewhere', cwd: '/srv', status: 'busy', tmux: 'work:@1.%1', remote: 'c2' },
+      { pid: 3, sessionId: 'new-session', cwd: '/srv', status: 'waiting', tmux: 'work:@1.%1', remote: 'c1' }
+    ]
+    assert.equal(liveFor(tmuxMeta, sessions)?.sessionId, 'new-session')
+    assert.equal(liveFor(tmuxMeta, sessions.slice(0, 2)), undefined)
+  })
+
+  it('a normal pane still follows its own id', () => {
+    const meta = { claudeSessionId: 's-9', launch: { cwd: 'C:\\x' } }
+    assert.equal(liveFor(meta, [{ pid: 1, sessionId: 's-9', cwd: 'C:\\x' }])?.sessionId, 's-9')
+    assert.equal(liveFor({ claudeSessionId: null, launch: { cwd: 'C:\\x' } }, []), undefined)
   })
 })

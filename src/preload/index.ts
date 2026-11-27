@@ -18,6 +18,7 @@ import type {
   RemoteDirListing,
   RemoteProbe,
   RemoteSession,
+  RemoteTmuxListing,
   SshConnection,
   SshTarget,
   TranscriptSession,
@@ -86,6 +87,8 @@ const api: CmApi = {
     probe: (target: SshTarget): Promise<RemoteProbe> => ipcRenderer.invoke('ssh:probe', target),
     listDir: (target: SshTarget, path: string): Promise<RemoteDirListing> =>
       ipcRenderer.invoke('ssh:listDir', target, path),
+    tmuxPanes: (target: SshTarget): Promise<RemoteTmuxListing> =>
+      ipcRenderer.invoke('ssh:tmuxPanes', target),
     sessionsFor: (
       target: SshTarget,
       path: string

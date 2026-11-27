@@ -137,7 +137,9 @@ export class RemoteSessions extends EventEmitter<RemoteEvents> {
     const entry = { watcher, refs: 1, sessions: [] as LiveSession[] }
     this.watchers.set(connectionId, entry)
     watcher.on('sessions', (sessions) => {
-      entry.sessions = sessions
+      // Tagged with the connection: a tmux pane (#27) finds its Claude session
+      // by tmux target, and two servers can both have a "main:@1.%1".
+      entry.sessions = sessions.map((s) => ({ ...s, remote: connectionId }))
       this.emit('change')
     })
     watcher.on('transcript', (sessionId, reset, lines) => {

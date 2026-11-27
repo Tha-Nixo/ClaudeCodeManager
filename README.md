@@ -102,6 +102,12 @@ The tile executes `ssh -t` and starts `claude` in the remote folder. When the
 session closes, it drops back to the local shell, allowing you to reconnect
 without opening another tile.
 
+**tmux:** if the server has tmux, the picker also lists its panes, with the ones
+running Claude Code first, and a tile can attach to one instead of starting a
+new `claude`. Detaching (`prefix d`) drops back to the local shell. The tile
+follows whichever Claude session runs in that tmux pane, so status, alerts and
+costs work as for any remote tile, and restarting the app re-attaches it.
+
 **Authentication:** ClaudeManager never asks for or stores passwords. It relies
 on standard SSH mechanics: keys in `~/.ssh` or an SSH agent. If the server is
 not yet in your known hosts list, connect once manually with `ssh` to accept its

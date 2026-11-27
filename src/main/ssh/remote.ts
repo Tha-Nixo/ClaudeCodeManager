@@ -4,6 +4,8 @@ import type {
   RemoteEntry,
   RemoteProbe,
   RemoteSession,
+  RemoteTmuxListing,
+  RemoteTmuxPane,
   SshTarget
 } from '@shared/types'
 import { buildSshQuery, shellQuote } from './command'
@@ -352,4 +354,74 @@ export async function isRemoteResumable(
     RESTORE_TIMEOUT_MS
   )
   return res.ok && res.stdout.includes('OK')
+}
+
+// --- tmux panes (#27) ---------------------------------------------------------
+
+const EXIT_NO_TMUX = 5
+
+/**
+ * tmux panes on the server, plus the live registry records, so each pane can
+ * be matched with the Claude Code session it runs: the registry's `tmux` field
+ * is "<session>:<window id>.<pane id>". A server without tmux, or with no tmux
+ * server running, simply has no panes.
+ */
+export const TMUX_SCRIPT = [
+  `command -v tmux >/dev/null 2>&1 || exit ${EXIT_NO_TMUX}`,
+  `tmux list-panes -a -F 'P${TAB}#{session_name}${TAB}#{window_id}${TAB}#{pane_id}${TAB}#{window_name}${TAB}#{pane_current_command}${TAB}#{pane_current_path}${TAB}#{session_attached}' 2>/dev/null || exit 0`,
+  'dir="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/sessions"',
+  'for f in "$dir"/*.json; do',
+  '  [ -f "$f" ] || continue',
+  '  pid=$(basename "$f" .json)',
+  "  case \"$pid\" in ''|*[!0-9]*) continue ;; esac",
+  '  kill -0 "$pid" 2>/dev/null || continue',
+  `  printf 'R${TAB}%s\\n' "$(tr -d '\\n' < "$f")"`,
+  'done'
+].join('\n')
+
+/** Pure part of listTmux: the script's output into panes. */
+export function parseTmuxListing(stdout: string): RemoteTmuxPane[] {
+  const byTarget = new Map<string, { sessionId: string; status?: string; name?: string }>()
+  const panes: RemoteTmuxPane[] = []
+  for (const cols of rows(stdout)) {
+    if (cols[0] === 'R') {
+      try {
+        const rec = JSON.parse(cols.slice(1).join(TAB)) as {
+          sessionId?: string
+          tmux?: string
+          status?: string
+          name?: string
+        }
+        if (rec.sessionId && rec.tmux) {
+          byTarget.set(rec.tmux, { sessionId: rec.sessionId, status: rec.status, name: rec.name })
+        }
+      } catch {
+        // A record half-written while the server read it.
+      }
+    } else if (cols[0] === 'P' && cols.length >= 8) {
+      const [, session, windowId, paneId, windowName, command, path, attached] = cols
+      panes.push({
+        session,
+        windowId,
+        paneId,
+        windowName,
+        command,
+        path,
+        attached: Number(attached) > 0,
+        claude: null
+      })
+    }
+  }
+  for (const pane of panes) {
+    pane.claude = byTarget.get(`${pane.session}:${pane.windowId}.${pane.paneId}`) ?? null
+  }
+  return panes
+}
+
+/** tmux panes on a server, for the picker. */
+export async function listTmux(target: SshTarget): Promise<RemoteTmuxListing> {
+  const res = await runRemote(target, TMUX_SCRIPT)
+  if (res.code === EXIT_NO_TMUX) return { ok: true, panes: [] }
+  if (!res.ok) return { ok: false, error: res.error, panes: [] }
+  return { ok: true, panes: parseTmuxListing(res.stdout) }
 }

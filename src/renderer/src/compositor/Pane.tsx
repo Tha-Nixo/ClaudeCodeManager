@@ -4,6 +4,7 @@ import type { SessionMeta } from '../state/types'
 import { STATUS_LABEL } from '../state/types'
 import { shortenPath } from '../util/path'
 import { SearchBar } from '../terminal/SearchBar'
+import { remoteWhere } from '../state/live'
 
 interface PaneProps {
   meta: SessionMeta
@@ -65,7 +66,7 @@ export function Pane({
   const statusText =
     remote && meta.status === 'running' ? 'remote' : STATUS_LABEL[meta.status]
 
-  const where = remote ? `${remote.user}@${remote.host}:${remote.path}` : meta.cwd
+  const where = remote ? remoteWhere(remote) : meta.cwd
 
   return (
     <section
