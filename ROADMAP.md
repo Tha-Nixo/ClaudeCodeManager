@@ -5,13 +5,26 @@ issue, and the issue is the source of truth: details, acceptance criteria and
 progress live there. This file is the overview. Update it when a milestone
 closes or the plan changes.
 
-*Last updated: 2026-11-27. Current release: 1.1.1.*
+*Last updated: 2026-11-27. Current release: 1.1.1; everything below is merged
+in `main` and waits for the next release.*
 
-| Milestone | Theme | Issues |
-| --- | --- | --- |
-| [v1.1.2](https://github.com/Tha-Nixo/ClaudeCodeManager/milestone/1) | Correctness and security | 8 |
-| [v1.2.0](https://github.com/Tha-Nixo/ClaudeCodeManager/milestone/2) | Know what every session is doing | 5 |
-| [Later](https://github.com/Tha-Nixo/ClaudeCodeManager/milestone/3) | Accepted, not scheduled | 4 |
+| Milestone | Theme | Issues | Status |
+| --- | --- | --- | --- |
+| [v1.1.2](https://github.com/Tha-Nixo/ClaudeCodeManager/milestone/1) | Correctness and security | 8 | Done (PR #33, #34) |
+| [v1.2.0](https://github.com/Tha-Nixo/ClaudeCodeManager/milestone/2) | Know what every session is doing | 5 | Done (PR #35) |
+| [Later](https://github.com/Tha-Nixo/ClaudeCodeManager/milestone/3) | Accepted, not scheduled | 4 | 3 done; #32 waits for a signing identity |
+
+### What is left
+
+- **#32, code signing:** the release script signs as soon as an Azure Trusted
+  Signing identity is configured (see the README, Development). Getting one
+  costs money, so it is the owner's decision.
+- **Checks only a Windows machine can do:** start a packaged build, open and
+  restore panes, see a toast, detach the monitor window, run auto-update
+  against a local feed (`CM_UPDATE_DEV=1`), and attach a remote pane over
+  real ssh, tmux included. CI covers the tests and the build.
+- **Releasing:** `npm run release` on Windows, then
+  `npm run release -- --verify` before and after publishing the draft.
 
 ## Where this list comes from
 
@@ -29,7 +42,7 @@ translated into English. The checkup covered:
 - the four tests that are skipped on purpose, and the README's known
   limitations.
 
-## v1.1.2: correctness and security
+## v1.1.2: correctness and security (done)
 
 A patch release: no new features, so a user who updates notices only that the
 numbers are right.
@@ -61,7 +74,7 @@ Suggested order:
    check to the release script, so that this release does not repeat the
    problem.
 
-## v1.2.0: know what every session is doing
+## v1.2.0: know what every session is doing (done)
 
 The point of a multi-session manager is that you do not have to watch every
 pane. Today that holds only for local sessions, and only for the permission
@@ -89,7 +102,8 @@ path, so a remote session gets end-of-turn alerts as soon as both are done.
 
 ## Later
 
-Accepted, but not scheduled:
+Accepted, but not scheduled. #29, #30 and #31 are done; #32 has its
+plumbing and waits for a signing identity.
 
 - [#31](https://github.com/Tha-Nixo/ClaudeCodeManager/issues/31) Upgrade
   Electron 43 → 45. **Deadline:** before Electron 46 ships, when 43 leaves the
