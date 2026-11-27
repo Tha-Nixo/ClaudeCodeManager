@@ -31,34 +31,90 @@ export interface FuzzyResult {
   positions: number[]
 }
 
+/**
+ * A character as matching sees it: lowercase, without accents.
+ *
+ * `citta` must find `città`, and `İstanbul` must find itself (#29). Folding
+ * decomposes (NFD) and drops the combining marks, so 'à' becomes 'a' and the
+ * Turkish 'İ' becomes 'i'. It can change the length of a string, which is why
+ * fold() keeps a map back to the original indices.
+ */
+export function foldChar(ch: string): string {
+  return ch.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase()
+}
+
+interface Folded {
+  text: string
+  /**
+   * For each unit of `text`, the index of the unit it came from in the original.
+   * Null when folding kept every index (all ASCII, the common case).
+   */
+  map: number[] | null
+}
+
+// eslint-disable-next-line no-control-regex
+const NON_ASCII = /[^\x00-\x7f]/
+
+/** Folds a string code point by code point, remembering where each unit came from. */
+export function fold(text: string): Folded {
+  // The picker searches on every key press, over thousands of paths, most of
+  // them plain ASCII: those need neither normalize() nor a map.
+  if (!NON_ASCII.test(text)) return { text: text.toLowerCase(), map: null }
+
+  const parts: string[] = []
+  const map: number[] = []
+  let index = 0
+  for (const cp of text) {
+    const folded = cp.charCodeAt(0) < 0x80 ? cp.toLowerCase() : foldChar(cp)
+    if (folded.length === cp.length) {
+      // Same length (plain letters, emoji): unit for unit, so a surrogate pair
+      // keeps two distinct positions.
+      for (let j = 0; j < folded.length; j++) map.push(index + j)
+    } else {
+      // Shorter or longer ('à' from a decomposed pair, a ligature): every
+      // folded unit points at the start of the original character.
+      for (let j = 0; j < folded.length; j++) map.push(index)
+    }
+    parts.push(folded)
+    index += cp.length
+  }
+  return { text: parts.join(''), map }
+}
+
 export function fuzzyMatch(pattern: string, text: string): FuzzyResult | null {
   if (pattern.length === 0) return { score: 0, positions: [] }
-  if (pattern.length > text.length) return null
 
-  const lowerPattern = pattern.toLowerCase()
-  // toLowerCase() can LENGTHEN strings (e.g. 'İ' becomes two code units),
-  // in which case indices found in lowerText would be invalid on text.
-  // When lengths diverge, fall back to case-sensitive matching rather than reading out of bounds.
-  const lowered = text.toLowerCase()
-  const lowerText = lowered.length === text.length ? lowered : text
+  // Both sides folded the same way: positions are found in the folded text and
+  // reported in the original one, so the highlight stays on the right letters.
+  const query = fold(pattern).text
+  const folded = fold(text)
+  if (query.replace(/ /g, '').length > folded.text.length) return null
+  const origin = (i: number): number => (folded.map ? folded.map[i] : i)
 
   // Basename start: matches from this index onwards receive a bonus.
   const lastSep = Math.max(text.lastIndexOf('\\'), text.lastIndexOf('/'))
   const baseStart = lastSep + 1
 
-  /** Scans the pattern matching each character starting from `from`. */
+  /** Scans the pattern matching each character starting from original index `from`. */
   const scan = (from: number): FuzzyResult | null => {
     const positions: number[] = []
     let score = 0
-    let textIndex = from
+    let textIndex = folded.map ? folded.map.findIndex((orig) => orig >= from) : from
+    if (textIndex === -1) return null
     let previousMatch = -1
 
-    for (let p = 0; p < lowerPattern.length; p++) {
-      const ch = lowerPattern[p]
+    for (let p = 0; p < query.length; p++) {
+      const ch = query[p]
       if (ch === ' ') continue
 
-      const found = lowerText.indexOf(ch, textIndex)
-      if (found === -1) return null
+      let foundFolded = folded.text.indexOf(ch, textIndex)
+      // A ligature folds into two letters of one character: the second letter
+      // must land on a later character, or the highlight would repeat.
+      while (foundFolded !== -1 && origin(foundFolded) <= previousMatch) {
+        foundFolded = folded.text.indexOf(ch, foundFolded + 1)
+      }
+      if (foundFolded === -1) return null
+      const found = origin(foundFolded)
 
       score += SCORE_MATCH
 
@@ -81,7 +137,7 @@ export function fuzzyMatch(pattern: string, text: string): FuzzyResult | null {
 
       positions.push(found)
       previousMatch = found
-      textIndex = found + 1
+      textIndex = foundFolded + 1
     }
 
     // On equal matches, prefer shorter paths: almost always closer to what was intended.
