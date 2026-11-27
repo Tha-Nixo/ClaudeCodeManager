@@ -1,9 +1,16 @@
 import type { MonitorPane, MonitorState } from '@shared/types'
 import { formatCost, formatTokens } from '../usage/UsagePanel'
 
+/**
+ * Contents of the monitor panel.
+ *
+ * The same component draws the docked drawer and the detached window: only
+ * the frame around it changes. It knows neither of them; it just receives the
+ * state, so it cannot diverge between the two containers.
+ */
 interface MonitorPanelProps {
   state: MonitorState | null
-  /** Omitted when rendered in detached window. */
+  /** Absent in the detached window, which cannot give focus to a pane. */
   onFocusPane?: (paneId: string) => void
 }
 
@@ -54,6 +61,8 @@ function Row({
   onFocus?: (paneId: string) => void
 }): React.JSX.Element {
   const usage = pane.usage
+  // Without a known window no percentage is shown: an invented number would be
+  // worse than no number.
   const fill =
     usage && usage.contextWindow > 0
       ? Math.min(100, Math.round((usage.contextTokens / usage.contextWindow) * 100))

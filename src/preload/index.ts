@@ -1,11 +1,11 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { CmApi, ListDirResult } from '@shared/api'
+import { DEVTOOLS_ARG } from '@shared/devtools'
 import type { ThemeCatalog } from '@shared/theme'
 import type {
   AppConfig,
   CreateSessionResult,
   FolderCandidate,
-  FolderInfo,
   IndexKind,
   IndexStatus,
   LaunchOptions,
@@ -40,7 +40,6 @@ const api: CmApi = {
     resize: (id: string, cols: number, rows: number): void =>
       ipcRenderer.send('pty:resize', id, cols, rows),
     kill: (id: string): Promise<void> => ipcRenderer.invoke('pty:kill', id),
-    scrollback: (id: string): Promise<string> => ipcRenderer.invoke('pty:scrollback', id),
 
     onData: (cb: (e: PtyDataEvent) => void): (() => void) => {
       const listener = (_e: unknown, payload: PtyDataEvent): void => cb(payload)
@@ -69,8 +68,6 @@ const api: CmApi = {
     search: (query: string): Promise<FolderCandidate[]> =>
       ipcRenderer.invoke('folders:search', query),
     list: (path: string): Promise<ListDirResult> => ipcRenderer.invoke('folders:list', path),
-    drives: (): Promise<string[]> => ipcRenderer.invoke('folders:drives'),
-    info: (path: string): Promise<FolderInfo> => ipcRenderer.invoke('folders:info', path),
     favorites: (): Promise<string[]> => ipcRenderer.invoke('folders:favorites'),
     toggleFavorite: (path: string): Promise<string[]> =>
       ipcRenderer.invoke('folders:toggleFavorite', path)
@@ -165,7 +162,8 @@ const api: CmApi = {
     toggleFullscreen: (): void => ipcRenderer.send('win:toggle-fullscreen'),
     minimize: (): void => ipcRenderer.send('win:minimize'),
     quit: (): void => ipcRenderer.send('win:quit'),
-    toggleDevTools: (): void => ipcRenderer.send('win:toggle-devtools')
+    toggleDevTools: (): void => ipcRenderer.send('win:toggle-devtools'),
+    devToolsAllowed: process.argv.includes(DEVTOOLS_ARG)
   }
 }
 

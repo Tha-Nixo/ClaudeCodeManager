@@ -1,5 +1,6 @@
 import { join } from 'node:path'
 import { BrowserWindow, app, screen } from 'electron'
+import { devToolsPreferences } from '../dev/devtools'
 import { readJson, writeJsonAtomic } from '../store/config'
 
 /**
@@ -108,7 +109,8 @@ export function openMonitorWindow(isDev: boolean): void {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
-      spellcheck: false
+      spellcheck: false,
+      ...devToolsPreferences()
     }
   })
 

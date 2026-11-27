@@ -9,13 +9,18 @@ interface PaneProps {
   meta: SessionMeta
   rect: PaneLayout
   focused: boolean
+  /** This pane is the one being dragged. */
   dragging: boolean
+  /** The search bar is open on this pane. */
   searching: boolean
   onCloseSearch: () => void
   index: number
   onFocus: () => void
   onClose: () => void
+  /** Closes this pane and opens the folder picker: offered when launch failed. */
+  onReplace: () => void
   onSlotReady: (slot: HTMLDivElement) => void
+  /** Drag from the header: moves floating panes, reorders tiled ones. */
   onHeaderDragStart: (e: React.PointerEvent) => void
   onFloatResizeStart: (e: React.PointerEvent) => void
 }
@@ -30,12 +35,15 @@ export function Pane({
   index,
   onFocus,
   onClose,
+  onReplace,
   onSlotReady,
   onHeaderDragStart,
   onFloatResizeStart
 }: PaneProps): React.JSX.Element {
   const notified = useRef(false)
 
+  // A callback ref instead of useEffect: the slot must be reported the instant
+  // it enters the DOM, because that is when the terminal can be measured.
   const slotRef = useCallback(
     (el: HTMLDivElement | null) => {
       if (el && !notified.current) {
@@ -49,6 +57,11 @@ export function Pane({
   const remote = meta.launch.remote
   const dotClass = `cm-pane__dot cm-pane__dot--${meta.status}`
 
+  // The registry of live sessions is on the local computer; a remote session
+  // writes its own on the server, so it never arrives here. Saying "ready"
+  // would be a claim we cannot check: while the connection is alive the pane
+  // shows "remote", and the states that depend on the local ssh process
+  // (starting, exited, error) stay true.
   const statusText =
     remote && meta.status === 'running' ? 'remote' : STATUS_LABEL[meta.status]
 
@@ -56,6 +69,9 @@ export function Pane({
 
   return (
     <section
+      // Identifies the pane in the DOM: end-to-end tests use it to follow a pane
+      // while it moves, which its position cannot do, because two different
+      // arrangements can have the same geometry.
       data-pane-id={meta.paneId}
       className={[
         'cm-pane',
@@ -116,6 +132,13 @@ export function Pane({
           <div className="cm-notice">
             <div className="cm-notice__title">Unable to launch terminal</div>
             <div>{meta.error}</div>
+            <button
+              className="cm-chip"
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={onReplace}
+            >
+              Choose a folder…
+            </button>
           </div>
         )}
       </div>

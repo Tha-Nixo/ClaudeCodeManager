@@ -170,6 +170,12 @@ extracted from the changelog.
 `npm run release -- --tidy` cleans up and organizes the current version directory
 without bumping version numbers or git tags: useful after a manual `npm run dist`.
 
+`npm run release -- --verify [<version>]` checks a release on GitHub: that it
+is attached to the `v<version>` tag, that the tag points at the same commit as
+the local one, and that `latest.yml` and the installer match. Run it before
+publishing the draft and again after. Release 1.1.1 went live on a tag GitHub
+made up, and nothing complained.
+
 With `GH_TOKEN` set in your environment, the script also uploads release assets
 to GitHub as a **draft**: it must be reviewed and published manually. As long
 as it remains a draft, no clients receive it—by design, since auto-updates reach
@@ -183,6 +189,7 @@ Useful environment variables during development:
 | `CM_WINDOWED=1` | Launch in windowed mode instead of fullscreen |
 | `CM_DEV_BRIDGE=1` | Enable the development bridge (see below) |
 | `CM_UPDATE_DEV=1` | Enable updates during development, reading `dev-app-update.yml` |
+| `CM_DEVTOOLS=1` | Allow DevTools (F12) in a packaged build, to diagnose a problem on an installed copy. In development they are always on. |
 
 `CM_UPDATE_DEV` exists because nobody notices a broken update pipeline until
 release day. With a `dev-app-update.yml` pointing to a local feed, you can test

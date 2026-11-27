@@ -140,6 +140,11 @@ for (const { text } of MAIN) {
 const sorted = (s: Iterable<string>): string[] => [...s].sort()
 
 describe('IPC Contract: source extraction', () => {
+  /**
+   * Without this safety net, a regex that stops matching (a comma in the style,
+   * a renamed `ipcMain`, a moved file) would make every following check pass
+   * on nothing, and the suite would stay green while checking nothing at all.
+   */
   it('finds channels on both sides', () => {
     assert.ok(HANDLE.size > 0, 'no ipcMain.handle found in src/main/ipc.ts')
     assert.ok(ON.size > 0, 'no ipcMain.on found in src/main/ipc.ts')
@@ -151,6 +156,9 @@ describe('IPC Contract: source extraction', () => {
   })
 
   it('does not register the same channel with both handle and on', () => {
+    // The two registrations would coexist without errors, but the channel would
+    // answer one way or the other depending on the caller: behavior nobody can
+    // work out by reading the preload.
     const dupes = sorted(HANDLE).filter((c) => ON.has(c))
     assert.deepEqual(dupes, [], `channels registered twice with different handlers: ${dupes.join(', ')}`)
   })
@@ -163,6 +171,9 @@ describe('IPC Contract: renderer requests to main', () => {
 
     for (const channel of sorted(INVOKE)) {
       if (HANDLE.has(channel)) continue
+      // `invoke` on a channel registered with `on` does not end in a visible error:
+      // the promise never resolves, and the part of the interface waiting for it
+      // keeps loading forever.
       if (ON.has(channel)) mismatched.push(channel)
       else missing.push(channel)
     }
@@ -185,6 +196,8 @@ describe('IPC Contract: renderer requests to main', () => {
 
     for (const channel of sorted(SEND)) {
       if (ON.has(channel)) continue
+      // `send` to an `ipcMain.handle` reaches nobody and raises nothing: the user's
+      // command vanishes without a trace.
       if (HANDLE.has(channel)) mismatched.push(channel)
       else missing.push(channel)
     }
@@ -213,13 +226,68 @@ describe('IPC Contract: events from main to renderer', () => {
   })
 })
 
+/**
+ * Members of the preload API, as `group.member`, read from the object literal
+ * in src/preload/index.ts: groups sit at two spaces of indentation, members at four.
+ */
+function preloadMembers(source: string): string[] {
+  const members: string[] = []
+  let group: string | null = null
+  // A Windows checkout has CRLF line endings: '\r' would break the '$' anchors.
+  for (const line of source.split(/\r?\n/)) {
+    const opened = /^  (\w+): \{$/.exec(line)
+    if (opened) {
+      group = opened[1]
+      continue
+    }
+    if (/^  \}/.test(line)) {
+      group = null
+      continue
+    }
+    const member = /^    (\w+):/.exec(line)
+    if (group && member) members.push(`${group}.${member[1]}`)
+  }
+  return members
+}
+
+/** Every .ts/.tsx file under src/renderer, comments stripped. */
+function rendererSources(dir = join(ROOT, 'src', 'renderer')): string {
+  let text = ''
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = join(dir, entry.name)
+    if (entry.isDirectory()) text += rendererSources(full)
+    else if (/\.tsx?$/.test(entry.name)) text += `${readClean(full)}\n`
+  }
+  return text
+}
+
+const API = preloadMembers(PRELOAD)
+const RENDERER = rendererSources()
+
 const ORPHANS = sorted([...HANDLE, ...ON]).filter((c) => !INVOKE.has(c) && !SEND.has(c))
 
-describe('IPC Contract: main channels unused by preload', () => {
-  it.skip(
-    ORPHANS.length === 0
-      ? 'no main channels left unused'
-      : `handled in main but never used by preload: ${ORPHANS.join(', ')}`,
-    () => {}
-  )
+/**
+ * Issue #23: three preload APIs (pty.scrollback, folders.info, folders.drives)
+ * were exposed and handled in main, but nothing in the renderer called them.
+ * Each one is attack surface on the renderer boundary and code to maintain, so
+ * an API the renderer does not use is removed, not kept "just in case".
+ */
+describe('IPC Contract: nothing exposed that nobody uses (issue #23 regression)', () => {
+  it('reads the preload API', () => {
+    assert.ok(API.length > 20, `only found ${API.length} preload members`)
+    assert.ok(API.includes('pty.create'), 'pty.create not found: has the preload layout changed?')
+  })
+
+  it('every preload API is used by the renderer', () => {
+    // `window.cm.ssh\n  .sessionsFor(...)`: a call may break across lines.
+    const unused = API.filter((member) => {
+      const [group, name] = member.split('.')
+      return !new RegExp(`\\bcm\\s*\\.\\s*${group}\\s*\\.\\s*${name}\\b`).test(RENDERER)
+    })
+    assert.deepEqual(unused, [], `exposed by preload but never used by the renderer: ${unused.join(', ')}`)
+  })
+
+  it('every main channel is used by preload', () => {
+    assert.deepEqual(ORPHANS, [], `handled in main but never used by preload: ${ORPHANS.join(', ')}`)
+  })
 })

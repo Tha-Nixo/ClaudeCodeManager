@@ -29,6 +29,7 @@ import { paneStatusFromLive, type SessionMeta } from './state/types'
 import { applyTheme } from './theme/apply'
 import { UsagePanel, formatCost, formatTokens } from './usage/UsagePanel'
 import { basename, isUsefulTitle } from './util/path'
+import { launchErrorMessage } from './util/ipcError'
 import {
   destroySession,
   ensureSession,
@@ -165,10 +166,7 @@ export default function App(): React.JSX.Element {
           })
         )
         .catch((err: unknown) =>
-          patchSession(paneId, {
-            status: 'error',
-            error: err instanceof Error ? err.message : String(err)
-          })
+          patchSession(paneId, { status: 'error', error: launchErrorMessage(err) })
         )
     },
     [patchSession]
@@ -397,7 +395,7 @@ export default function App(): React.JSX.Element {
   // Custom bindings overlay the default map. Recomputed only when changed:
   // reinstalling the event listener on every render is wasteful.
   const { keymap, problems: keymapProblems } = useMemo(
-    () => resolveKeymap(config?.keymap),
+    () => resolveKeymap(config?.keymap, { devTools: window.cm.win.devToolsAllowed }),
     [config?.keymap]
   )
 
@@ -647,6 +645,10 @@ export default function App(): React.JSX.Element {
         sessions={sessions}
         onFocusPane={(id) => setLayout((prev) => setFocus(prev, id))}
         onClosePane={closePane}
+        onReplacePane={(paneId) => {
+          closePane(paneId)
+          setSelectorOpen(true)
+        }}
         onSlotReady={onSlotReady}
         onSetRatio={(path, ratio) => setLayout((prev) => setRatio(prev, path, ratio))}
         onMoveFloating={(id, x, y) => setLayout((prev) => updateFloating(prev, id, { x, y }))}

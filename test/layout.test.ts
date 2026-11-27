@@ -21,22 +21,27 @@ import {
 import type { DropSide, Layout, LayoutNode, SplitDir } from '../src/renderer/src/compositor/layout'
 
 /**
- * Layout tree invariants.
+ * Invariants of the layout tree.
  *
- * The tree manages open sessions: if an id appears twice the same terminal
- * renders in two places competing for one PTY; if focus points to a deleted pane
- * keystrokes are lost; if a ratio becomes non-finite both split children disappear
- * (geometry.ts calculates widths with Math.round(usable * ratio)).
+ * The tree is the only thing holding the open sessions together: if an id
+ * appears twice, the same terminal is drawn in two places and the two panes
+ * fight over the same PTY; if focus points to a pane that no longer exists,
+ * the keyboard stops reaching anything; if a ratio becomes non-finite, both
+ * children of the split vanish from the screen (geometry.ts computes widths
+ * with Math.round(usable * ratio)).
  *
- * Tree invariants are checked after EVERY operation.
+ * None of these breakages raises an error: the app stays alive and wrong.
+ * That is why the shape of the tree is checked after EVERY operation, not just
+ * at the end.
  */
 
+/** Limits documented in layout.ts; they are not exported, so they are repeated here. */
 const MIN_RATIO = 0.1
 const MAX_RATIO = 0.9
 
 /**
- * Checks all invariants of a layout tree.
- * Throws with an informative message indicating failure context.
+ * Checks all the invariants of a layout at once.
+ * Throws with a message saying which operation broke what.
  */
 function verifyTree(layout: Layout, context = ''): void {
   const where = context ? ` [${context}]` : ''
@@ -54,6 +59,8 @@ function verifyTree(layout: Layout, context = ''): void {
       return
     }
     assert.equal(node.kind, 'split', `unknown node kind at '${path}'${where}`)
+    // A split missing a child is the typical way a wrong removal shows up: half
+    // the screen stays empty and the panes below it cannot be reached.
     assert.ok(node.a != null, `split missing child a at '${path}'${where}`)
     assert.ok(node.b != null, `split missing child b at '${path}'${where}`)
     assert.ok(
@@ -73,14 +80,14 @@ function verifyTree(layout: Layout, context = ''): void {
   const floating = layout.floating.map((f) => f.id)
   const all = [...inTiling, ...floating]
 
-  // Duplicate id check
+  // A repeated id means two panes on the same terminal.
   assert.equal(
     new Set(all).size,
     all.length,
     `duplicate id among ${JSON.stringify(all)}${where}`
   )
 
-  // Focused pane must exist
+  // Focus must be reachable, otherwise the keyboard types into the void.
   if (layout.focused !== null) {
     assert.ok(
       all.includes(layout.focused),
@@ -88,7 +95,7 @@ function verifyTree(layout: Layout, context = ''): void {
     )
   }
 
-  // Zoomed pane must exist
+  // A phantom zoom hides every pane and shows none.
   if (layout.zoomed !== null) {
     assert.ok(
       all.includes(layout.zoomed),
@@ -96,7 +103,8 @@ function verifyTree(layout: Layout, context = ''): void {
     )
   }
 
-  // findPath and collectLeaves consistency
+  // findPath and collectLeaves must tell the same story: dragging and resizing
+  // trust the paths.
   for (const id of inTiling) {
     const path = findPath(layout.root, id)
     assert.notEqual(path, null, `findPath did not find '${id}' present in tree${where}`)
@@ -116,7 +124,7 @@ function verifyTree(layout: Layout, context = ''): void {
 
 const RECTANGLE = { x: 100, y: 60, w: 800, h: 400 }
 
-/** Builds a tiling adding panes sequentially as the app does. */
+/** Builds a tiling by adding panes one after the other, as the app does. */
 function buildTiling(ids: string[], dir: SplitDir = 'h'): Layout {
   let layout: Layout = EMPTY_LAYOUT
   for (const id of ids) layout = addPane(layout, id, dir)
@@ -126,6 +134,8 @@ function buildTiling(ids: string[], dir: SplitDir = 'h'): Layout {
 const SIDES: DropSide[] = ['left', 'right', 'top', 'bottom', 'center']
 
 describe('layout: invariant verification detects corrupted tree', () => {
+  // If verifyTree passed on anything, the rest of this file would be green for
+  // nothing.
   it('rejects duplicate id, broken split, phantom focus, and NaN ratio', () => {
     const duplicateA: Layout = {
       root: { kind: 'split', dir: 'h', ratio: 0.5, a: { kind: 'leaf', id: 'a' }, b: { kind: 'leaf', id: 'a' } },
@@ -154,13 +164,14 @@ describe('layout: invariant verification detects corrupted tree', () => {
     } as unknown as Layout
     assert.throws(() => verifyTree(brokenRatio), /non-finite ratio/)
 
+    // And a healthy tree must not raise false alarms.
     verifyTree(buildTiling(['a', 'b', 'c']))
   })
 })
 
 // --- Randomized sequences ---------------------------------------------------
 
-/** Seeded PRNG for reproducible sequences. */
+/** Seeded pseudo-random generator: the sequence is always the same. */
 function prng(seed: number): () => number {
   let s = seed >>> 0
   return () => {
@@ -171,8 +182,14 @@ function prng(seed: number): () => number {
   }
 }
 
+/** Ids that do not exist: every operation must ignore them without touching anything. */
 const PHANTOM_IDS = ['phantom', '', 'undefined', 'null', '../../other', 'r999']
+/**
+ * Plausible paths and garbage paths, like those that can arrive from a drag
+ * started before the tree changed.
+ */
 const PATHS = ['', 'a', 'b', 'ab', 'ba', 'aaa', 'bbbb', 'zz', 'a b', '../..']
+/** Including the values a gutter drag produces past the edges. */
 const RATIOS = [0, 0.05, 0.25, 0.5, 0.75, 1, 1.5, -3, Infinity, -Infinity]
 const OPERATIONS = [
   'addPane',
@@ -203,6 +220,7 @@ function mixedSequence(seed: number, steps: number, outcome: Outcome): void {
     const present = allPanes(layout)
     outcome.maxPanes = Math.max(outcome.maxPanes, present.length)
 
+    // A known id almost always, an invented one now and then.
     const target = (): string =>
       present.length > 0 && rand() < 0.85 ? pick(present) : pick(PHANTOM_IDS)
 
@@ -274,8 +292,12 @@ function mixedSequence(seed: number, steps: number, outcome: Outcome): void {
     const where = `seed ${seed}, step ${step}, ${op}(${usedIds.join(', ')})`
     verifyTree(layout, where)
 
+    // The functions are declared pure, and the layout ends up in layout.json and
+    // in React state: an in-place change would redraw nothing.
     assert.deepEqual(previous, snapshot, `${op} mutated input layout [${where}]`)
 
+    // An id that does not exist must not be able to change anything: this is the
+    // case of a session closed while its context menu was still open.
     if (usedIds.length > 0 && usedIds.some((id) => !hasPane(previous, id))) {
       assert.deepEqual(layout, snapshot, `${op} on non-existent id modified layout [${where}]`)
     }
@@ -285,6 +307,7 @@ function mixedSequence(seed: number, steps: number, outcome: Outcome): void {
     }
   }
 
+  // Close everything: nothing may be left at the end, and no step may throw.
   let safety = 0
   while (allPanes(layout).length > 0) {
     layout = removePane(layout, allPanes(layout)[0])
@@ -302,6 +325,8 @@ describe('layout: randomized mixed sequences', () => {
     const outcome: Outcome = { changes: new Map(), maxPanes: 0 }
     for (const seed of [1, 7, 12345, 987654321, 42]) mixedSequence(seed, 400, outcome)
 
+    // The sequence must really have exercised the tree: without these two checks,
+    // a change of weights would turn the test green without proving anything.
     assert.ok(outcome.maxPanes >= 6, `tiling too small: ${outcome.maxPanes} panes`)
     for (const op of OPERATIONS) {
       assert.ok((outcome.changes.get(op) ?? 0) > 0, `operation ${op} never produced changes`)
@@ -344,6 +369,7 @@ describe('layout: pane removal', () => {
     layout = removePane(layout, 'a')
     verifyTree(layout, 'empty tiling with floating pane alive')
     assert.equal(layout.root, null)
+    // Focus must fall back on the only pane left, not into the void.
     assert.equal(layout.focused, 'b')
     assert.equal(allPanes(layout).length, 1)
   })
@@ -363,6 +389,8 @@ describe('layout: pane removal', () => {
     layout = toggleZoom(layout, 'b')
     assert.equal(layout.zoomed, 'b')
     layout = removePane(layout, 'b')
+    // With zoomed on a closed pane the stage would stay black: geometry.ts hides
+    // every pane except the zoomed one, which is gone.
     verifyTree(layout, 'closing zoomed pane')
     assert.equal(layout.zoomed, null)
   })
@@ -374,6 +402,8 @@ describe('layout: setRatio boundaries', () => {
   const withSplit = (): Layout => buildTiling(['a', 'b'])
 
   it('clamps ratio within usable bounds', () => {
+    // Past these limits one of the two panes becomes a useless strip: dragging
+    // the gutter beyond the edge must simply stop.
     for (const [input, expected] of [
       [0, MIN_RATIO],
       [-0.5, MIN_RATIO],
@@ -392,6 +422,11 @@ describe('layout: setRatio boundaries', () => {
   })
 
   it('setRatio with NaN does not break split', () => {
+    // Found while writing this suite: the clamp was
+    // Math.min(0.9, Math.max(0.1, ratio)), which returns NaN for NaN. The saved
+    // ratio became NaN, geometry.ts computed Math.round(usable * NaN) => NaN,
+    // both children of the split vanished from the screen, and the value ended up
+    // in layout.json too.
     const after = setRatio(withSplit(), '', NaN)
     const root = after.root as Extract<LayoutNode, { kind: 'split' }>
     assert.ok(Number.isFinite(root.ratio), `ratio became ${root.ratio}`)
@@ -403,12 +438,18 @@ describe('layout: setRatio boundaries', () => {
     assert.deepEqual(setRatio(EMPTY_LAYOUT, '', 0.3), EMPTY_LAYOUT)
 
     const two = withSplit()
+    // A path deeper than the tree: it happens when a gutter drag goes on after
+    // the pane below was closed.
     for (const path of ['a', 'b', 'aaa', 'bbbbbb']) {
       assert.deepEqual(setRatio(two, path, 0.3), two, `path '${path}'`)
     }
   })
 
   it('invalid path does not resize another split', () => {
+    // Found while writing this suite: nodeAt and replaceAt treated every
+    // character other than 'a' as 'b' (step === 'a' ? a : b). A path the app never
+    // emits, such as 'z', was followed down to child b and changed its ratio: the
+    // request was not rejected, it resized another split.
     const layout = buildTiling(['a', 'b', 'c'])
     assert.deepEqual(setRatio(layout, 'z', 0.3), layout)
   })
@@ -427,6 +468,8 @@ describe('layout: setRatio boundaries', () => {
 
 describe('layout: movePaneTo (drag & drop)', () => {
   it('inserts pane at correct side without duplication', () => {
+    // The order of the leaves is the order on screen: getting it wrong means
+    // dropping on the left and seeing the pane appear on the right.
     const cases: [DropSide, string[], SplitDir][] = [
       ['left', ['c', 'a', 'b'], 'h'],
       ['right', ['a', 'c', 'b'], 'h'],
@@ -477,6 +520,8 @@ describe('layout: movePaneTo (drag & drop)', () => {
   })
 
   it('dragging only tiled pane onto floating pane does not lose it', () => {
+    // Without the check on detached.root the tiling would stay empty and the
+    // dragged pane would land nowhere: a lost session.
     let layout = buildTiling(['a', 'b'])
     layout = toggleFloat(layout, 'b', RECTANGLE)
     const after = movePaneTo(layout, 'a', 'b', 'left')
@@ -497,6 +542,8 @@ describe('layout: movePaneTo (drag & drop)', () => {
   })
 
   it('center swap is disabled for floating panes', () => {
+    // A floating pane holds no position in the tree: swapping it would duplicate
+    // it or make it vanish.
     let layout = buildTiling(['a', 'b'])
     layout = toggleFloat(layout, 'b', RECTANGLE)
     assert.deepEqual(movePaneTo(layout, 'b', 'a', 'center'), layout)
@@ -564,6 +611,8 @@ describe('layout: floating panes', () => {
 
     layout = setFocus(layout, 'b')
     verifyTree(layout, 'focus on floating pane')
+    // Without raising it, the active pane would stay covered and you would type
+    // blind into a terminal you cannot see.
     assert.ok(zIndex(layout, 'b') > zIndex(layout, 'c'), 'active floating pane should raise to top')
   })
 
@@ -626,6 +675,7 @@ describe('layout: focus and zoom', () => {
     const on = toggleZoom(layout, 'a')
     assert.equal(on.zoomed, 'a')
     assert.equal(toggleZoom(on, 'a').zoomed, null)
+    // Zooming another pane replaces the zoom, it does not add one.
     assert.equal(toggleZoom(on, 'b').zoomed, 'b')
   })
 })
@@ -638,6 +688,8 @@ describe('layout: swapPanes', () => {
     const after = swapPanes(layout, 'a', 'c')
     verifyTree(after, 'swapPanes')
     assert.deepEqual(collectLeaves(after.root), ['c', 'b', 'a'])
+    // Two swaps bring back the starting state: position is the only thing that
+    // changes.
     assert.deepEqual(swapPanes(after, 'a', 'c'), layout)
   })
 
@@ -684,6 +736,8 @@ describe('layout: operations on empty layout', () => {
   })
 
   it('EMPTY_LAYOUT remains empty and immutable', () => {
+    // It is an exported constant: if a function changed it in place, every later
+    // launch would start with the panes of the previous session.
     assert.deepEqual(EMPTY_LAYOUT, EMPTY)
   })
 })

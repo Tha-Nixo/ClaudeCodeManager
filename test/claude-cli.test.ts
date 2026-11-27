@@ -1,26 +1,31 @@
-import { mkdtempSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { mkdtempSync, writeFileSync } from 'node:fs'
+import { homedir, tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { buildClaudeArgs, expectedClaudeSessionId } from '../src/main/claude/cli'
-import { encodeProjectDir, normalizePath } from '../src/main/claude/paths'
+import {
+  encodeProjectDir,
+  globalConfigFile,
+  normalizePath,
+  trustedFolders
+} from '../src/main/claude/paths'
 import type { LaunchOptions } from '../src/shared/types'
 
 /**
- * Launch options arrive from renderer (untrusted source):
- * any value surviving validation reaches the `claude` command line.
- * Weak validation would allow unintended flags to execute (e.g.
- * `--dangerously-skip-permissions`). These tests verify the contract:
- * only allowed values pass, everything else is discarded.
+ * Launch options come from the renderer, which is not a trusted source: any
+ * value that survives validation ends up on the `claude` command line. Weak
+ * validation here is not a cosmetic defect, it is a way to run flags the user
+ * never chose (for example `--dangerously-skip-permissions`). These tests pin
+ * the contract: only what is on the list gets through, everything else is
+ * dropped.
  */
-
 const NEW_ID = '11111111-2222-4333-8444-555555555555'
 const RESUMED_ID = '550e8400-e29b-41d4-a716-446655440000'
-/** Temp directory: no tests depend on personal paths. */
+/** Temporary folder: no test may depend on personal paths. */
 const CWD = mkdtempSync(join(tmpdir(), 'cm-cli-'))
 
-/** Default arguments produced without special options. */
+/** Arguments produced when nothing special is asked for. */
 const BASE = ['--session-id', NEW_ID]
 
 function build(opts: Partial<LaunchOptions>): string[] {
@@ -34,41 +39,43 @@ function valueOfFlag(args: string[], flag: string): string | undefined {
 }
 
 /**
- * Hostile or malformed values from compromised renderer, manual config,
- * or incompatible future layout files.
+ * Values no interface produces, but that a compromised renderer, a
+ * hand-written configuration or a layout saved by a future version may well
+ * contain.
  */
 const HOSTILE_VALUES: unknown[] = [
-  // Injection attempts
+  // Injection attempts: the most dangerous flag of the CLI, alone and attached
+  // to an otherwise legitimate value.
   '--dangerously-skip-permissions',
   'opus --dangerously-skip-permissions',
   '--permission-mode bypassPermissions',
   '-p',
-  // Shell command separators
+  // Command separators: they only matter if someone brings back a shell.
   'opus; --dangerously-skip-permissions',
   'opus && whoami',
   'opus | tee /tmp/x',
   'opus`whoami`',
   'opus$(whoami)',
-  // Spaces and newlines
+  // Spaces and newlines: they would split the argument into several.
   'opus sonnet',
   ' opus',
   'opus ',
   'opus\nhaiku',
   'opus\r\n--continue',
   'opus\thaiku',
-  // Near-miss variations
+  // Close cousins of a valid value: validation must be exact.
   'OPUS',
   'Opus',
   'opus2',
   'op',
   'default ',
-  // Object prototype keys
+  // Keys that a plain object would answer "present" to.
   '__proto__',
   'constructor',
   'prototype',
   'toString',
   'hasOwnProperty',
-  // Invalid types
+  // Wrong types: malformed JSON or a forgotten field.
   42,
   0,
   -1,
@@ -107,6 +114,8 @@ describe('buildClaudeArgs: allowed values become expected flags', () => {
   })
 
   it("'default' means DO NOT pass flag, not passing the literal 'default'", () => {
+    // If 'default' got through, claude would use a model that does not exist and
+    // the session would not start at all.
     const args = build({ model: 'default', effort: 'default', permissionMode: 'default' })
     assert.deepEqual(args, BASE)
   })
@@ -142,6 +151,8 @@ describe('buildClaudeArgs: disallowed values are rejected, not passed', () => {
   }
 
   it('no hostile combination triggers --dangerously-skip-permissions', () => {
+    // The only way to turn it on would be a validation that lets the string
+    // through: here it is tried on all three fields at once.
     for (const val of HOSTILE_VALUES) {
       const args = build({
         model: val,
@@ -162,6 +173,8 @@ describe('buildClaudeArgs: disallowed values are rejected, not passed', () => {
   })
 
   it('rejected values never leave a flag without value or an empty argument', () => {
+    // A `--model` followed by nothing would make claude eat the next argument
+    // (the prompt) as the model name.
     for (const val of HOSTILE_VALUES) {
       const args = build({
         model: val as never,
@@ -191,6 +204,8 @@ describe('buildClaudeArgs: resumeSessionId accepts only valid UUIDs', () => {
     `{${RESUMED_ID}}`,
     ` ${RESUMED_ID}`,
     `${RESUMED_ID} `,
+    // A trailing newline: in other languages '$' would tolerate it, and the id
+    // would slip into the command line split in two.
     `${RESUMED_ID}\n`,
     `${RESUMED_ID}\r\n`,
     `${RESUMED_ID} --dangerously-skip-permissions`,
@@ -218,6 +233,8 @@ describe('buildClaudeArgs: resumeSessionId accepts only valid UUIDs', () => {
   })
 
   it('expected disk session id always matches id passed to claude', () => {
+    // If the two diverged, the pane would stay disconnected from the registry of
+    // live sessions: no title, no notification.
     for (const id of [RESUMED_ID, ...NON_UUID]) {
       const opts = { cwd: CWD, resumeSessionId: id as never }
       const args = buildClaudeArgs(opts, NEW_ID)
@@ -234,6 +251,7 @@ describe('buildClaudeArgs: resumeSessionId accepts only valid UUIDs', () => {
 })
 
 describe('buildClaudeArgs: --session-id and --resume never appear together', () => {
+  /** Every combination of the options that choose how the session starts. */
   const COMBINATIONS: Partial<LaunchOptions>[] = []
   for (const continueLast of [undefined, false, true]) {
     for (const forkSession of [undefined, false, true]) {
@@ -258,6 +276,8 @@ describe('buildClaudeArgs: --session-id and --resume never appear together', () 
       const args = build(opts)
       const both = args.includes('--session-id') && args.includes('--resume')
       assert.equal(both, false, `combination ${JSON.stringify(opts)} -> ${JSON.stringify(args)}`)
+      // Exactly one of the paths is always taken, otherwise claude would open a
+      // session with an id we do not know.
       const chosen = ['--session-id', '--resume', '--continue'].filter((f) => args.includes(f))
       assert.equal(chosen.length, 1, `combination ${JSON.stringify(opts)}`)
     }
@@ -269,6 +289,7 @@ describe('buildClaudeArgs: --session-id and --resume never appear together', () 
   })
 
   it('--fork-session appears only together with --continue or --resume', () => {
+    // On its own, claude rejects it and the session does not start.
     for (const opts of COMBINATIONS) {
       const args = build(opts)
       if (!args.includes('--fork-session')) continue
@@ -318,6 +339,9 @@ describe('buildClaudeArgs: initial prompt sits at end after --', () => {
   })
 
   it('separator -- appears exactly once, keeping prompt as single argument', () => {
+    // A second '--' before the prompt would make claude read two positional
+    // arguments instead of one. The prompt itself is left out of the count: if
+    // the user types exactly '--', that is text, not a separator.
     for (const initialPrompt of HOSTILE_PROMPTS) {
       const args = build({ initialPrompt, model: 'opus', name: 'name' })
       const beforePrompt = args.slice(0, -1)
@@ -345,6 +369,7 @@ describe('buildClaudeArgs: initial prompt sits at end after --', () => {
   })
 
   it('no argument is ever an empty string', () => {
+    // An empty argument shifts the position of all the others.
     for (const initialPrompt of ['', '  ', ...HOSTILE_PROMPTS]) {
       for (const name of ['', '  ', 'name', '\u0000']) {
         const args = build({ initialPrompt, name, model: 'opus' })
@@ -360,6 +385,8 @@ describe('buildClaudeArgs: initial prompt sits at end after --', () => {
 
 describe('buildClaudeArgs: session name', () => {
   it('strips control characters and stays on single line', () => {
+    // The name ends up in the pane title and in the prompt box: a newline or an
+    // ANSI sequence would mess up the terminal.
     const args = build({ name: 'line one\nline two\r\tend' })
     const name = valueOfFlag(args, '--name')
     assert.equal(name, 'line oneline twoend')
@@ -389,16 +416,48 @@ describe('buildClaudeArgs: session name', () => {
     assert.equal(name?.length, 64)
   })
 
+  /**
+   * Found while writing this suite.
+   *
+   * The cut at 64 used slice(), which counts UTF-16 units: when the 64th place
+   * fell in the middle of a character outside the basic plane (emoji, rare
+   * ideographs) the name ended with half a surrogate. Observed with 63 letters
+   * plus an emoji: the --name value ended with a lone '\uD83D', which is not
+   * valid text and shows as a replacement character in the pane title and in
+   * Claude Code's registry. The cut now counts code points (Array.from).
+   */
   it('clamping at 64 does not split multi-byte characters', () => {
+    // Look for an UNPAIRED surrogate, not any surrogate: a whole emoji contains
+    // two by construction, so looking for all of them would give a test that
+    // could never pass.
     const name = valueOfFlag(build({ name: 'a'.repeat(63) + '🚀' }), '--name') ?? ''
     assert.equal(name.isWellFormed(), true, `name truncated in middle: ${JSON.stringify(name)}`)
     assert.equal(name, 'a'.repeat(63) + '🚀', 'whole character should remain')
 
+    // And the cut must still happen when the name really is too long.
     const long = valueOfFlag(build({ name: '🚀'.repeat(100) }), '--name') ?? ''
     assert.equal(long.isWellFormed(), true, 'no broken surrogate pairs')
     assert.equal(Array.from(long).length, 64, 'clamped to 64 characters')
   })
 
+  /**
+   * Found while writing this suite.
+   *
+   * `name` and `initialPrompt` were the only LaunchOptions fields without a
+   * type check: model, effort and permissionMode go through a list of allowed
+   * values and survive any type, the resume id goes through a regex. With a
+   * non-text value buildClaudeArgs threw
+   *   TypeError: opts.name.replace is not a function
+   *   TypeError: opts.initialPrompt.trim is not a function
+   * and the pane did not open.
+   *
+   * Not a theoretical case: layout.json is openly hand-editable, and
+   * store/layout.ts only checks that `launch` is an object, without looking
+   * inside; ipc.ts too passes the renderer's options to the manager as they
+   * arrive. A `"name": 123` written by mistake into the saved layout made that
+   * pane fail to restore on every launch. A non-text field is now ignored like
+   * every other invalid value, and the session starts anyway.
+   */
   it('non-string name or prompt is ignored gracefully without failing launch', () => {
     for (const name of [42, true, {}, []] as unknown[]) {
       const args = build({ name } as unknown as Partial<LaunchOptions>)
@@ -411,6 +470,7 @@ describe('buildClaudeArgs: session name', () => {
   })
 
   it('missing or null name produces no --name', () => {
+    // These two cases were always handled: they are falsy and get skipped.
     for (const name of [null, undefined] as unknown[]) {
       const args = build({ name } as unknown as Partial<LaunchOptions>)
       assert.deepEqual(args, BASE, `name ${JSON.stringify(name)}`)
@@ -424,11 +484,15 @@ describe('encodeProjectDir: path to transcript folder name', () => {
   })
 
   it('mixed slashes yield same name as backslashes', () => {
+    // Paths come from hand-written configuration files and from history.jsonl,
+    // where both forms live side by side.
     assert.equal(encodeProjectDir('C:/Users/User/Projects'), encodeProjectDir('C:\\Users\\User\\Projects'))
     assert.equal(encodeProjectDir('C:/Users\\User//Projects'), 'C--Users-User-Projects')
   })
 
   it('trailing slash is ignored: resolves to same folder', () => {
+    // Without this normalization the folder's transcripts would not be found,
+    // because Claude Code writes the form without a trailing separator.
     for (const base of ['C:\\Projects\\App', 'D:/work/my project', 'C:\\a']) {
       const expected = encodeProjectDir(base)
       for (const trailing of ['\\', '/', '\\\\', '//', '\\/']) {
@@ -438,6 +502,7 @@ describe('encodeProjectDir: path to transcript folder name', () => {
   })
 
   it('at drive root the separator counts', () => {
+    // 'C:\' is a real folder, 'C:' is the drive: Claude Code writes them differently.
     assert.equal(encodeProjectDir('C:\\'), 'C--')
     assert.equal(encodeProjectDir('C:'), 'C-')
     assert.equal(encodeProjectDir('C:\\\\'), 'C--')
@@ -452,16 +517,22 @@ describe('encodeProjectDir: path to transcript folder name', () => {
   })
 
   it('drive letter preserves case: distinct casing yields distinct names', () => {
+    // Not a cosmetic detail: the name must match, character by character, the
+    // one Claude Code writes, and Claude Code does not normalize case.
     assert.equal(encodeProjectDir('C:\\Projects'), 'C--Projects')
     assert.equal(encodeProjectDir('c:\\Projects'), 'c--Projects')
     assert.notEqual(encodeProjectDir('C:\\Projects'), encodeProjectDir('c:\\Projects'))
   })
 
   it('empty path produces empty name', () => {
+    // Callers must not pass it: the empty name would point at the projects/
+    // folder itself instead of at a project.
     assert.equal(encodeProjectDir(''), '')
   })
 
   it('result is always a safe folder name', () => {
+    // encodeProjectDir is joined to projects/ with join: if a separator or a
+    // '..' survived, a hostile path would get out of that folder.
     const hostile = [
       'C:\\..\\..\\Windows\\System32',
       'C:/../..',
@@ -479,6 +550,7 @@ describe('encodeProjectDir: path to transcript folder name', () => {
     for (const p of hostile) {
       const name = encodeProjectDir(p)
       assert.match(name, /^[A-Za-z0-9-]*$/, `${JSON.stringify(p)} -> ${JSON.stringify(name)}`)
+      // Direct proof: joined to a root, the result never leaves it.
       assert.equal(
         resolve(join(CWD, name)).startsWith(resolve(CWD)),
         true,
@@ -496,6 +568,9 @@ describe('encodeProjectDir: path to transcript folder name', () => {
 
 describe('normalizePath: key for folder deduplication', () => {
   it('different spellings of same folder produce same key', () => {
+    // knownFolders merges history.jsonl and the project directories: if the two
+    // spellings did not collapse, the same folder would show up twice in the
+    // picker, with halved counts.
     const forms = [
       'C:\\Users\\User\\Projects',
       'C:/Users/User/Projects',
@@ -521,11 +596,15 @@ describe('normalizePath: key for folder deduplication', () => {
   })
 
   it('distinct folders remain distinct', () => {
+    // The other side of the coin: an overly aggressive normalization would make
+    // real folders disappear from the list.
     const distinct = ['C:\\a', 'C:\\ab', 'C:\\a\\b', 'C:\\a-b', 'C:\\a b', 'D:\\a']
     assert.equal(new Set(distinct.map(normalizePath)).size, distinct.length)
   })
 
   it('encodeProjectDir is not used for deduplication because it is lossy', () => {
+    // The encoding is lossy: 'a b', 'a_b' and 'a-b' all end up as 'a-b'. Using
+    // it as a key would merge distinct folders into a single entry.
     const distinct = ['C:\\a b', 'C:\\a_b', 'C:\\a-b']
     assert.equal(new Set(distinct.map(encodeProjectDir)).size, 1)
     assert.equal(new Set(distinct.map(normalizePath)).size, 3)
@@ -534,6 +613,56 @@ describe('normalizePath: key for folder deduplication', () => {
   it('applying normalization twice is idempotent', () => {
     for (const p of ['C:/a/b/', 'C:\\', 'C:', '', 'D:/x']) {
       assert.equal(normalizePath(normalizePath(p)), normalizePath(p), JSON.stringify(p))
+    }
+  })
+})
+
+describe('trustedFolders: honors CLAUDE_CONFIG_DIR (issue #20 regression)', () => {
+  /** A config dir holding a .claude.json with the given trust entries. */
+  function configDir(projects: Record<string, { hasTrustDialogAccepted?: boolean }>): string {
+    const dir = mkdtempSync(join(tmpdir(), 'cm-claude-config-'))
+    writeFileSync(join(dir, '.claude.json'), JSON.stringify({ projects }), 'utf8')
+    return dir
+  }
+
+  it('reads .claude.json inside CLAUDE_CONFIG_DIR', () => {
+    const previous = process.env.CLAUDE_CONFIG_DIR
+    try {
+      process.env.CLAUDE_CONFIG_DIR = configDir({
+        'C:/Work/Trusted': { hasTrustDialogAccepted: true },
+        'C:/Work/Asked': { hasTrustDialogAccepted: false }
+      })
+      assert.equal(globalConfigFile(), join(process.env.CLAUDE_CONFIG_DIR, '.claude.json'))
+      const trust = trustedFolders()
+      assert.equal(trust.get(normalizePath('C:\\Work\\Trusted')), true)
+      assert.equal(trust.get(normalizePath('C:\\Work\\Asked')), false)
+    } finally {
+      if (previous === undefined) delete process.env.CLAUDE_CONFIG_DIR
+      else process.env.CLAUDE_CONFIG_DIR = previous
+    }
+  })
+
+  it('does not reuse a cached answer after CLAUDE_CONFIG_DIR changes', () => {
+    const previous = process.env.CLAUDE_CONFIG_DIR
+    try {
+      process.env.CLAUDE_CONFIG_DIR = configDir({ 'D:/one': { hasTrustDialogAccepted: true } })
+      assert.equal(trustedFolders().get(normalizePath('D:/one')), true)
+      process.env.CLAUDE_CONFIG_DIR = configDir({ 'D:/two': { hasTrustDialogAccepted: true } })
+      assert.equal(trustedFolders().get(normalizePath('D:/one')), undefined)
+      assert.equal(trustedFolders().get(normalizePath('D:/two')), true)
+    } finally {
+      if (previous === undefined) delete process.env.CLAUDE_CONFIG_DIR
+      else process.env.CLAUDE_CONFIG_DIR = previous
+    }
+  })
+
+  it('without CLAUDE_CONFIG_DIR, the file sits in the home directory, not in ~/.claude', () => {
+    const previous = process.env.CLAUDE_CONFIG_DIR
+    try {
+      delete process.env.CLAUDE_CONFIG_DIR
+      assert.equal(globalConfigFile(), join(homedir(), '.claude.json'))
+    } finally {
+      if (previous !== undefined) process.env.CLAUDE_CONFIG_DIR = previous
     }
   })
 })

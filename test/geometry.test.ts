@@ -68,12 +68,14 @@ function tiling(n: number, stage: Rect = STAGE): Layout {
  * Regression test for issue #10.
  *
  * Previously no minimum dimension was enforced. Repeatedly splitting the same
- * pane caused widths of 1600, 796, 394, 193, 92, 42, 17, 4 and finally 0: from
- * the 8th split onward the pane had zero width. The session launched and consumed
- * tokens, but the terminal was neither visible nor clickable.
+ * pane gave widths of 1600, 796, 394, 193, 92, 42, 17, 4 and finally 0: from
+ * the 8th split onward the pane was born zero wide. The session really started
+ * and consumed tokens, but the terminal was neither visible nor reachable with
+ * the mouse, and the only way to notice was the bill.
  */
 describe('geometry: minimum pane dimension (issue #10)', () => {
   it('without guard the 8th split still produces a zero-width pane', () => {
+    // The original defect, reproduced: it is the reason canSplit exists.
     let layout = EMPTY_LAYOUT
     for (let i = 1; i <= 9; i++) layout = addPane(layout, `p${i}`, 'h')
 
@@ -100,6 +102,8 @@ describe('geometry: minimum pane dimension (issue #10)', () => {
   })
 
   it('canSplit returns true exactly when actual split stays above threshold', () => {
+    // The guard must be neither wider (unusable panes) nor narrower (splits
+    // refused for no reason) than the split that then happens.
     const twoHorizontal = addPane(addPane(EMPTY_LAYOUT, 'a', 'h'), 'b', 'h')
     for (let w = 0; w <= 600; w++) {
       const widths = tiled(compute(twoHorizontal, { x: 0, y: 0, w, h: 900 })).map((p) => p.w)
@@ -123,6 +127,8 @@ describe('geometry: minimum pane dimension (issue #10)', () => {
     while (splits < maxSplits) {
       const active = layout.focused ? rectOf(layout, layout.focused) : null
       const dir = naturalSplitDir(active)
+      // The same condition as the app: when the guard says no, the session is born
+      // floating, not inside an invisible pane.
       if (active && !canSplit(active, dir)) break
       layout = addPane(layout, `p${splits + 1}`, dir)
       splits++
@@ -138,6 +144,7 @@ describe('geometry: minimum pane dimension (issue #10)', () => {
   })
 
   it('pane just above threshold splits into two usable panes', () => {
+    // The edge case matters more than the others: it is where the guard decides.
     const tight: Rect = { x: 0, y: 0, w: MIN_PANE_W * 2 + GAP, h: MIN_PANE_H * 2 + GAP }
     assert.equal(canSplit(tight, 'h'), true)
     assert.equal(canSplit(tight, 'v'), true)
@@ -179,12 +186,15 @@ describe('geometry: tiling invariants', () => {
   }
 
   it('uses full stage: panes only leave gutters', () => {
+    // A rounding error would leave a permanent dead strip.
     const panes = tiled(compute(tiling(2)))
     const area = panes.reduce((sum, p) => sum + p.w * p.h, 0)
     assert.equal(area, (STAGE.w - GAP) * STAGE.h)
   })
 
   it('offset stage is not treated as if at origin', () => {
+    // The window has a toolbar on top: if the offset is lost, the panes end up
+    // under it.
     const offset: Rect = { x: 120, y: 48, w: 1000, h: 700 }
     for (const p of tiled(compute(tiling(5, offset), offset))) {
       assert.ok(p.x >= offset.x && p.y >= offset.y, `${p.id} goes beyond stage bounds`)
@@ -199,6 +209,8 @@ describe('geometry: tiling invariants', () => {
     { x: 0, y: 0, w: -1600, h: -900 }
   ]) {
     it(`degenerate stage ${degenerate.w}x${degenerate.h} does not produce invalid numbers`, () => {
+      // It really happens: the window gets minimized and the container measures
+      // zero. One NaN here and nothing comes back when it is restored.
       const c = compute(tiling(3, STAGE), degenerate)
       const panes = tiled(c)
       assert.equal(panes.length, 3)
@@ -207,6 +219,7 @@ describe('geometry: tiling invariants', () => {
         for (const val of [p.x, p.y, p.w, p.h]) {
           assert.ok(Number.isFinite(val), `${p.id}: non-finite coordinate`)
         }
+        // No pane can be bigger than the available space.
         assert.ok(p.w <= Math.max(0, degenerate.w), `${p.id} width ${p.w} on stage ${degenerate.w}`)
         assert.ok(p.h <= Math.max(0, degenerate.h), `${p.id} height ${p.h} on stage ${degenerate.h}`)
       }
@@ -221,6 +234,7 @@ describe('geometry: tiling invariants', () => {
 })
 
 describe('geometry: floating panes off-screen', () => {
+  /** A tiling of two panes where the second one has been detached. */
   function withFloating(patch: { x: number; y: number; w: number; h: number }): Layout {
     const base = tiling(2)
     const rect = rectOf(base, 'p2')
@@ -240,6 +254,9 @@ describe('geometry: floating panes off-screen', () => {
 
   for (const c of cases) {
     it(`remains clamped with visible portion: ${c.name}`, () => {
+      // The saved coordinates come from an earlier session, perhaps on another
+      // monitor. Without snapping back, the pane exists but cannot be seen, nor
+      // brought back with the mouse.
       const p = rectOf(withFloating(c), 'p2')
       assert.ok(p)
       assert.equal(p.floating, true)
@@ -264,6 +281,8 @@ describe('geometry: floating panes off-screen', () => {
   }
 
   it('header remains grab-able even on offset stage', () => {
+    // The title bar is the only way to drag a floating pane back: it must stay
+    // below the top edge of the stage, not above it.
     const offset: Rect = { x: 200, y: 90, w: 900, h: 600 }
     const layout = withFloating({ x: -9999, y: -9999, w: 400, h: 300 })
     const p = rectOf(layout, 'p2', offset)
@@ -284,8 +303,12 @@ describe('geometry: floating panes off-screen', () => {
 describe('geometry: drag drop side detection', () => {
   const wideRects: Rect[] = [
     { x: 0, y: 0, w: 1000, h: 600 },
+    // Very wide and short: without normalizing, the top and bottom edges would
+    // be unreachable, and docking above or below would no longer be possible.
     { x: 0, y: 0, w: 1200, h: 60 },
+    // Very narrow and tall: the mirror case.
     { x: 0, y: 0, w: 60, h: 1200 },
+    // With an offset: the rectangle is almost never at the origin.
     { x: 340, y: 120, w: 500, h: 300 }
   ]
 
@@ -301,6 +324,8 @@ describe('geometry: drag drop side detection', () => {
     })
 
     it(`four corners of ${r.w}x${r.h} are not mistaken for center`, () => {
+      // On a corner the choice between the two adjacent sides is debatable, but
+      // swapping the panes when pointing at a corner never is.
       const corners = [
         { p: { x: r.x + 1, y: r.y + 1 }, allowed: ['left', 'top'] },
         { p: { x: r.x + r.w - 1, y: r.y + 1 }, allowed: ['right', 'top'] },
@@ -315,6 +340,8 @@ describe('geometry: drag drop side detection', () => {
   }
 
   it('center drop zone is small and symmetrical', () => {
+    // If the center were wide, panes would be swapped when the user meant to dock
+    // them side by side. Just past a fifth from the center it must already dock.
     const r: Rect = { x: 0, y: 0, w: 1000, h: 1000 }
     assert.equal(dropSideAt(r, { x: 500 + 200, y: 500 }), 'center')
     assert.equal(dropSideAt(r, { x: 500 + 230, y: 500 }), 'right')
@@ -324,6 +351,8 @@ describe('geometry: drag drop side detection', () => {
   })
 
   it('degenerate rectangle does not break calculation', () => {
+    // It happens while the layout is still being measured: it must give a valid
+    // answer instead of NaN or an invented side.
     for (const r of [
       { x: 0, y: 0, w: 0, h: 0 },
       { x: 0, y: 0, w: 1, h: 0 },
@@ -383,12 +412,24 @@ describe('geometry: focus movement across panes', () => {
 
   for (const [from, dir, expected] of neighbors) {
     it(`from ${from} toward ${dir} leads to ${expected ?? 'no pane'}`, () => {
+      // Toward the outside it must give null: focus must not jump to the other side
+      // of the screen when you are already at the edge.
       const panes = compute(grid()).panes
       assert.equal(paneInDirection(panes, from, dir), expected)
     })
   }
 
   it('prefers collinear neighbor over closer diagonal neighbor', () => {
+    /**
+     * An arrangement chosen on purpose so that the two criteria disagree:
+     *
+     *   pA      |        pC        (top row)
+     *   p1 |          pB           (bottom row)
+     *
+     * The center of pA is ~456 px from p1's, pB's is ~804: by raw distance pA
+     * would win, but pA is ABOVE. Pressing "right" must land on pB, and pressing
+     * "up" on pA.
+     */
     let layout = addPane(EMPTY_LAYOUT, 'pA', 'h')
     layout = addPane(layout, 'p1', 'v')
     layout = addPane(setFocus(layout, 'pA'), 'pC', 'h')
@@ -431,6 +472,8 @@ describe('geometry: zoomed pane', () => {
     const base = tiling(5)
     const rect = rectOf(base, 'p5')
     assert.ok(rect)
+    // Even a floating pane, which normally covers everything, must disappear
+    // under the zoom.
     const withFloat = toggleFloat(base, 'p5', { x: 200, y: 200, w: 500, h: 400 })
     const c = compute(toggleZoom(withFloat, 'p3'))
 
@@ -445,10 +488,14 @@ describe('geometry: zoomed pane', () => {
     for (const p of c.panes) {
       if (p.id !== 'p3') assert.ok(zoom.z > p.z, `${p.id} stays above zoomed pane`)
     }
+    // With no visible tiling there is nothing to resize: a draggable gutter over
+    // the zoom would change a layout nobody can see.
     assert.deepEqual(c.gutters, [])
   })
 
   it('hidden panes retain full dimensions', () => {
+    // Zeroing them would resize the PTY, and on leaving the zoom the terminal
+    // content would already have been reflowed for nothing.
     const withoutZoom = compute(tiling(4))
     const withZoom = compute(toggleZoom(tiling(4), 'p2'))
 
@@ -463,6 +510,8 @@ describe('geometry: zoomed pane', () => {
   })
 
   it('focus does not move to a pane hidden by zoom', () => {
+    // With a single visible pane, the arrow keys must not lead into a terminal
+    // the user cannot see.
     const c = compute(toggleZoom(tiling(4), 'p2'))
     for (const dir of ['left', 'right', 'up', 'down'] as const) {
       assert.equal(paneInDirection(c.panes, 'p2', dir), null)

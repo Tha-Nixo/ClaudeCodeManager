@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { verifyRelease } from './verify-release.mjs'
 
 /**
  * Prepares a release: bumps version, writes changelog from commits,
@@ -11,6 +12,7 @@ import { fileURLToPath } from 'node:url'
  *
  *   npm run release -- patch|minor|major|<version>
  *   npm run release -- minor --dry      dry run: preview without writing
+ *   npm run release -- --verify [<version>]   check a release on GitHub (#17)
  *
  * Publishing to GitHub requires GH_TOKEN in the environment, and the release
  * is created as a DRAFT: it must be reviewed and published manually. An auto-update
@@ -93,6 +95,15 @@ if (args.includes('--tidy')) {
   for (const f of result.toPublish) console.log(`  ${f}`)
   console.log(`  (instructions: release/v${version}/TO-UPLOAD.md)`)
   process.exit(0)
+}
+
+// Check a release on GitHub: run it before publishing the draft, and again
+// after. See verify-release.mjs.
+if (args.includes('--verify')) {
+  const version =
+    args.find((a) => /^\d+\.\d+\.\d+$/.test(a)) ??
+    JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version
+  process.exit(await verifyRelease({ version, root, git }))
 }
 
 // --- Pre-flight checks -------------------------------------------------------
@@ -202,7 +213,10 @@ function reorganize(outDir, version, entry) {
 
 On https://github.com/Tha-Nixo/ClaudeCodeManager/releases/new:
 
-1. Under *Choose a tag*, select **\`v${version}\`** (already created).
+1. Under *Choose a tag*, select **\`v${version}\`**. It must already be on
+   GitHub (\`git push origin v${version}\`). If it is not in the list, stop and
+   push it: a tag typed in here is created on whatever main points at, which
+   is how 1.1.1 ended up on the wrong commit (#17).
 2. Title: \`ClaudeManager ${version}\`
 3. Description: paste the text below.
 4. Drag and drop these files (all and only files in this directory):
@@ -213,6 +227,8 @@ ${list}
    The \`.blockmap\` file enables delta downloads for subsequent updates.
 
 5. Click **Publish release**.
+6. Run \`npm run release -- --verify\`: it fails if the tag, the assets or
+   latest.yml do not match.
 
 Verification check: ${status}
 
@@ -242,6 +258,7 @@ run('npx', ['electron-builder', '--publish', publish], true)
 const outDir = join(root, 'release', tag)
 const reorganized = dryRun ? null : reorganize(outDir, version, entry)
 
+// git starts directly: no shell, so no hand-written quotes.
 run('git', ['add', 'package.json', 'CHANGELOG.md'])
 run('git', ['commit', '-m', tag])
 run('git', ['tag', '-a', tag, '-m', tag])
@@ -252,10 +269,15 @@ if (reorganized) {
   console.log(`  (release instructions: release/${tag}/TO-UPLOAD.md)`)
 }
 
-console.log(`\nDone. Remaining manual steps:`)
-console.log(`  git push && git push origin ${tag}`)
+// The order matters (#17): a draft published before its tag is on GitHub gets
+// a tag that GitHub makes up, on whatever main points at.
+console.log(`\nDone. Remaining manual steps, in this order:`)
+console.log(`  1. git push && git push origin ${tag}`)
 if (publish === 'always') {
-  console.log('  publish draft release on GitHub (no clients receive it while in draft)')
+  console.log(`  2. npm run release -- --verify     (checks the draft: tag, assets, latest.yml)`)
+  console.log('  3. publish the draft on GitHub (no clients receive it while in draft)')
+  console.log(`  4. npm run release -- --verify     (again, on the published release)`)
 } else {
-  console.log(`  upload files from release/${tag}/ to GitHub release`)
+  console.log(`  2. upload files from release/${tag}/ to the GitHub release for ${tag}`)
+  console.log(`  3. npm run release -- --verify`)
 }

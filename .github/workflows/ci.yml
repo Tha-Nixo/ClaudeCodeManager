@@ -1,8 +1,10 @@
 name: CI
 
-# Runs on Windows: the product is a native Windows desktop compositor,
-# and critical tests pass arguments through PowerShell 5.1 and the C runtime
-# to verify native executable child process spawning.
+# Windows rather than Linux, which would be cheaper: the product is a Windows
+# application, and part of the tests go through PowerShell 5.1 and the C
+# runtime to check how arguments reach a native executable. On another system
+# those tests skip themselves, and the most serious defect found so far would
+# go unnoticed.
 
 on:
   push:
@@ -11,6 +13,7 @@ on:
   pull_request:
   workflow_dispatch:
 
+# A push arriving while CI runs makes the previous run useless.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -28,6 +31,9 @@ jobs:
           node-version: 22
           cache: npm
 
+      # `npm ci` respects the lockfile. The install scripts are needed: without
+      # them the Electron binary is not downloaded, and the build fails at a point
+      # that has nothing to do with the cause.
       - name: Install dependencies
         run: npm ci
 
@@ -37,5 +43,7 @@ jobs:
       - name: Test
         run: npm test
 
+      # The build is part of the check: a packaging error shows neither in the
+      # typecheck nor in the tests.
       - name: Build
         run: npm run build

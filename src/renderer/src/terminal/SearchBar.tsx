@@ -2,9 +2,12 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { clearSearch, focusPane, searchPane } from './registry'
 
 /**
- * Scrollback search bar for the active pane.
+ * Search bar over the active pane's scrollback.
+ *
+ * It lives in the pane and not as an overlay: the search is about *that*
+ * terminal, and a central panel would not say which one. On close, focus goes
+ * back to the terminal, otherwise you would keep typing into an invisible field.
  */
-
 interface SearchBarProps {
   paneId: string
   onClose: () => void
@@ -17,6 +20,7 @@ export function SearchBar({ paneId, onClose }: SearchBarProps): React.JSX.Elemen
 
   useEffect(() => inputRef.current?.focus(), [])
 
+  // When the pane changes, the previous pane's highlights must go.
   useEffect(() => () => clearSearch(paneId), [paneId])
 
   const search = useCallback(
@@ -30,6 +34,8 @@ export function SearchBar({ paneId, onClose }: SearchBarProps): React.JSX.Elemen
     [paneId, query]
   )
 
+  // Search while typing, after a short wait: on a ten-thousand-line scrollback,
+  // one search per keystroke can be felt.
   useEffect(() => {
     const t = setTimeout(() => search('next'), 160)
     return () => clearTimeout(t)
@@ -44,6 +50,8 @@ export function SearchBar({ paneId, onClose }: SearchBarProps): React.JSX.Elemen
   return (
     <div
       className="cm-search"
+      // The compositor is already disabled by the overlay, but without this, Alt
+      // combinations would still reach the terminal underneath.
       onKeyDown={(e) => {
         e.stopPropagation()
         if (e.key === 'Escape') {
