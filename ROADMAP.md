@@ -12,13 +12,13 @@ in `main` and waits for the next release.*
 | --- | --- | --- | --- |
 | [v1.1.2](https://github.com/Tha-Nixo/ClaudeCodeManager/milestone/1) | Correctness and security | 8 | Done (PR #33, #34) |
 | [v1.2.0](https://github.com/Tha-Nixo/ClaudeCodeManager/milestone/2) | Know what every session is doing | 5 | Done (PR #35) |
-| [Later](https://github.com/Tha-Nixo/ClaudeCodeManager/milestone/3) | Accepted, not scheduled | 4 | 3 done; #32 waits for a signing identity |
+| [Later](https://github.com/Tha-Nixo/ClaudeCodeManager/milestone/3) | Accepted, not scheduled | 4 | Done (PR #36) |
 
 ### What is left
 
-- **#32, code signing:** the release script signs as soon as an Azure Trusted
-  Signing identity is configured (see the README, Development). Getting one
-  costs money, so it is the owner's decision.
+- **Signing identity:** #32 is closed with signing ready: the release script
+  signs as soon as an Azure Trusted Signing identity is configured (see the
+  README, Development). Until then the published executables stay unsigned.
 - **Checks only a Windows machine can do:** start a packaged build, open and
   restore panes, see a toast, detach the monitor window, run auto-update
   against a local feed (`CM_UPDATE_DEV=1`), and attach a remote pane over
@@ -102,8 +102,8 @@ path, so a remote session gets end-of-turn alerts as soon as both are done.
 
 ## Later
 
-Accepted, but not scheduled. #29, #30 and #31 are done; #32 has its
-plumbing and waits for a signing identity.
+Accepted, but not scheduled. All four are done; #32's signing turns on when a
+signing identity is configured.
 
 - [#31](https://github.com/Tha-Nixo/ClaudeCodeManager/issues/31) Upgrade
   Electron 43 → 45. **Deadline:** before Electron 46 ships, when 43 leaves the
