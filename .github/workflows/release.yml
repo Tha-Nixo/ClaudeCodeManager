@@ -1,0 +1,84 @@
+name: Release
+
+# Packages the app on a Windows runner and uploads it to a DRAFT release
+# attached to the tag that started the run. A release no longer needs a
+# Windows machine at hand: bump the version and write the changelog section on
+# main, then push an annotated tag. Making the draft live stays manual, because
+# an auto-update reaches every installed copy.
+#
+#   git tag -a v1.2.0 -m v1.2.0 && git push origin v1.2.0
+#   npm run release -- --verify       checks the draft
+#   (publish the draft on GitHub)
+#   npm run release -- --verify       checks the published release
+#
+# To run it again on an existing tag: gh workflow run release.yml --ref v1.2.0
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+# electron-builder creates the draft and uploads the assets.
+permissions:
+  contents: write
+
+# Two runs on the same tag would upload over each other.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  package:
+    # A manual run from a branch would package a version that has no tag.
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # The same checks as CI: the tag may point at a commit CI never saw.
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      # Secrets that are not set arrive as empty strings, which signing.mjs
+      # reads as "not configured": an unsigned build, as before #32.
+      - name: Package and upload to a draft release
+        run: node scripts/package-ci.mjs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CM_SIGN_PUBLISHER: ${{ secrets.CM_SIGN_PUBLISHER }}
+          CM_SIGN_ENDPOINT: ${{ secrets.CM_SIGN_ENDPOINT }}
+          CM_SIGN_ACCOUNT: ${{ secrets.CM_SIGN_ACCOUNT }}
+          CM_SIGN_PROFILE: ${{ secrets.CM_SIGN_PROFILE }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+
+      # Kept for a week: the packages exactly as the runner built them, even if
+      # the upload to the release failed halfway.
+      - name: Keep the packages
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: packages
+          path: |
+            release/v*/*.exe
+            release/v*/*.blockmap
+            release/v*/latest.yml
+          retention-days: 7
+          if-no-files-found: ignore

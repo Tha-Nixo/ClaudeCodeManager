@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
+import { changelogEntryFor, releasePlan } from '../scripts/changelog.mjs'
 import { signingConfig } from '../scripts/signing.mjs'
 import { checkRelease } from '../scripts/verify-release.mjs'
 
@@ -133,5 +134,60 @@ describe('code signing is opt-in (issue #32)', () => {
     assert.ok(yaml.includes('certificateProfileName: "profile"'))
     // The secret stays in the environment, never in the generated file.
     assert.ok(!yaml.includes('AZURE_CLIENT_SECRET') && !yaml.includes(': "s"'))
+  })
+})
+
+describe('release workflow: the tag and the notes (CI packaging)', () => {
+  const CHANGELOG = [
+    '# Changelog',
+    '',
+    '<!-- new versions below -->',
+    '',
+    '## 1.2.0 — 2026-11-27',
+    '',
+    'Intro line.',
+    '',
+    '- **Item.** Text.',
+    '',
+    '## 1.1.1 — 2026-08-05',
+    '',
+    '- Old.',
+    ''
+  ].join('\r\n')
+
+  it('finds a version section, CRLF or not, and only that section', () => {
+    const entry = changelogEntryFor(CHANGELOG, '1.2.0')
+    assert.ok(entry.startsWith('## 1.2.0 — 2026-11-27'))
+    assert.ok(entry.includes('- **Item.** Text.'))
+    assert.ok(!entry.includes('1.1.1') && !entry.includes('Old.'))
+    // The last section runs to the end of the file.
+    assert.equal(changelogEntryFor(CHANGELOG, '1.1.1'), '## 1.1.1 — 2026-08-05\n\n- Old.')
+    // "1.2" must not match the 1.2.0 heading.
+    assert.equal(changelogEntryFor(CHANGELOG, '1.2'), '')
+  })
+
+  it('publishes under the tag package.json names, with the section as notes', () => {
+    const plan = releasePlan({ version: '1.2.0', ref: 'v1.2.0', changelog: CHANGELOG })
+    assert.equal(plan.tag, 'v1.2.0')
+    assert.equal(plan.title, 'ClaudeManager 1.2.0')
+    // Earlier releases carry no heading in their notes: the page has a title.
+    assert.ok(plan.notes.startsWith('Intro line.'))
+    assert.ok(!plan.notes.includes('## '))
+  })
+
+  it('refuses a tag that disagrees with package.json, or a run from a branch', () => {
+    assert.throws(
+      () => releasePlan({ version: '1.2.0', ref: 'v1.2.1', changelog: CHANGELOG }),
+      /must run on tag v1\.2\.0/
+    )
+    assert.throws(() => releasePlan({ version: '1.2.0', ref: 'main', changelog: CHANGELOG }), /v1\.2\.0/)
+    assert.throws(() => releasePlan({ version: '1.2.0', ref: '', changelog: CHANGELOG }), /no ref/)
+  })
+
+  it('refuses a version without release notes', () => {
+    assert.throws(
+      () => releasePlan({ version: '1.3.0', ref: 'v1.3.0', changelog: CHANGELOG }),
+      /no "## 1\.3\.0 " section/
+    )
   })
 })
