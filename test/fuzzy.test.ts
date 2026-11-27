@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { fuzzyMatch, rankBy } from '../src/main/indexer/fuzzy'
+import { foldChar, fuzzyMatch, rankBy } from '../src/main/indexer/fuzzy'
 
 /**
  * Positions go to the UI to highlight the matched letters: if an index falls
@@ -29,10 +29,11 @@ function verifyPositions(pattern: string, text: string, positions: number[]): vo
     previous = pos
 
     // The highlighted character must really be the one searched for, otherwise
-    // the user sees underlined letters they never typed.
+    // the user sees underlined letters they never typed. Compared folded, as
+    // the matcher compares them: typing 'a' highlights 'à' (#29).
     assert.equal(
-      text[pos].toLowerCase(),
-      expected[i].toLowerCase(),
+      foldChar(text[pos]),
+      foldChar(expected[i]),
       `position ${pos} points to ${JSON.stringify(text[pos])} instead of ${JSON.stringify(expected[i])}`
     )
   }
@@ -332,22 +333,45 @@ describe('fuzzy: rankBy', () => {
   })
 })
 
-describe('fuzzy: observed behaviors for documentation', () => {
-  it.skip('finds exact folder name containing Turkish dotted capital I', () => {
-    // Known defect, tracked in #29: fuzzyMatch('İstanbul', 'C:\\dev\\İstanbul')
-    // returns null. The module deliberately stops ignoring case when
-    // toLowerCase() changes the length of the text, but it still lowercases the
-    // QUERY: 'İ' becomes two units ('i' plus a combining mark) that do not exist in
-    // the text, which is now compared literally. The folder cannot be found even
-    // by typing its full name.
-    assert.notEqual(fuzzyMatch('İstanbul', 'C:\\dev\\İstanbul'), null)
+describe('fuzzy: accents and the Turkish dotted I (issue #29)', () => {
+  it('finds an exact folder name containing the Turkish dotted capital I', () => {
+    // fuzzyMatch('İstanbul', 'C:\\dev\\İstanbul') returned null: the module
+    // stopped ignoring case when toLowerCase() changed the length of the text,
+    // but still lowercased the QUERY, so 'İ' became two units ('i' plus a
+    // combining mark) that the text, compared literally, did not have.
+    const text = 'C:\\dev\\İstanbul'
+    const match = fuzzyMatch('İstanbul', text)
+    assert.ok(match)
+    verifyPositions('İstanbul', text, match.positions)
+    assert.ok(fuzzyMatch('istanbul', text), 'typed without the dot')
   })
 
-  it.skip('matches accented paths when typing unaccented query', () => {
-    // Known defect, tracked in #29: fuzzyMatch('citta', 'C:\\dev\\città') returns
-    // null, while 'città' and 'CITTÀ' work. It may be a choice, but in an Italian
-    // project accented names are common and almost always typed without the
-    // accent.
-    assert.notEqual(fuzzyMatch('citta', 'C:\\dev\\città'), null)
+  it('matches accented paths when typing an unaccented query', () => {
+    // On an Italian system accented names are common ("Città", "Attività")
+    // and almost always typed without the accent.
+    const text = 'C:\\dev\\città'
+    const match = fuzzyMatch('citta', text)
+    assert.ok(match)
+    verifyPositions('citta', text, match.positions)
+    // The highlight lands on 'à', the letter the 'a' stands for.
+    assert.equal(text[match.positions[4]], 'à')
+    assert.ok(fuzzyMatch('ATTIVITA', 'D:\\Attività'))
+  })
+
+  it('a decomposed accent (as macOS writes names) folds the same way', () => {
+    const text = 'C:\\dev\\citta\u0300'
+    const match = fuzzyMatch('citta', text)
+    assert.ok(match)
+    verifyPositions('citta', text, match.positions)
+  })
+
+  it('an ASCII query ranks exactly as before', () => {
+    // Folding leaves ASCII alone: the issue #6 ranking must not move.
+    const ranking = rankBy(
+      'cm',
+      ['C:\\Users\\Chiara\\Modelli', 'C:\\Users\\Carlo\\Musica', 'C:\\dev\\ClaudeManager'],
+      (t) => t
+    )
+    assert.equal(ranking[0].item, 'C:\\dev\\ClaudeManager')
   })
 })

@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { signingConfig } from './signing.mjs'
 import { verifyRelease } from './verify-release.mjs'
 
 /**
@@ -111,6 +112,16 @@ if (args.includes('--verify')) {
 const status = git('status', '--porcelain')
 if (status && !dryRun) {
   console.error('Working directory has uncommitted changes. Please commit or stash before releasing:\n' + status)
+  process.exit(1)
+}
+
+// Signing (#32) is checked before anything is written: a half-configured
+// environment must stop the release, not produce an unsigned one by surprise.
+let signing = null
+try {
+  signing = signingConfig(process.env)
+} catch (err) {
+  console.error(err.message)
   process.exit(1)
 }
 
@@ -252,7 +263,18 @@ if (publish === 'never') {
 
 run('npm', ['run', 'typecheck'], true)
 run('npx', ['electron-vite', 'build'], true)
-run('npx', ['electron-builder', '--publish', publish], true)
+if (signing) {
+  // A config file that extends the base one: the publisher name may contain
+  // spaces, which a -c flag would not survive through the npx shell.
+  const signingFile = join(root, 'release', 'signing.yml')
+  mkdirSync(dirname(signingFile), { recursive: true })
+  if (!dryRun) writeFileSync(signingFile, signing, 'utf8')
+  console.log(`Signing with Azure Trusted Signing as ${process.env.CM_SIGN_PUBLISHER}`)
+  run('npx', ['electron-builder', '--publish', publish, '--config', 'release/signing.yml'], true)
+} else {
+  console.log('Unsigned build: no CM_SIGN_* variables (see scripts/signing.mjs, #32)')
+  run('npx', ['electron-builder', '--publish', publish], true)
+}
 
 // Matches directories.output in electron-builder.yml.
 const outDir = join(root, 'release', tag)

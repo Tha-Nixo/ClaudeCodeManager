@@ -182,6 +182,15 @@ extracted from the changelog.
 `npm run release -- --tidy` cleans up and organizes the current version directory
 without bumping version numbers or git tags: useful after a manual `npm run dist`.
 
+**Code signing** is off unless a signing identity is configured. With Azure
+Trusted Signing, set `CM_SIGN_PUBLISHER`, `CM_SIGN_ENDPOINT`, `CM_SIGN_ACCOUNT`,
+`CM_SIGN_PROFILE` and the app registration's `AZURE_TENANT_ID`,
+`AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET` before `npm run release` on Windows:
+the installer and the portable executable are signed, and the publisher name
+goes into `app-update.yml`, so installed copies refuse an update that is not
+signed by the same publisher. Setting only some of the variables stops the
+release instead of producing an unsigned build.
+
 `npm run release -- --verify [<version>]` checks a release on GitHub: that it
 is attached to the `v<version>` tag, that the tag points at the same commit as
 the local one, and that `latest.yml` and the installer match. Run it before
@@ -381,8 +390,9 @@ Design choices not immediately obvious from the code:
   available, list prices otherwise. For users with a Max or Pro subscription,
   this does not represent actual billed amounts, but rather the equivalent API
   cost for the same workload.
-- Executables are not code-signed: on first launch, Windows SmartScreen will
-  display an untrusted application prompt.
+- Published executables are not code-signed yet: on first launch, Windows
+  SmartScreen displays an untrusted application prompt. The release script can
+  sign them once a signing identity exists (see Development).
 - When opening a remote folder for the first time, Claude Code prompts to
   confirm trust for that folder, just like it does locally. You must respond
   directly inside the terminal tile.

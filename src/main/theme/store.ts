@@ -100,7 +100,7 @@ followed by bright versions of the same eight colors.
     "borderIdle": "#3A3937",
     "borderFocus": "#D97757",
     "text": "#F0EEE6",
-    "textDim": "#8C8B87",
+    "textDim": "#949490",
     "accent": "#D97757",
     "ok": "#7DA87B",
     "waiting": "#E0A458",

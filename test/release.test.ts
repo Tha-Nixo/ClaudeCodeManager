@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
+import { signingConfig } from '../scripts/signing.mjs'
 import { checkRelease } from '../scripts/verify-release.mjs'
 
 type Facts = Parameters<typeof checkRelease>[0]
@@ -99,5 +100,38 @@ describe('release --verify (issue #17 regression)', () => {
     const { problems, notes } = checkRelease(facts({ releases: [release({ draft: true })] }))
     assert.deepEqual(problems, [])
     assert.ok(notes.some((n) => n.includes('draft')))
+  })
+})
+
+describe('code signing is opt-in (issue #32)', () => {
+  const FULL = {
+    CM_SIGN_PUBLISHER: 'Example Publisher: "Dev"',
+    CM_SIGN_ENDPOINT: 'https://weu.codesigning.azure.net',
+    CM_SIGN_ACCOUNT: 'account',
+    CM_SIGN_PROFILE: 'profile',
+    AZURE_TENANT_ID: 't',
+    AZURE_CLIENT_ID: 'c',
+    AZURE_CLIENT_SECRET: 's'
+  }
+
+  it('nothing configured: an unsigned build, exactly as before', () => {
+    assert.equal(signingConfig({}), null)
+  })
+
+  it('half configured: the release stops instead of shipping unsigned by surprise', () => {
+    assert.throws(() => signingConfig({ CM_SIGN_PUBLISHER: 'x' }), /CM_SIGN_ENDPOINT/)
+    const { AZURE_CLIENT_SECRET: _secret, ...noSecret } = FULL
+    assert.throws(() => signingConfig(noSecret), /AZURE_CLIENT_SECRET/)
+  })
+
+  it('fully configured: extends the base config and quotes every value', () => {
+    const yaml = signingConfig(FULL)
+    assert.ok(yaml)
+    assert.match(yaml, /^extends: electron-builder\.yml$/m)
+    // A colon and quotes in the publisher name must not break the YAML.
+    assert.ok(yaml.includes('publisherName: "Example Publisher: \\"Dev\\""'))
+    assert.ok(yaml.includes('certificateProfileName: "profile"'))
+    // The secret stays in the environment, never in the generated file.
+    assert.ok(!yaml.includes('AZURE_CLIENT_SECRET') && !yaml.includes(': "s"'))
   })
 })
