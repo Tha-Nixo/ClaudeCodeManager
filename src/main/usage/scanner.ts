@@ -5,6 +5,7 @@ import type { SessionUsage, UsageSummary } from '@shared/types'
 import { projectsDir } from '../claude/paths'
 import { readJson, writeJsonAtomic } from '../store/config'
 import {
+  PRICING_FINGERPRINT,
   ZERO_TOKENS,
   addTokens,
   contextWindowFor,
@@ -19,9 +20,21 @@ import {
  *
  * Incremental caching operates per file: when a transcript changes, it is re-parsed
  * in its entirety to accurately resolve message.id deduplication.
+ *
+ * Costs are computed per turn while parsing, not from summed tokens: a price
+ * can depend on the size of each request (Haiku 5.5 charges more above 100K
+ * prompt tokens), and summed tokens no longer know which request was which.
+ * The cache therefore stores costs, and it is rebuilt whenever the price table
+ * changes (`PRICING_FINGERPRINT`).
  */
 
-const CACHE_VERSION = 4
+const CACHE_VERSION = 5
+
+/** Tokens and their cost, for one model in one bucket (file or day). */
+interface ModelUsage {
+  tokens: TokenCounts
+  cost: number
+}
 
 interface FileContribution {
   mtimeMs: number
@@ -31,10 +44,10 @@ interface FileContribution {
   turns: number
   firstAt: number
   lastAt: number
-  /** Token breakdown by model. */
-  byModel: Record<string, TokenCounts>
-  /** Token breakdown by local date (YYYY-MM-DD) and model. */
-  byDay: Record<string, Record<string, TokenCounts>>
+  /** Usage by model. */
+  byModel: Record<string, ModelUsage>
+  /** Usage by local date (YYYY-MM-DD) and model. */
+  byDay: Record<string, Record<string, ModelUsage>>
   /**
    * Input tokens of the LATEST assistant turn, including cache reads/writes.
    * Estimates current conversation context fullness.
@@ -46,6 +59,8 @@ interface FileContribution {
 
 interface UsageCache {
   version: number
+  /** PRICING_FINGERPRINT of the table the stored costs were computed with. */
+  pricing: string
   files: Record<string, FileContribution>
 }
 
@@ -60,7 +75,9 @@ function cachePath(): string {
 function loadCache(): UsageCache {
   if (cache) return cache
   const stored = readJson<UsageCache>(cachePath())
-  cache = stored && stored.version === CACHE_VERSION ? stored : { version: CACHE_VERSION, files: {} }
+  const current =
+    stored && stored.version === CACHE_VERSION && stored.pricing === PRICING_FINGERPRINT
+  cache = current ? stored : { version: CACHE_VERSION, pricing: PRICING_FINGERPRINT, files: {} }
   return cache
 }
 
@@ -84,7 +101,15 @@ function findTranscripts(dir: string, out: string[] = []): string[] {
 interface Turn {
   model: string | null
   tokens: TokenCounts
+  cost: number
   timestamp: number
+}
+
+function addUsage(a: ModelUsage | undefined, turn: Turn): ModelUsage {
+  return {
+    tokens: addTokens(a?.tokens ?? ZERO_TOKENS, turn.tokens),
+    cost: (a?.cost ?? 0) + turn.cost
+  }
 }
 
 function parseTranscript(file: string): Omit<FileContribution, 'mtimeMs' | 'size'> {
@@ -128,6 +153,9 @@ function parseTranscript(file: string): Omit<FileContribution, 'mtimeMs' | 'size
             ephemeral_5m_input_tokens?: number
             ephemeral_1h_input_tokens?: number
           }
+          server_tool_use?: { web_search_requests?: number }
+          speed?: string
+          inference_geo?: string
         }
       }
     }
@@ -165,7 +193,12 @@ function parseTranscript(file: string): Omit<FileContribution, 'mtimeMs' | 'size
 
     const timestamp = rec.timestamp ? Date.parse(rec.timestamp) : 0
     const key = rec.message?.id
-    const turn: Turn = { model, tokens, timestamp }
+    const cost = costOf(model, tokens, {
+      webSearches: usage.server_tool_use?.web_search_requests ?? 0,
+      fast: usage.speed === 'fast',
+      usOnly: usage.inference_geo === 'us'
+    })
+    const turn: Turn = { model, tokens, cost, timestamp }
 
     contribution.lastContext = tokens.input + tokens.cacheRead + tokens.cacheWrite5m + tokens.cacheWrite1h
     contribution.lastModel = model
@@ -176,15 +209,12 @@ function parseTranscript(file: string): Omit<FileContribution, 'mtimeMs' | 'size
   for (const turn of byMessageId.values()) {
     const model = turn.model ?? 'unknown'
     contribution.turns += 1
-    contribution.byModel[model] = addTokens(contribution.byModel[model] ?? ZERO_TOKENS, turn.tokens)
+    contribution.byModel[model] = addUsage(contribution.byModel[model], turn)
 
     if (turn.timestamp > 0) {
       const day = localDayKey(new Date(turn.timestamp))
       contribution.byDay[day] ??= {}
-      contribution.byDay[day][model] = addTokens(
-        contribution.byDay[day][model] ?? ZERO_TOKENS,
-        turn.tokens
-      )
+      contribution.byDay[day][model] = addUsage(contribution.byDay[day][model], turn)
       contribution.firstAt =
         contribution.firstAt === 0
           ? turn.timestamp
@@ -244,9 +274,9 @@ export function sessionUsage(): Record<string, SessionUsage> {
   for (const file of Object.values(state.files)) {
     let tokens = 0
     let cost = 0
-    for (const [model, counts] of Object.entries(file.byModel)) {
-      tokens += totalTokens(counts)
-      cost += costOf(model, counts)
+    for (const usage of Object.values(file.byModel)) {
+      tokens += totalTokens(usage.tokens)
+      cost += usage.cost
     }
 
     const { window, approximate } = contextWindowFor(file.lastModel)
@@ -305,10 +335,9 @@ export function summarize(): UsageSummary {
 
     const project = contribution.cwd ?? 'unknown'
 
-    for (const [model, tokens] of Object.entries(contribution.byModel)) {
-      const cost = costOf(model, tokens)
-      const count =
-        tokens.input + tokens.output + tokens.cacheRead + tokens.cacheWrite5m + tokens.cacheWrite1h
+    for (const [model, usage] of Object.entries(contribution.byModel)) {
+      const cost = usage.cost
+      const count = totalTokens(usage.tokens)
 
       totalCost += cost
       totalTokensAll += count
@@ -323,14 +352,9 @@ export function summarize(): UsageSummary {
     }
 
     for (const [day, models] of Object.entries(contribution.byDay)) {
-      for (const [model, tokens] of Object.entries(models)) {
-        const cost = costOf(model, tokens)
-        const count =
-          tokens.input +
-          tokens.output +
-          tokens.cacheRead +
-          tokens.cacheWrite5m +
-          tokens.cacheWrite1h
+      for (const usage of Object.values(models)) {
+        const cost = usage.cost
+        const count = totalTokens(usage.tokens)
         if (day === today) {
           todayCost += cost
           todayTokens += count

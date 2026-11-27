@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { contextWindowFor, costOf, priceFor } from '../src/main/usage/pricing'
+import { contextWindowFor, costOf, priceFor, type TokenCounts } from '../src/main/usage/pricing'
 import { scan, sessionUsage, summarize } from '../src/main/usage/scanner'
 
 /**
@@ -98,6 +98,13 @@ describe('pricing: context window (issue #11 regression)', () => {
     assert.equal(contextWindowFor('claude-haiku-4-5').window, 200_000)
   })
 
+  it("Haiku 5.5 has a 1M window, not Haiku 4.5's 200K (issue #16)", () => {
+    assert.deepEqual(contextWindowFor('claude-haiku-5-5'), {
+      window: 1_000_000,
+      approximate: false
+    })
+  })
+
   it('unknown model does not produce fabricated percentage', () => {
     assert.deepEqual(contextWindowFor('gpt-5-turbo'), { window: 0, approximate: false })
     assert.deepEqual(contextWindowFor(null), { window: 0, approximate: false })
@@ -106,8 +113,9 @@ describe('pricing: context window (issue #11 regression)', () => {
   })
 
   it('marks approximate for future models matched by family heuristic', () => {
+    // Unknown Haiku ids fall back to the newest Haiku (5.5, 1M), flagged as a guess.
     assert.deepEqual(contextWindowFor('claude-haiku-9-0-20270101'), {
-      window: 200_000,
+      window: 1_000_000,
       approximate: true
     })
     assert.equal(contextWindowFor('claude-opus-42').approximate, true)
@@ -207,6 +215,175 @@ describe('pricing: token cost computation', () => {
   })
 })
 
+/**
+ * Issue #16: every model released after August 2026 was priced as its
+ * predecessor (prefix match) and labelled exact, and cache reads were a fixed
+ * 0.1x of input. The entries below are `cost-state` records that Claude Code
+ * 2.1.322+ wrote into real transcripts: `costUSD` is what `/cost` showed. The
+ * price table must reproduce it from the token counts.
+ */
+const COST_STATE: { model: string; usage: Record<string, number>; costUSD: number }[] = [
+  {
+    model: 'claude-fable-5-2',
+    usage: {
+      inputTokens: 5762,
+      outputTokens: 550445,
+      cacheReadInputTokens: 186566622,
+      cacheCreationEphemeral5mInputTokens: 1194,
+      cacheCreationEphemeral1hInputTokens: 5805677
+    },
+    costUSD: 152.2799924
+  },
+  {
+    model: 'claude-opus-5-5',
+    usage: {
+      inputTokens: 2775,
+      outputTokens: 145956,
+      cacheReadInputTokens: 29857691,
+      cacheCreationEphemeral5mInputTokens: 207,
+      cacheCreationEphemeral1hInputTokens: 399756
+    },
+    costUSD: 12.1008412
+  },
+  {
+    model: 'claude-sonnet-5-5',
+    usage: {
+      inputTokens: 11908,
+      outputTokens: 3688821,
+      cacheReadInputTokens: 960773763,
+      cacheCreationEphemeral5mInputTokens: 14255010,
+      cacheCreationEphemeral1hInputTokens: 5591703
+    },
+    costUSD: 190.9937393
+  },
+  {
+    // A session whose every request stayed under 100K prompt tokens: base tier.
+    model: 'claude-haiku-5-5',
+    usage: {
+      inputTokens: 52630,
+      outputTokens: 16,
+      cacheReadInputTokens: 0,
+      cacheCreationEphemeral5mInputTokens: 0,
+      cacheCreationEphemeral1hInputTokens: 0
+    },
+    costUSD: 0.005271
+  },
+  {
+    model: 'claude-opus-5',
+    usage: {
+      inputTokens: 4,
+      outputTokens: 0,
+      cacheReadInputTokens: 42360,
+      cacheCreationEphemeral5mInputTokens: 0,
+      cacheCreationEphemeral1hInputTokens: 85458
+    },
+    costUSD: 0.87578
+  },
+  {
+    model: 'claude-opus-4-8',
+    usage: {
+      inputTokens: 34,
+      outputTokens: 15929,
+      cacheReadInputTokens: 1233014,
+      cacheCreationEphemeral5mInputTokens: 0,
+      cacheCreationEphemeral1hInputTokens: 67118
+    },
+    costUSD: 1.686082
+  },
+  {
+    // Older record layout (one cacheCreationInputTokens total, billed as
+    // 5-minute writes) and a web search.
+    model: 'claude-haiku-4-5-20251001',
+    usage: {
+      inputTokens: 30701,
+      outputTokens: 28574,
+      cacheReadInputTokens: 3462340,
+      cacheCreationEphemeral5mInputTokens: 305336,
+      cacheCreationEphemeral1hInputTokens: 0,
+      webSearchRequests: 1
+    },
+    costUSD: 0.911475
+  }
+]
+
+const ZERO: TokenCounts = { input: 0, output: 0, cacheRead: 0, cacheWrite5m: 0, cacheWrite1h: 0 }
+
+describe('pricing: matches Claude Code cost-state (issue #16 regression)', () => {
+  for (const { model, usage, costUSD } of COST_STATE) {
+    it(`${model} reproduces /cost within 1 %`, () => {
+      const tokens: TokenCounts = {
+        input: usage.inputTokens,
+        output: usage.outputTokens,
+        cacheRead: usage.cacheReadInputTokens,
+        cacheWrite5m: usage.cacheCreationEphemeral5mInputTokens,
+        cacheWrite1h: usage.cacheCreationEphemeral1hInputTokens
+      }
+      const cost = costOf(model, tokens, { webSearches: usage.webSearchRequests ?? 0 })
+      const error = Math.abs(cost / costUSD - 1)
+      assert.ok(error < 0.01, `${model}: $${cost.toFixed(4)} vs $${costUSD}`)
+    })
+  }
+
+  it('new models resolve to their own row, not to their predecessor', () => {
+    for (const [id, label] of [
+      ['claude-opus-5-5', 'Opus 5.5'],
+      ['claude-fable-5-2', 'Fable 5.2'],
+      ['claude-sonnet-5-5', 'Sonnet 5.5'],
+      ['claude-haiku-5-5', 'Haiku 5.5']
+    ]) {
+      const price = priceFor(id)
+      assert.equal(price?.label, label)
+      assert.equal(price?.approximate, false)
+    }
+  })
+
+  it('an unknown id is approximate, even when it starts with a known one', () => {
+    assert.equal(priceFor('claude-opus-9-9')?.approximate, true)
+    assert.equal(priceFor('claude-opus-5-7')?.approximate, true)
+    assert.equal(priceFor('claude-sonnet-5-5-preview')?.approximate, true)
+    // A date suffix is the only thing stripped before an exact match.
+    assert.equal(priceFor('claude-sonnet-5-5-20261101')?.approximate, false)
+  })
+
+  it("cache reads use each model's own rate", () => {
+    const read = (model: string): number => costOf(model, { ...ZERO, cacheRead: 1_000_000 })
+    assert.equal(read('claude-opus-5-5'), 0.2)
+    assert.equal(read('claude-sonnet-5-5'), 0.1)
+    assert.equal(read('claude-fable-5-2'), 0.2)
+    assert.equal(read('claude-fable-5'), 1)
+    assert.equal(read('claude-opus-5'), 0.5)
+  })
+
+  it('Haiku 5.5 charges the higher tier above 100K prompt tokens, per request', () => {
+    const near = (a: number, b: number): void => assert.ok(Math.abs(a - b) < 1e-12, `${a} != ${b}`)
+    const prompt = (input: number, cacheRead = 0): TokenCounts => ({
+      ...ZERO,
+      input,
+      cacheRead,
+      output: 1000
+    })
+    // 100,000 is not "over" 100,000.
+    near(costOf('claude-haiku-5-5', prompt(100_000)), 0.01 + 0.0005)
+    near(costOf('claude-haiku-5-5', prompt(100_001)), 0.0500005 + 0.0025)
+    // Cache reads count toward the prompt size, and are billed at the higher tier too.
+    near(costOf('claude-haiku-5-5', prompt(10_000, 140_000)), 0.005 + 0.007 + 0.0025)
+  })
+
+  it('fast mode, US-only inference and web searches', () => {
+    const near = (a: number, b: number): void => assert.ok(Math.abs(a - b) < 1e-12, `${a} != ${b}`)
+    const input = { ...ZERO, input: 1_000_000 }
+    const output = { ...ZERO, output: 1_000_000 }
+    assert.equal(costOf('claude-opus-5-5', input, { fast: true }), 8)
+    assert.equal(costOf('claude-opus-5-5', output, { fast: true }), 40)
+    // No fast-mode price is listed for Sonnet: standard rates apply.
+    assert.equal(costOf('claude-sonnet-5-5', input, { fast: true }), 2)
+    near(costOf('claude-opus-5-5', input, { usOnly: true }), 4.4)
+    // Models before 4.6 have no US-only premium.
+    assert.equal(costOf('claude-haiku-4-5', input, { usOnly: true }), 1)
+    near(costOf('claude-opus-5-5', ZERO, { webSearches: 3 }), 0.03)
+  })
+})
+
 // --- Transcript Parsing -----------------------------------------------------
 
 describe('scanner: core parser logic', () => {
@@ -301,6 +478,38 @@ describe('scanner: core parser logic', () => {
     const totals = summarize()
     assert.equal(totals.totalTokens, 1_000_000)
     assert.equal(totals.totalCost, 6.25)
+  })
+
+  it('prices each turn on its own prompt size, not on the session total (issue #16)', () => {
+    const project = fakeRoot()
+    writeTranscript(project, 'haiku55-session', [
+      makeRow({ id: 'k1', model: 'claude-haiku-5-5', uso: { input: 50_000 } }),
+      makeRow({ id: 'k2', model: 'claude-haiku-5-5', uso: { input: 150_000 } })
+    ])
+
+    rescan()
+    // 50K at $0.10 plus 150K at $0.50 (over 100K). Pricing the 200K sum as a
+    // single request would give $0.10.
+    const cost = sessionUsage()['haiku55-session'].cost
+    assert.ok(Math.abs(cost - 0.08) < 1e-12, `cost ${cost}`)
+  })
+
+  it('counts web searches reported in usage (issue #16)', () => {
+    const project = fakeRoot()
+    writeTranscript(project, 'search-session', [
+      JSON.stringify({
+        type: 'assistant',
+        message: {
+          id: 'w1',
+          model: 'claude-sonnet-5-5',
+          usage: { input_tokens: 0, output_tokens: 1, server_tool_use: { web_search_requests: 2 } }
+        }
+      })
+    ])
+
+    rescan()
+    const cost = sessionUsage()['search-session'].cost
+    assert.ok(Math.abs(cost - (0.02 + 0.00001)) < 1e-12, `cost ${cost}`)
   })
 
   it('aggregates by model and by project folder', () => {
