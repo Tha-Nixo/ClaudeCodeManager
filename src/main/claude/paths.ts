@@ -27,6 +27,20 @@ export function claudeHome(): string {
   return process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude')
 }
 
+/**
+ * Claude Code's own state file (account, MCP servers, per-project trust).
+ *
+ * It is NOT inside ~/.claude by default: it sits next to it, in the home
+ * directory. With CLAUDE_CONFIG_DIR set it moves inside that directory.
+ * The docs only say that "settings, session history, and plugins" move, so
+ * this was checked against Claude Code 2.1.332 itself: `claude mcp add -s user`
+ * with CLAUDE_CONFIG_DIR set writes $CLAUDE_CONFIG_DIR/.claude.json (#20).
+ */
+export function globalConfigFile(): string {
+  const dir = process.env.CLAUDE_CONFIG_DIR
+  return dir ? join(dir, '.claude.json') : join(homedir(), '.claude.json')
+}
+
 export function projectsDir(): string {
   return join(claudeHome(), 'projects')
 }
@@ -155,21 +169,23 @@ export function knownFolders(): KnownFolder[] {
 
 // --- Folder trust -------------------------------------------------
 
-let trustCache: { at: number; map: Map<string, boolean> } | null = null
+let trustCache: { at: number; file: string; map: Map<string, boolean> } | null = null
 const TRUST_TTL_MS = 30_000
 
 /**
  * Folders for which the trust dialog has already been accepted.
  *
- * ~/.claude.json also contains `oauthAccount` and, inside projects[].mcpServers,
+ * .claude.json also contains `oauthAccount` and, inside projects[].mcpServers,
  * environment variables with API keys: we extract ONLY hasTrustDialogAccepted
  * and immediately discard the rest, never recording or exposing it.
  */
 export function trustedFolders(): Map<string, boolean> {
-  if (trustCache && Date.now() - trustCache.at < TRUST_TTL_MS) return trustCache.map
+  const file = globalConfigFile()
+  if (trustCache && trustCache.file === file && Date.now() - trustCache.at < TRUST_TTL_MS) {
+    return trustCache.map
+  }
 
   const map = new Map<string, boolean>()
-  const file = join(homedir(), '.claude.json')
 
   if (existsSync(file)) {
     try {
@@ -184,6 +200,6 @@ export function trustedFolders(): Map<string, boolean> {
     }
   }
 
-  trustCache = { at: Date.now(), map }
+  trustCache = { at: Date.now(), file, map }
   return map
 }

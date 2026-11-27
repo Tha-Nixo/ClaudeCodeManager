@@ -1,10 +1,15 @@
-import { mkdtempSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { mkdtempSync, writeFileSync } from 'node:fs'
+import { homedir, tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { buildClaudeArgs, expectedClaudeSessionId } from '../src/main/claude/cli'
-import { encodeProjectDir, normalizePath } from '../src/main/claude/paths'
+import {
+  encodeProjectDir,
+  globalConfigFile,
+  normalizePath,
+  trustedFolders
+} from '../src/main/claude/paths'
 import type { LaunchOptions } from '../src/shared/types'
 
 /**
@@ -534,6 +539,56 @@ describe('normalizePath: key for folder deduplication', () => {
   it('applying normalization twice is idempotent', () => {
     for (const p of ['C:/a/b/', 'C:\\', 'C:', '', 'D:/x']) {
       assert.equal(normalizePath(normalizePath(p)), normalizePath(p), JSON.stringify(p))
+    }
+  })
+})
+
+describe('trustedFolders: honors CLAUDE_CONFIG_DIR (issue #20 regression)', () => {
+  /** A config dir holding a .claude.json with the given trust entries. */
+  function configDir(projects: Record<string, { hasTrustDialogAccepted?: boolean }>): string {
+    const dir = mkdtempSync(join(tmpdir(), 'cm-claude-config-'))
+    writeFileSync(join(dir, '.claude.json'), JSON.stringify({ projects }), 'utf8')
+    return dir
+  }
+
+  it('reads .claude.json inside CLAUDE_CONFIG_DIR', () => {
+    const previous = process.env.CLAUDE_CONFIG_DIR
+    try {
+      process.env.CLAUDE_CONFIG_DIR = configDir({
+        'C:/Work/Trusted': { hasTrustDialogAccepted: true },
+        'C:/Work/Asked': { hasTrustDialogAccepted: false }
+      })
+      assert.equal(globalConfigFile(), join(process.env.CLAUDE_CONFIG_DIR, '.claude.json'))
+      const trust = trustedFolders()
+      assert.equal(trust.get(normalizePath('C:\\Work\\Trusted')), true)
+      assert.equal(trust.get(normalizePath('C:\\Work\\Asked')), false)
+    } finally {
+      if (previous === undefined) delete process.env.CLAUDE_CONFIG_DIR
+      else process.env.CLAUDE_CONFIG_DIR = previous
+    }
+  })
+
+  it('does not reuse a cached answer after CLAUDE_CONFIG_DIR changes', () => {
+    const previous = process.env.CLAUDE_CONFIG_DIR
+    try {
+      process.env.CLAUDE_CONFIG_DIR = configDir({ 'D:/one': { hasTrustDialogAccepted: true } })
+      assert.equal(trustedFolders().get(normalizePath('D:/one')), true)
+      process.env.CLAUDE_CONFIG_DIR = configDir({ 'D:/two': { hasTrustDialogAccepted: true } })
+      assert.equal(trustedFolders().get(normalizePath('D:/one')), undefined)
+      assert.equal(trustedFolders().get(normalizePath('D:/two')), true)
+    } finally {
+      if (previous === undefined) delete process.env.CLAUDE_CONFIG_DIR
+      else process.env.CLAUDE_CONFIG_DIR = previous
+    }
+  })
+
+  it('without CLAUDE_CONFIG_DIR, the file sits in the home directory, not in ~/.claude', () => {
+    const previous = process.env.CLAUDE_CONFIG_DIR
+    try {
+      delete process.env.CLAUDE_CONFIG_DIR
+      assert.equal(globalConfigFile(), join(homedir(), '.claude.json'))
+    } finally {
+      if (previous !== undefined) process.env.CLAUDE_CONFIG_DIR = previous
     }
   })
 })
