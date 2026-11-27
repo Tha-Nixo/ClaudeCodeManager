@@ -158,6 +158,8 @@ export interface LiveSession {
   startedAt?: number
   updatedAt?: number
   version?: string
+  /** "<session>:@<window>.%<pane>" when Claude Code runs inside tmux (#27). */
+  tmux?: string
 }
 
 /** Past session parsed from disk transcript. */

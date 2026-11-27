@@ -4,22 +4,9 @@ import { app } from 'electron'
 import type { SessionUsage, UsageSummary } from '@shared/types'
 import { projectsDir } from '../claude/paths'
 import { readJson, writeJsonAtomic } from '../store/config'
-import {
-  addUsage,
-  calibrateSession,
-  snapshotModels,
-  type CostSnapshot,
-  type DayBuckets
-} from './calibrate'
-import {
-  PRICING_FINGERPRINT,
-  contextWindowFor,
-  costOf,
-  isBillable,
-  priceFor,
-  totalTokens,
-  type TokenCounts
-} from './pricing'
+import { calibrateSession, type CostSnapshot, type DayBuckets } from './calibrate'
+import { PRICING_FINGERPRINT, contextWindowFor, priceFor, totalTokens } from './pricing'
+import { TranscriptReader } from './transcript'
 
 /**
  * Token accounting from Claude Code transcripts.
@@ -126,158 +113,16 @@ function findTranscripts(dir: string, out: string[] = []): string[] {
   return out
 }
 
-interface Turn {
-  model: string
-  tokens: TokenCounts
-  cost: number
-  timestamp: number
-  /** Line of the record that last wrote this turn: places it around a snapshot. */
-  line: number
-}
-
 function parseTranscript(file: string): Omit<FileContribution, 'mtimeMs' | 'size'> {
-  const contribution: Omit<FileContribution, 'mtimeMs' | 'size'> = {
-    sessionId: basename(file, '.jsonl'),
-    ownerSessionId: basename(file, '.jsonl'),
-    cwd: null,
-    turns: 0,
-    firstAt: 0,
-    lastAt: 0,
-    snapshot: null,
-    before: {},
-    after: {},
-    lastContext: 0,
-    lastModel: null
-  }
-
-  let raw: string
+  const name = basename(file, '.jsonl')
+  const reader = new TranscriptReader((at) => localDayKey(new Date(at)))
   try {
-    raw = readFileSync(file, 'utf8')
+    for (const line of readFileSync(file, 'utf8').split('\n')) reader.push(line)
   } catch {
-    return contribution
+    // Unreadable (removed while scanning): an empty contribution.
   }
-
-  // Deduplicate within the file: several records share the same message.id and
-  // only the last one carries the final totals. Summing them all inflates the
-  // numbers.
-  const byMessageId = new Map<string, Turn>()
-  let owner: string | null = null
-  let snapshotLine = -1
-  let lastTimestamp = 0
-
-  const lines = raw.split('\n')
-  for (let index = 0; index < lines.length; index++) {
-    const line = lines[index]
-    const isSnapshot = line.includes('"cost-state"')
-    if (!line.trim() || (!isSnapshot && !line.includes('"usage"'))) continue
-
-    let rec: {
-      type?: string
-      cwd?: string
-      sessionId?: string
-      timestamp?: string
-      modelUsage?: unknown
-      message?: {
-        id?: string
-        model?: string
-        usage?: {
-          input_tokens?: number
-          output_tokens?: number
-          cache_read_input_tokens?: number
-          cache_creation_input_tokens?: number
-          cache_creation?: {
-            ephemeral_5m_input_tokens?: number
-            ephemeral_1h_input_tokens?: number
-          }
-          server_tool_use?: { web_search_requests?: number }
-          speed?: string
-          inference_geo?: string
-        }
-      }
-    }
-    try {
-      rec = JSON.parse(line)
-    } catch {
-      continue
-    }
-
-    // Cumulative for the session: only the last one matters. It has no
-    // timestamp, so it takes the one of the last turn written before it.
-    if (rec.type === 'cost-state') {
-      contribution.snapshot = { at: lastTimestamp, models: snapshotModels(rec.modelUsage) }
-      snapshotLine = index
-      continue
-    }
-
-    if (rec.type !== 'assistant') continue
-    if (rec.cwd && !contribution.cwd) contribution.cwd = rec.cwd
-    if (!owner && typeof rec.sessionId === 'string' && rec.sessionId) owner = rec.sessionId
-
-    const usage = rec.message?.usage
-    if (!usage) continue
-
-    const created = usage.cache_creation
-    const creationTotal = usage.cache_creation_input_tokens ?? 0
-    // The 5m/1h split is authoritative when present; otherwise everything is
-    // attributed to 5 minutes, the default TTL.
-    const write5m = created?.ephemeral_5m_input_tokens ?? (created ? 0 : creationTotal)
-    const write1h = created?.ephemeral_1h_input_tokens ?? 0
-
-    const tokens: TokenCounts = {
-      input: usage.input_tokens ?? 0,
-      output: usage.output_tokens ?? 0,
-      cacheRead: usage.cache_read_input_tokens ?? 0,
-      cacheWrite5m: write5m,
-      cacheWrite1h: write1h
-    }
-
-    const sum =
-      tokens.input + tokens.output + tokens.cacheRead + tokens.cacheWrite5m + tokens.cacheWrite1h
-    if (sum === 0) continue
-
-    const model = rec.message?.model ?? null
-    if (!model || !isBillable(model)) continue
-
-    const timestamp = rec.timestamp ? Date.parse(rec.timestamp) : 0
-    if (timestamp > 0) lastTimestamp = timestamp
-    const key = rec.message?.id
-    const cost = costOf(model, tokens, {
-      webSearches: usage.server_tool_use?.web_search_requests ?? 0,
-      fast: usage.speed === 'fast',
-      usOnly: usage.inference_geo === 'us'
-    })
-    const turn: Turn = { model, tokens, cost, timestamp, line: index }
-
-    // File order, not timestamp order: the last turn written is the one that
-    // describes the context now, and timestamps across subagents and the main
-    // session are not necessarily monotonic.
-    contribution.lastContext = tokens.input + tokens.cacheRead + tokens.cacheWrite5m + tokens.cacheWrite1h
-    contribution.lastModel = model
-
-    // Without a message.id there is no way to deduplicate: the turn is kept
-    // anyway, under a unique key.
-    byMessageId.set(key || `anon-${byMessageId.size}`, turn)
-  }
-
-  if (owner) contribution.ownerSessionId = owner
-
-  for (const turn of byMessageId.values()) {
-    contribution.turns += 1
-    const side = turn.line < snapshotLine ? contribution.before : contribution.after
-    const day = turn.timestamp > 0 ? localDayKey(new Date(turn.timestamp)) : ''
-    side[day] ??= {}
-    side[day][turn.model] = addUsage(side[day][turn.model], turn)
-
-    if (turn.timestamp > 0) {
-      contribution.firstAt =
-        contribution.firstAt === 0
-          ? turn.timestamp
-          : Math.min(contribution.firstAt, turn.timestamp)
-      contribution.lastAt = Math.max(contribution.lastAt, turn.timestamp)
-    }
-  }
-
-  return contribution
+  const parsed = reader.result()
+  return { ...parsed, sessionId: name, ownerSessionId: parsed.ownerSessionId ?? name }
 }
 
 /** Updates the cache by reading only the transcripts that changed. */

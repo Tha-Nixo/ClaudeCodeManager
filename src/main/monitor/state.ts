@@ -1,5 +1,6 @@
 import { BrowserWindow, type WebContents } from 'electron'
 import type { MonitorPane, MonitorState } from '@shared/types'
+import { remoteSessions } from '../claude/remoteLive'
 import { sessionUsage, summarize } from '../usage/scanner'
 
 /**
@@ -47,7 +48,8 @@ function broadcast(channel: string, payload: unknown): void {
  * every two seconds costs almost nothing when nothing has changed.
  */
 export function currentState(): MonitorState {
-  const usage = sessionUsage()
+  // Remote panes (#26) take their usage from the server's transcripts.
+  const usage = { ...sessionUsage(), ...remoteSessions.usage() }
   const today = summarize()
 
   return {

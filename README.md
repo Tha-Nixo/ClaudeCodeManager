@@ -107,11 +107,14 @@ on standard SSH mechanics: keys in `~/.ssh` or an SSH agent. If the server is
 not yet in your known hosts list, connect once manually with `ssh` to accept its
 host key.
 
-**What doesn't work remotely:** The status indicator dot and token statistics
-rely on local files, whereas a remote session writes them to the remote server.
-For this reason, a remote tile displays `remote` instead of `ready`/`working`:
-pretending to know what Claude is doing would be guesswork. Resuming
-conversations does work, however, as it queries the server on demand.
+**Live status and costs:** while a remote tile is open, the app keeps one extra
+ssh connection per server (not per tile) that streams the server's session
+registry and the new lines of its transcripts. Remote tiles therefore show
+`ready` / `working` / `waiting`, raise the same notifications as local ones,
+and the drawer shows their context fill and cost. The server only needs a
+POSIX shell; `inotifywait`, when installed, makes updates near-instant, and
+without it they arrive within about two seconds. If that connection drops,
+the tiles go back to saying `remote` until it reconnects on its own.
 
 ## Requirements
 
@@ -374,8 +377,6 @@ Design choices not immediately obvious from the code:
   cost for the same workload.
 - Executables are not code-signed: on first launch, Windows SmartScreen will
   display an untrusted application prompt.
-- Remote sessions lack real-time status dots and token counting: the registry
-  and transcript files are located on the remote server.
 - When opening a remote folder for the first time, Claude Code prompts to
   confirm trust for that folder, just like it does locally. You must respond
   directly inside the terminal tile.

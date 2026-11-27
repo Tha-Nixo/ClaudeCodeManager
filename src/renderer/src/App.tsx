@@ -537,8 +537,8 @@ export default function App(): React.JSX.Element {
           index: i + 1,
           label: meta?.title ?? basename(remote ? remote.path : (meta?.cwd ?? '')),
           where: remote ? `${remote.user}@${remote.host}:${remote.path}` : (meta?.cwd ?? ''),
-          // A remote session writes state on the server: reporting "ready"
-          // would be guesswork, as in the pane header.
+          // Without the server's registry (watch stream down), reporting
+          // "ready" would be guesswork, as in the pane header.
           status: remote && meta?.status === 'running' ? 'remote' : (meta?.status ?? 'starting'),
           waitingFor: meta?.waitingFor ?? null,
           remote: Boolean(remote),
