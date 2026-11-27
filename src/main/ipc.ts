@@ -21,7 +21,12 @@ import {
   openMonitorWindow,
   setDetachedListener
 } from './monitor/window'
-import { onLiveChange, setKnownPanes, setNotificationsEnabled } from './notify/notifier'
+import {
+  onLiveChange,
+  setFinishNotificationsEnabled,
+  setKnownPanes,
+  setNotificationsEnabled
+} from './notify/notifier'
 import type { PtyManager } from './pty/manager'
 import {
   isRemoteResumable,
@@ -224,11 +229,13 @@ export function registerIpc(
   ipcMain.handle('config:set', (_e, patch: Partial<AppConfig>) => {
     const next = setConfig(patch)
     setNotificationsEnabled(next.notifyOnWaiting)
+    setFinishNotificationsEnabled(next.notifyOnFinish)
     return next
   })
 
   // Align initial state immediately: the preference is already on disk.
   setNotificationsEnabled(getConfig().notifyOnWaiting)
+  setFinishNotificationsEnabled(getConfig().notifyOnFinish)
 
   // --- Window -------------------------------------------------------------
 

@@ -381,6 +381,11 @@ export interface AppConfig {
    */
   notifyOnWaiting: boolean
   /**
+   * Desktop notification when a session finishes its turn (busy -> idle,
+   * lasting at least 1.5 s). Off means no alert at all, not even a flash.
+   */
+  notifyOnFinish: boolean
+  /**
    * Custom keymap: key combo -> action.
    *
    * Overlays on top of default keymap without replacing it entirely.
@@ -403,5 +408,6 @@ export const DEFAULT_CONFIG: Omit<AppConfig, 'defaultCwd'> = {
   scanRoots: [],
   themeId: DEFAULT_THEME_ID,
   notifyOnWaiting: true,
+  notifyOnFinish: true,
   keymap: {}
 }

@@ -189,8 +189,17 @@ export function SettingsPanel({
               />
               Notify when a session awaits user input
             </label>
+            <label className="cm-settings__check">
+              <input
+                type="checkbox"
+                checked={config.notifyOnFinish}
+                onChange={(e) => patch({ notifyOnFinish: e.target.checked })}
+              />
+              Notify when a session finishes its turn
+            </label>
             <div className="cm-source__detail">
-              Only when window is unfocused. Taskbar icon flashes regardless.
+              Only when the window is unfocused. For input requests the taskbar icon
+              flashes regardless.
             </div>
           </section>
 

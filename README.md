@@ -35,10 +35,11 @@ or detached as floating windows, each with its own terminal and `claude` process
   save connections, browse remote folders with the same badges as local ones,
   and resume existing conversations stored there. The remote folder is
   remembered for subsequent sessions.
-- **Notifications when a session awaits input.** With multiple tiles open, you
-  cannot monitor them all: when a session transitions to waiting for a response,
-  a system notification appears and the taskbar icon flashes. Clicking it takes
-  you directly to that tile with the terminal focused.
+- **Notifications when a session awaits input or finishes its turn.** With
+  multiple tiles open, you cannot monitor them all: when a session starts
+  waiting for a response, or finishes its turn, a system notification appears
+  and the taskbar icon flashes. Clicking it takes you directly to that tile with
+  the terminal focused. Each kind has its own switch in Settings.
 - **Monitoring drawer.** A tab on the right edge slides out a panel showing
   daily costs, token usage, and context window fill percentage for each session.
   It can be detached into a standalone, always-on-top window and moved to another
@@ -342,6 +343,9 @@ Design choices not immediately obvious from the code:
   session discovery does not count as a transition: otherwise, launching the app
   would treat all active sessions as 'new' and fire a barrage of alerts for
   existing states.
+- **A finished turn must stay finished for 1.5 seconds** (busy to idle) before
+  it is announced, so a short idle between two steps of the same turn cannot
+  trigger it. Several sessions finishing together produce one notification.
 - **Only sessions belonging to a managed tile trigger notifications.** The
   registry contains every active Claude Code process on the machine, including
   those opened in external terminal windows; notifying for external sessions

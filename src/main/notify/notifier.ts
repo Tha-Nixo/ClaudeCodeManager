@@ -4,18 +4,22 @@ import { BrowserWindow, Notification, app } from 'electron'
 import type { LiveSession, MonitorPane } from '@shared/types'
 
 /**
- * Notifies when a session starts waiting for input.
+ * Notifies when a session starts waiting for input, and when it finishes its
+ * turn (#24).
  *
  * This is the whole point of a multi-session manager: with six panes open you
  * cannot watch them all, and the app already knows the exact moment one stops
  * to wait. It reads it from the registry Claude Code maintains, with a watcher
- * and a 120 ms delay.
+ * and a 120 ms delay. The most frequent reason to look at a pane is that
+ * Claude finished (busy -> idle); the permission dialog (-> waiting) is the
+ * other one.
  *
  * Three rules keep this useful instead of annoying:
  *
- * 1. Notify only on the TRANSITION to "waiting for input", not for as long as
- *    it stays there. The registry is rewritten often, and notifying on every
- *    rewrite would produce a burst for a single wait.
+ * 1. Notify only on the TRANSITION, not for as long as the state lasts. The
+ *    registry is rewritten often, and notifying on every rewrite would produce
+ *    a burst for a single wait. A finished turn must also stay idle for
+ *    FINISH_DEBOUNCE_MS, so a short idle between two steps cannot trigger it.
  * 2. No notification while the window has focus: whoever is looking at the
  *    app already sees the dot change color.
  * 3. Only sessions that belong to a pane. The registry holds every live Claude
@@ -45,16 +49,26 @@ const previous = new Map<string, RememberedSession>()
  * look like a first sighting and the alert would not go out, exactly at the
  * moment it is most likely to be needed.
  */
-interface RememberedSession {
+export interface RememberedSession {
   status: string
   missing: number
+  /**
+   * When the session went from busy to idle, while that finish has not been
+   * announced yet. Cleared by any other status, so an idle that does not last
+   * FINISH_DEBOUNCE_MS never turns into an alert.
+   */
+  finishedAt?: number
 }
 
 /** Number of consecutive absent cycles allowed before eviction. */
 const FORGET_AFTER_MISSES = 5
+/** How long busy -> idle must hold before it counts as a finished turn. */
+export const FINISH_DEBOUNCE_MS = 1500
 /** Known panes published from renderer on layout updates. */
 let known: MonitorPane[] = []
 let enabled = true
+let finishEnabled = true
+let finishTimer: NodeJS.Timeout | null = null
 
 export function initNotifier(): void {
   // It must be set before building any Notification.
@@ -65,13 +79,20 @@ export function setNotificationsEnabled(value: boolean): void {
   enabled = value
 }
 
+/** "Notify when a session finishes": off means no alert at all, not even a flash. */
+export function setFinishNotificationsEnabled(value: boolean): void {
+  finishEnabled = value
+}
+
 export function setKnownPanes(panes: MonitorPane[]): void {
   known = Array.isArray(panes) ? panes : []
 }
 
 export interface PendingNotice {
+  kind: 'waiting' | 'finished'
   pane: MonitorPane
-  live: LiveSession
+  /** What the session waits for (waiting only): shown as the toast body. */
+  detail: string | null
 }
 
 /**
@@ -85,7 +106,8 @@ export interface PendingNotice {
 export function decideNotices(
   sessions: LiveSession[],
   panes: MonitorPane[],
-  seenBefore: Map<string, RememberedSession>
+  seenBefore: Map<string, RememberedSession>,
+  at = Date.now()
 ): PendingNotice[] {
   const present = new Set<string>()
   const out: PendingNotice[] = []
@@ -94,7 +116,18 @@ export function decideNotices(
     present.add(live.sessionId)
     const before = seenBefore.get(live.sessionId)
     const now = live.status ?? 'unknown'
-    seenBefore.set(live.sessionId, { status: now, missing: 0 })
+
+    // A finish is remembered while the session stays idle, and forgotten as
+    // soon as it does anything else. The alert itself waits for dueFinished().
+    let finishedAt: number | undefined
+    if (before !== undefined && now === 'idle') {
+      if (before.status === 'busy') finishedAt = at
+      else if (before.status === 'idle') finishedAt = before.finishedAt
+    }
+    seenBefore.set(
+      live.sessionId,
+      finishedAt === undefined ? { status: now, missing: 0 } : { status: now, missing: 0, finishedAt }
+    )
 
     // Only the transition, and only toward waiting. An undefined `before` means a
     // first sighting: when the app starts every session would be "new", and a
@@ -102,20 +135,53 @@ export function decideNotices(
     if (before === undefined || before.status === now || now !== 'waiting') continue
 
     const pane = panes.find((p) => p.claudeSessionId === live.sessionId)
-    if (pane) out.push({ pane, live })
+    if (pane) out.push({ kind: 'waiting', pane, detail: live.waitingFor ?? null })
   }
 
   // Sessions that disappeared are not forgotten at once: the registry is
   // rewritten exactly when the status changes, and a one-poll absence is
   // normal. Forgetting at once made the return look like a first sighting,
   // and the alert did not go out.
+  // A pending finish is dropped too: a session that went away (/exit) right
+  // after its turn has nothing left to announce.
   for (const [id, record] of [...seenBefore.entries()]) {
     if (present.has(id)) continue
     if (record.missing + 1 >= FORGET_AFTER_MISSES) seenBefore.delete(id)
-    else seenBefore.set(id, { ...record, missing: record.missing + 1 })
+    else seenBefore.set(id, { status: record.status, missing: record.missing + 1 })
   }
 
   return out
+}
+
+/**
+ * Finished turns whose idle has lasted FINISH_DEBOUNCE_MS, for managed panes
+ * only. Each finish is announced once: its mark is cleared here.
+ */
+export function dueFinished(
+  panes: MonitorPane[],
+  seenBefore: Map<string, RememberedSession>,
+  at = Date.now()
+): PendingNotice[] {
+  const out: PendingNotice[] = []
+  for (const [id, record] of seenBefore) {
+    if (record.finishedAt === undefined || record.missing > 0) continue
+    if (at - record.finishedAt < FINISH_DEBOUNCE_MS) continue
+    seenBefore.set(id, { status: record.status, missing: record.missing })
+    const pane = panes.find((p) => p.claudeSessionId === id)
+    if (pane) out.push({ kind: 'finished', pane, detail: null })
+  }
+  return out
+}
+
+/** Earliest moment a pending finish becomes due, or null if none is pending. */
+function nextFinishDue(seenBefore: Map<string, RememberedSession>): number | null {
+  let next: number | null = null
+  for (const record of seenBefore.values()) {
+    if (record.finishedAt === undefined || record.missing > 0) continue
+    const due = record.finishedAt + FINISH_DEBOUNCE_MS
+    if (next === null || due < next) next = due
+  }
+  return next
 }
 
 /**
@@ -126,8 +192,28 @@ export function decideNotices(
  */
 export function onLiveChange(sessions: LiveSession[], getWindow: () => BrowserWindow | null): void {
   const waiting = decideNotices(sessions, known, previous)
-  if (waiting.length === 0) return
+  if (waiting.length > 0) deliver(waiting, getWindow)
+  scheduleFinishCheck(getWindow)
+}
 
+/**
+ * A finished turn is announced only after its idle has lasted, so it needs a
+ * timer: the registry does not change again while a session sits idle.
+ */
+function scheduleFinishCheck(getWindow: () => BrowserWindow | null): void {
+  if (finishTimer) clearTimeout(finishTimer)
+  finishTimer = null
+  const due = nextFinishDue(previous)
+  if (due === null) return
+  finishTimer = setTimeout(() => {
+    finishTimer = null
+    const finished = dueFinished(known, previous)
+    if (finished.length > 0 && finishEnabled) deliver(finished, getWindow)
+    scheduleFinishCheck(getWindow)
+  }, Math.max(0, due - Date.now()))
+}
+
+function deliver(notices: PendingNotice[], getWindow: () => BrowserWindow | null): void {
   const win = getWindow()
   // Whoever is looking at the app already sees the dot change color: a system
   // notification on top of the window that triggered it is just noise. A
@@ -135,31 +221,45 @@ export function onLiveChange(sessions: LiveSession[], getWindow: () => BrowserWi
   // it active: it is treated as not being watched.
   const visible = Boolean(win && win.isFocused() && !win.isMinimized())
 
-  traceForTests(waiting, visible)
+  traceForTests(notices, visible)
   if (visible) return
 
-  notify(waiting, win)
+  notify(notices, win)
 }
 
-function notify(waiting: PendingNotice[], win: BrowserWindow | null): void {
+/** Toast title and body: several notices of one kind become a single toast. */
+export function noticeText(notices: PendingNotice[]): { title: string; body: string } {
+  const first = notices[0]
+  const finished = first.kind === 'finished'
+  if (notices.length === 1) {
+    return {
+      title: finished
+        ? `${first.pane.label} finished`
+        : `${first.pane.label} is waiting for input`,
+      body: finished ? first.pane.where : (first.detail ?? first.pane.where)
+    }
+  }
+  return {
+    title: finished
+      ? `${notices.length} sessions finished`
+      : `${notices.length} sessions waiting for input`,
+    body: notices.map((n) => n.pane.label).join(' · ')
+  }
+}
+
+function notify(notices: PendingNotice[], win: BrowserWindow | null): void {
   // The taskbar flash happens anyway: it stays visible even when system
   // notifications are turned off or suppressed by Windows Focus Assist.
   if (win && !win.isDestroyed()) win.flashFrame(true)
 
-  if (!enabled || !Notification.isSupported()) return
+  // notifyOnWaiting turns off the waiting toast only; finished notices only
+  // get here when notifyOnFinish is on.
+  const toastsOn = notices[0].kind === 'finished' ? finishEnabled : enabled
+  if (!toastsOn || !Notification.isSupported()) return
 
   // Several sessions at once become a single alert: three stacked
   // notifications for one event are worse than one that sums them up.
-  const title =
-    waiting.length === 1
-      ? `${waiting[0].pane.label} is waiting for input`
-      : `${waiting.length} sessions waiting for input`
-
-  const body =
-    waiting.length === 1
-      ? (waiting[0].live.waitingFor ?? waiting[0].pane.where)
-      : waiting.map((w) => w.pane.label).join(' · ')
-
+  const { title, body } = noticeText(notices)
   const notification = new Notification({ title, body, silent: false })
 
   // The click leads to the app and to the right pane: without it the alert
@@ -171,7 +271,7 @@ function notify(waiting: PendingNotice[], win: BrowserWindow | null): void {
     target.show()
     target.focus()
     target.flashFrame(false)
-    target.webContents.send('notify:focus-pane', waiting[0].pane.paneId)
+    target.webContents.send('notify:focus-pane', notices[0].pane.paneId)
   })
 
   notification.show()
@@ -186,14 +286,14 @@ function notify(waiting: PendingNotice[], win: BrowserWindow | null): void {
  * the trace goes in its folder. In the packaged app the variable is never set
  * and nothing is written.
  */
-function traceForTests(waiting: PendingNotice[], suppressed: boolean): void {
+function traceForTests(notices: PendingNotice[], suppressed: boolean): void {
   if (process.env.CM_DEV_BRIDGE !== '1') return
   try {
     const outcome = suppressed ? 'SUPPRESSED(window visible)' : 'SHOWN'
-    const who = waiting.map((w) => w.pane.paneId.slice(0, 8)).join(',')
+    const who = notices.map((n) => n.pane.paneId.slice(0, 8)).join(',')
     appendFileSync(
       join(app.getPath('userData'), 'dev-bridge', 'notifications.log'),
-      `${new Date().toISOString()} ${outcome} ${who}\n`,
+      `${new Date().toISOString()} ${outcome} ${notices[0].kind} ${who}\n`,
       'utf8'
     )
   } catch {
