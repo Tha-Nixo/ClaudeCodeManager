@@ -15,6 +15,8 @@ interface PaneProps {
   index: number
   onFocus: () => void
   onClose: () => void
+  /** Closes this pane and opens the folder picker: offered when launch failed. */
+  onReplace: () => void
   onSlotReady: (slot: HTMLDivElement) => void
   onHeaderDragStart: (e: React.PointerEvent) => void
   onFloatResizeStart: (e: React.PointerEvent) => void
@@ -30,6 +32,7 @@ export function Pane({
   index,
   onFocus,
   onClose,
+  onReplace,
   onSlotReady,
   onHeaderDragStart,
   onFloatResizeStart
@@ -116,6 +119,13 @@ export function Pane({
           <div className="cm-notice">
             <div className="cm-notice__title">Unable to launch terminal</div>
             <div>{meta.error}</div>
+            <button
+              className="cm-chip"
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={onReplace}
+            >
+              Choose a folder…
+            </button>
           </div>
         )}
       </div>

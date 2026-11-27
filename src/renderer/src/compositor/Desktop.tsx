@@ -19,6 +19,8 @@ interface DesktopProps {
   sessions: Record<string, SessionMeta>
   onFocusPane: (paneId: string) => void
   onClosePane: (paneId: string) => void
+  /** Closes a pane that failed to launch and opens the folder picker. */
+  onReplacePane: (paneId: string) => void
   onSlotReady: (paneId: string, slot: HTMLDivElement) => void
   onSetRatio: (path: string, ratio: number) => void
   onMoveFloating: (paneId: string, x: number, y: number) => void
@@ -47,6 +49,7 @@ export function Desktop({
   sessions,
   onFocusPane,
   onClosePane,
+  onReplacePane,
   onSlotReady,
   onSetRatio,
   onMoveFloating,
@@ -321,6 +324,7 @@ export function Desktop({
               onCloseSearch={onCloseSearch}
               onFocus={() => onFocusPane(rect.id)}
               onClose={() => onClosePane(rect.id)}
+              onReplace={() => onReplacePane(rect.id)}
               onSlotReady={(slot) => onSlotReady(rect.id, slot)}
               onHeaderDragStart={(e) =>
                 rect.floating ? onFloatDragStart(e, rect.id) : onTileDragStart(e, rect.id)

@@ -1,11 +1,11 @@
 import { EventEmitter } from 'node:events'
 import { randomUUID } from 'node:crypto'
-import { existsSync } from 'node:fs'
 import { spawn as ptySpawn, type IPty } from '@lydell/node-pty'
 import type { CreateSessionResult, LaunchOptions } from '@shared/types'
 import { buildClaudeArgs, expectedClaudeSessionId, resolveClaudeExecutable } from '../claude/cli'
 import { ensureBootstrapScript, powershellArgs } from './bootstrap'
 import { buildPtyEnv } from './env'
+import { spawnCwd } from './cwd'
 import { buildCommandLine } from './winargs'
 import { buildSshInvocation, sshDestination } from '../ssh/command'
 
@@ -44,7 +44,7 @@ export class PtyManager extends EventEmitter<PtyManagerEvents> {
     const id = randomUUID()
     const claudeSessionId = expectedClaudeSessionId(opts, id)
 
-    const cwd = existsSync(opts.cwd) ? opts.cwd : process.env.USERPROFILE || process.cwd()
+    const cwd = spawnCwd(opts)
     const script = ensureBootstrapScript()
 
     // A remote pane launches ssh, which in turn runs claude on the server.
