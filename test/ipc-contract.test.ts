@@ -233,7 +233,8 @@ describe('IPC Contract: events from main to renderer', () => {
 function preloadMembers(source: string): string[] {
   const members: string[] = []
   let group: string | null = null
-  for (const line of source.split('\n')) {
+  // A Windows checkout has CRLF line endings: '\r' would break the '$' anchors.
+  for (const line of source.split(/\r?\n/)) {
     const opened = /^  (\w+): \{$/.exec(line)
     if (opened) {
       group = opened[1]
