@@ -67,7 +67,8 @@ export class PtyManager extends EventEmitter<PtyManagerEvents> {
         commandLine: buildCommandLine(invocation.args),
         label: remote
           ? `Connecting to ${sshDestination(remote)} — ${remote.path}`
-          : undefined
+          : undefined,
+        ownerPid: process.pid
       })
     })
 

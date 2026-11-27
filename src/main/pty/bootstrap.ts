@@ -29,12 +29,35 @@ $cmCwd     = $env:CM_CWD
 $cmExe     = $env:CM_EXE
 $cmCmdLine = $env:CM_CMDLINE
 $cmLabel   = $env:CM_LABEL
+$cmOwner   = $env:CM_OWNER_PID
 
 # The variables must not linger in the interactive shell or in child processes.
-Remove-Item Env:CM_CWD     -ErrorAction SilentlyContinue
-Remove-Item Env:CM_EXE     -ErrorAction SilentlyContinue
-Remove-Item Env:CM_CMDLINE -ErrorAction SilentlyContinue
-Remove-Item Env:CM_LABEL   -ErrorAction SilentlyContinue
+Remove-Item Env:CM_CWD       -ErrorAction SilentlyContinue
+Remove-Item Env:CM_EXE       -ErrorAction SilentlyContinue
+Remove-Item Env:CM_CMDLINE   -ErrorAction SilentlyContinue
+Remove-Item Env:CM_LABEL     -ErrorAction SilentlyContinue
+Remove-Item Env:CM_OWNER_PID -ErrorAction SilentlyContinue
+
+# Watchdog (#28). ClaudeManager kills its panes on a normal quit, but a crash
+# or Stop-Process -Force skips that, and under ConPTY node-pty does not even
+# know the shell's pid. So the shell watches the app itself: a second runspace
+# waits on the app's process handle (no polling, and a handle cannot be
+# confused with a later process that reuses the pid) and, when the app is
+# gone, ends this shell's whole tree: claude or ssh, and whatever they started.
+if ($cmOwner) {
+  try {
+    $cmOwnerProcess = [System.Diagnostics.Process]::GetProcessById([int]$cmOwner)
+    $cmWatchdog = [PowerShell]::Create()
+    [void]$cmWatchdog.AddScript({
+      param($owner, $shell, $taskkill)
+      $owner.WaitForExit()
+      & $taskkill /PID $shell /T /F | Out-Null
+    }).AddArgument($cmOwnerProcess).AddArgument($PID).AddArgument("$env:SystemRoot\\System32\\taskkill.exe")
+    [void]$cmWatchdog.BeginInvoke()
+  } catch {
+    # The app is already gone, or its handle cannot be opened: nothing to watch.
+  }
+}
 
 if ($cmCwd -and (Test-Path -LiteralPath $cmCwd)) {
   Set-Location -LiteralPath $cmCwd

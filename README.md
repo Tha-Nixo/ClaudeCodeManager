@@ -355,6 +355,12 @@ Design choices not immediately obvious from the code:
 - **A minimized window is treated as unobserved**, even if the OS still
   considers it focused/active: it is not visible on screen, so no one can see
   the status dot change color.
+- **Every pane dies with the app, even when the app crashes.** A normal quit
+  kills the panes in `before-quit`, but a crash or `Stop-Process -Force` skips
+  it. So each pane's PowerShell bootstrap watches the ClaudeManager process
+  handle from a second runspace and, when it is gone, ends its own process
+  tree with `taskkill /T`. Waiting on the handle costs nothing, and unlike a
+  pid it cannot be confused with a later process.
 - **Panel subscribers are tracked by identity, not reference-counted.** A simple
   integer counter desynchronizes on edge cases—window closed without
   unregistering, renderer reloaded, crash—leaving a background timer running
@@ -362,12 +368,10 @@ Design choices not immediately obvious from the code:
 
 ## Known Limitations
 
-- If the app terminates abnormally (crash, `Stop-Process -Force`), tile shells
-  may stay alive: process cleanup runs on `before-quit`, which is bypassed in
-  such cases. A clean shutdown leaves no orphaned processes.
-- Displayed costs reflect standard API list prices. For users with a Max or Pro
-  subscription, this does not represent actual billed amounts, but rather the
-  equivalent API cost for the same workload.
+- Displayed costs are API prices: the ones Claude Code records itself where
+  available, list prices otherwise. For users with a Max or Pro subscription,
+  this does not represent actual billed amounts, but rather the equivalent API
+  cost for the same workload.
 - Executables are not code-signed: on first launch, Windows SmartScreen will
   display an untrusted application prompt.
 - Remote sessions lack real-time status dots and token counting: the registry

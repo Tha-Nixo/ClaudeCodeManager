@@ -39,6 +39,11 @@ export interface PtyEnvOptions {
   commandLine: string
   /** Header displayed before launch, indicating the target destination. */
   label?: string
+  /**
+   * The ClaudeManager process. The bootstrap's watchdog closes the pane's whole
+   * process tree when it dies without cleaning up (#28).
+   */
+  ownerPid?: number
 }
 
 /** process.env stripped of Claude Code session markers. */
@@ -57,7 +62,8 @@ export function buildPtyEnv(opts: PtyEnvOptions): Record<string, string | undefi
     CM_CWD: opts.cwd,
     CM_EXE: opts.exe,
     CM_CMDLINE: opts.commandLine,
-    CM_LABEL: opts.label ?? ''
+    CM_LABEL: opts.label ?? '',
+    CM_OWNER_PID: opts.ownerPid ? String(opts.ownerPid) : ''
   }
 }
 
