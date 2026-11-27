@@ -3,12 +3,14 @@ import type {
   AppConfig,
   IndexKind,
   LaunchOptions,
+  LiveSession,
   MonitorPane,
   PersistedLayout,
   SshConnection,
   SshTarget
 } from '@shared/types'
 import type { LiveSessions } from './claude/live'
+import { remoteSessions } from './claude/remoteLive'
 import { isResumable, sessionsForFolder } from './claude/transcripts'
 import { devToolsAllowed } from './dev/devtools'
 import { listDir } from './fs/browse'
@@ -21,12 +23,18 @@ import {
   openMonitorWindow,
   setDetachedListener
 } from './monitor/window'
-import { onLiveChange, setKnownPanes, setNotificationsEnabled } from './notify/notifier'
+import {
+  onLiveChange,
+  setFinishNotificationsEnabled,
+  setKnownPanes,
+  setNotificationsEnabled
+} from './notify/notifier'
 import type { PtyManager } from './pty/manager'
 import {
   isRemoteResumable,
   listDir as listRemoteDir,
   listSessions as listRemoteSessions,
+  listTmux,
   probe
 } from './ssh/remote'
 import { getConfig, setConfig } from './store/config'
@@ -53,12 +61,24 @@ export function registerIpc(
 ): void {
   // --- PTY ------------------------------------------------------------------
 
+  // Remote panes keep their server's watch stream open (#26): one stream per
+  // connection, released when its last pane goes, however it goes.
+  const remoteByPty = new Map<string, string>()
+  const releaseRemote = (ptyId: string): void => {
+    const connectionId = remoteByPty.get(ptyId)
+    if (!connectionId) return
+    remoteByPty.delete(ptyId)
+    remoteSessions.release(connectionId)
+  }
+
   ipcMain.handle('pty:create', (_e, opts: LaunchOptions) => {
     const result = ptys.create(opts)
     if (opts.remote) {
       // For a remote pane, local folder has no meaning: what is worth
       // remembering is the connection with its last remote path.
       touchConnection(opts.remote.connectionId, opts.remote.path)
+      remoteByPty.set(result.id, opts.remote.connectionId)
+      remoteSessions.retain(opts.remote.connectionId)
     } else {
       // The folder only enters recents if the process actually launched.
       touchRecent(result.cwd)
@@ -75,6 +95,7 @@ export function registerIpc(
 
   ipcMain.handle('pty:kill', (_e, id: string) => {
     ptys.kill(id)
+    releaseRemote(id)
   })
 
   // Forward PTY events to the renderer.
@@ -82,6 +103,7 @@ export function registerIpc(
     getWindow()?.webContents.send('pty:data', { id, data })
   })
   ptys.on('exit', (id, exitCode, signal) => {
+    releaseRemote(id)
     getWindow()?.webContents.send('pty:exit', { id, exitCode, signal })
   })
 
@@ -133,6 +155,9 @@ export function registerIpc(
         stored.panes.map(async (pane) => {
           const id = typeof pane.claudeSessionId === 'string' ? pane.claudeSessionId : null
           if (!id) return { ...pane, claudeSessionId: null }
+          // A tmux pane re-attaches (#27): nothing is resumed, so there is no
+          // transcript to look for, and no reason to wait for the server.
+          if (pane.launch?.remote?.tmux) return pane
 
           const remote = pane.launch?.remote
           const alive = remote
@@ -153,13 +178,20 @@ export function registerIpc(
 
   // --- Claude sessions ------------------------------------------------------
 
-  ipcMain.handle('claude:live', () => live.sessions)
-  ipcMain.handle('claude:sessionsFor', (_e, folder: string) => sessionsForFolder(folder))
-
-  live.on('change', (sessions) => {
+  // Local and remote sessions travel together: the renderer and the notifier
+  // tell them apart by the pane they belong to, not by where they run.
+  const allSessions = (): LiveSession[] => [...live.sessions, ...remoteSessions.sessions]
+  const liveChanged = (): void => {
+    const sessions = allSessions()
     getWindow()?.webContents.send('claude:live-change', sessions)
     onLiveChange(sessions, getWindow)
-  })
+  }
+
+  ipcMain.handle('claude:live', () => allSessions())
+  ipcMain.handle('claude:sessionsFor', (_e, folder: string) => sessionsForFolder(folder))
+
+  live.on('change', liveChanged)
+  remoteSessions.on('change', liveChanged)
 
   // --- Monitoring panel ---------------------------------------------
 
@@ -203,6 +235,7 @@ export function registerIpc(
   ipcMain.handle('ssh:listDir', (_e, target: SshTarget, path: string) =>
     listRemoteDir(target, path)
   )
+  ipcMain.handle('ssh:tmuxPanes', (_e, target: SshTarget) => listTmux(target))
   ipcMain.handle('ssh:sessionsFor', (_e, target: SshTarget, path: string) =>
     listRemoteSessions(target, path)
   )
@@ -224,11 +257,13 @@ export function registerIpc(
   ipcMain.handle('config:set', (_e, patch: Partial<AppConfig>) => {
     const next = setConfig(patch)
     setNotificationsEnabled(next.notifyOnWaiting)
+    setFinishNotificationsEnabled(next.notifyOnFinish)
     return next
   })
 
   // Align initial state immediately: the preference is already on disk.
   setNotificationsEnabled(getConfig().notifyOnWaiting)
+  setFinishNotificationsEnabled(getConfig().notifyOnFinish)
 
   // --- Window -------------------------------------------------------------
 

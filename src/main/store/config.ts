@@ -133,6 +133,7 @@ export function getConfig(): AppConfig {
     scanRoots: roots.length ? roots : defaultRoots(),
     themeId: str(stored?.themeId, DEFAULT_CONFIG.themeId),
     notifyOnWaiting: bool(stored?.notifyOnWaiting, DEFAULT_CONFIG.notifyOnWaiting),
+    notifyOnFinish: bool(stored?.notifyOnFinish, DEFAULT_CONFIG.notifyOnFinish),
     // Keymap is an open map rather than a fixed-shape object: keys are
     // arbitrary user-defined shortcut sequences, so here we only verify
     // it is a Record<string, string>. The rest is validated by `resolveKeymap`.

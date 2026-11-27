@@ -1,4 +1,4 @@
-import type { LaunchOptions, SshTarget } from '@shared/types'
+import type { LaunchOptions, SshTarget, TmuxTarget } from '@shared/types'
 import { buildClaudeArgs } from '../claude/cli'
 
 /**
@@ -116,10 +116,33 @@ export function buildSshInvocation(opts: LaunchOptions, sessionId: string): SshI
   const target = opts.remote
   if (!target) throw new Error('buildSshInvocation requires opts.remote')
 
+  const command = target.tmux ? tmuxAttachCommand(target.tmux) : remoteCommand(opts, sessionId)
   return {
     file: 'ssh',
-    args: [...connectionArgs(target), sshDestination(target), remoteCommand(opts, sessionId)]
+    args: [...connectionArgs(target), sshDestination(target), command]
   }
+}
+
+/**
+ * Attaches to an existing tmux session instead of starting claude (#27), and
+ * brings up the pane that was picked.
+ *
+ * `exec` again: detaching (prefix d) ends ssh, and the pane drops back to the
+ * local shell like any other remote pane. The session name is matched exactly
+ * ('=' prefix): a session called "1" must not be taken for window 1. The ids
+ * come from the layout file, so they are checked before being used, and quoted
+ * like every other value.
+ */
+export function tmuxAttachCommand(tmux: TmuxTarget): string {
+  const session = `=${tmux.session}`
+  const gone = `ClaudeManager: tmux session "${tmux.session}" no longer exists on this server.`
+  const attach = ['tmux', 'attach-session', '-t', session]
+  if (/^@\d+$/.test(tmux.windowId)) attach.push(';', 'select-window', '-t', tmux.windowId)
+  if (/^%\d+$/.test(tmux.paneId)) attach.push(';', 'select-pane', '-t', tmux.paneId)
+  return [
+    `tmux has-session -t ${shellQuote(session)} 2>/dev/null || { echo ${shellQuote(gone)} >&2; exit 1; }`,
+    `exec ${attach.map(shellQuote).join(' ')}`
+  ].join('\n')
 }
 
 /** Non-interactive ssh command, to query the server. */

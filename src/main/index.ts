@@ -1,6 +1,7 @@
 import { join } from 'node:path'
 import { app, BrowserWindow, Menu, session, shell } from 'electron'
 import { LiveSessions } from './claude/live'
+import { remoteSessions } from './claude/remoteLive'
 import { installDevBridge } from './dev/bridge'
 import { devToolsPreferences } from './dev/devtools'
 import { registerIpc } from './ipc'
@@ -147,6 +148,7 @@ if (!app.requestSingleInstanceLock()) {
     // write, which must be flushed before quitting.
     flushLayout()
     live.stop()
+    remoteSessions.stopAll()
     stopUpdater()
     ptys.killAll()
   })

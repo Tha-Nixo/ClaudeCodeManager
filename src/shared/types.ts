@@ -51,6 +51,8 @@ export interface RemoteLaunch extends SshTarget {
   path: string
   /** Connection name for pane header. */
   name: string
+  /** Attach to this tmux pane instead of starting claude (#27). */
+  tmux?: TmuxTarget
 }
 
 /** Server reconnaissance probe result. */
@@ -90,6 +92,38 @@ export interface RemoteSession {
   lastPrompt: string | null
   modifiedAt: number
   sizeBytes: number
+}
+
+/** A tmux pane on a server, and the Claude Code session running in it, if any (#27). */
+export interface RemoteTmuxPane {
+  session: string
+  /** tmux window id, e.g. '@1'. */
+  windowId: string
+  /** tmux pane id, e.g. '%1': unique on the server while the pane lives. */
+  paneId: string
+  windowName: string
+  /** What the pane runs now (`pane_current_command`). */
+  command: string
+  path: string
+  /** Another client is attached to the session. */
+  attached: boolean
+  /** From the server's registry, whose `tmux` field names this pane. */
+  claude: { sessionId: string; status?: string; name?: string } | null
+}
+
+export interface RemoteTmuxListing {
+  ok: boolean
+  error?: string
+  panes: RemoteTmuxPane[]
+}
+
+/** Where a remote pane attaches instead of starting claude (#27). */
+export interface TmuxTarget {
+  session: string
+  windowId: string
+  paneId: string
+  /** Claude session in that pane when it was picked; the live registry has the last word. */
+  claudeSessionId?: string
 }
 
 export interface LaunchOptions {
@@ -158,6 +192,10 @@ export interface LiveSession {
   startedAt?: number
   updatedAt?: number
   version?: string
+  /** "<session>:@<window>.%<pane>" when Claude Code runs inside tmux (#27). */
+  tmux?: string
+  /** Connection id, for sessions reported by a server's watch stream (#26). */
+  remote?: string
 }
 
 /** Past session parsed from disk transcript. */
@@ -236,10 +274,16 @@ export interface UsageSummary {
   weekCost: number
   weekTokens: number
   totalCost: number
+  /**
+   * The part of totalCost that comes from Claude Code's own cost records
+   * (`/cost`). The rest is estimated from the price table (#25).
+   */
+  reportedCost: number
   totalTokens: number
   /** Number of transcripts with at least one counted turn. */
   sessions: number
-  byModel: { model: string; tokens: number; cost: number }[]
+  /** `approximate`: the model is not in the price table and is priced as its family's newest. */
+  byModel: { model: string; tokens: number; cost: number; approximate: boolean }[]
   byProject: { path: string; tokens: number; cost: number }[]
   generatedAt: number
 }
@@ -250,7 +294,10 @@ export interface SessionUsage {
   cwd: string | null
   turns: number
   tokens: number
+  /** Includes the session's subagents, as `/cost` does. */
   cost: number
+  /** The part of `cost` reported by Claude Code itself; the rest is estimated. */
+  reportedCost: number
   lastAt: number
   /**
    * Latest turn input tokens including cache: estimates current context fullness.
@@ -381,6 +428,11 @@ export interface AppConfig {
    */
   notifyOnWaiting: boolean
   /**
+   * Desktop notification when a session finishes its turn (busy -> idle,
+   * lasting at least 1.5 s). Off means no alert at all, not even a flash.
+   */
+  notifyOnFinish: boolean
+  /**
    * Custom keymap: key combo -> action.
    *
    * Overlays on top of default keymap without replacing it entirely.
@@ -403,5 +455,6 @@ export const DEFAULT_CONFIG: Omit<AppConfig, 'defaultCwd'> = {
   scanRoots: [],
   themeId: DEFAULT_THEME_ID,
   notifyOnWaiting: true,
+  notifyOnFinish: true,
   keymap: {}
 }

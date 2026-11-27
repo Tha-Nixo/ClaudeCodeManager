@@ -23,8 +23,10 @@ or detached as floating windows, each with its own terminal and `claude` process
 - **Real-time status.** The indicator dot on each tile shows whether Claude is
   working or waiting for input, read directly from the session registry that
   Claude Code maintains in `~/.claude/sessions/`.
-- **Usage statistics.** Tokens and list-price costs by day, model, and folder,
-  calculated from session transcripts.
+- **Usage statistics.** Tokens and costs by day, model, and folder, calculated
+  from session transcripts and calibrated with the cost records Claude Code
+  writes itself, so a session's total matches what `/cost` shows. Figures not
+  yet covered by those records are estimated from list prices and marked `~`.
 - **Layout restoration.** Reopening the app restores the exact tiling layout,
   resuming conversations right where they were left off.
 - **Themes.** Six built-in themes (Claude Dark and Light, Midnight, Gruvbox,
@@ -35,10 +37,11 @@ or detached as floating windows, each with its own terminal and `claude` process
   save connections, browse remote folders with the same badges as local ones,
   and resume existing conversations stored there. The remote folder is
   remembered for subsequent sessions.
-- **Notifications when a session awaits input.** With multiple tiles open, you
-  cannot monitor them all: when a session transitions to waiting for a response,
-  a system notification appears and the taskbar icon flashes. Clicking it takes
-  you directly to that tile with the terminal focused.
+- **Notifications when a session awaits input or finishes its turn.** With
+  multiple tiles open, you cannot monitor them all: when a session starts
+  waiting for a response, or finishes its turn, a system notification appears
+  and the taskbar icon flashes. Clicking it takes you directly to that tile with
+  the terminal focused. Each kind has its own switch in Settings.
 - **Monitoring drawer.** A tab on the right edge slides out a panel showing
   daily costs, token usage, and context window fill percentage for each session.
   It can be detached into a standalone, always-on-top window and moved to another
@@ -99,16 +102,25 @@ The tile executes `ssh -t` and starts `claude` in the remote folder. When the
 session closes, it drops back to the local shell, allowing you to reconnect
 without opening another tile.
 
+**tmux:** if the server has tmux, the picker also lists its panes, with the ones
+running Claude Code first, and a tile can attach to one instead of starting a
+new `claude`. Detaching (`prefix d`) drops back to the local shell. The tile
+follows whichever Claude session runs in that tmux pane, so status, alerts and
+costs work as for any remote tile, and restarting the app re-attaches it.
+
 **Authentication:** ClaudeManager never asks for or stores passwords. It relies
 on standard SSH mechanics: keys in `~/.ssh` or an SSH agent. If the server is
 not yet in your known hosts list, connect once manually with `ssh` to accept its
 host key.
 
-**What doesn't work remotely:** The status indicator dot and token statistics
-rely on local files, whereas a remote session writes them to the remote server.
-For this reason, a remote tile displays `remote` instead of `ready`/`working`:
-pretending to know what Claude is doing would be guesswork. Resuming
-conversations does work, however, as it queries the server on demand.
+**Live status and costs:** while a remote tile is open, the app keeps one extra
+ssh connection per server (not per tile) that streams the server's session
+registry and the new lines of its transcripts. Remote tiles therefore show
+`ready` / `working` / `waiting`, raise the same notifications as local ones,
+and the drawer shows their context fill and cost. The server only needs a
+POSIX shell; `inotifywait`, when installed, makes updates near-instant, and
+without it they arrive within about two seconds. If that connection drops,
+the tiles go back to saying `remote` until it reconnects on its own.
 
 ## Requirements
 
@@ -342,6 +354,9 @@ Design choices not immediately obvious from the code:
   session discovery does not count as a transition: otherwise, launching the app
   would treat all active sessions as 'new' and fire a barrage of alerts for
   existing states.
+- **A finished turn must stay finished for 1.5 seconds** (busy to idle) before
+  it is announced, so a short idle between two steps of the same turn cannot
+  trigger it. Several sessions finishing together produce one notification.
 - **Only sessions belonging to a managed tile trigger notifications.** The
   registry contains every active Claude Code process on the machine, including
   those opened in external terminal windows; notifying for external sessions
@@ -349,6 +364,12 @@ Design choices not immediately obvious from the code:
 - **A minimized window is treated as unobserved**, even if the OS still
   considers it focused/active: it is not visible on screen, so no one can see
   the status dot change color.
+- **Every pane dies with the app, even when the app crashes.** A normal quit
+  kills the panes in `before-quit`, but a crash or `Stop-Process -Force` skips
+  it. So each pane's PowerShell bootstrap watches the ClaudeManager process
+  handle from a second runspace and, when it is gone, ends its own process
+  tree with `taskkill /T`. Waiting on the handle costs nothing, and unlike a
+  pid it cannot be confused with a later process.
 - **Panel subscribers are tracked by identity, not reference-counted.** A simple
   integer counter desynchronizes on edge cases—window closed without
   unregistering, renderer reloaded, crash—leaving a background timer running
@@ -356,16 +377,12 @@ Design choices not immediately obvious from the code:
 
 ## Known Limitations
 
-- If the app terminates abnormally (crash, `Stop-Process -Force`), tile shells
-  may stay alive: process cleanup runs on `before-quit`, which is bypassed in
-  such cases. A clean shutdown leaves no orphaned processes.
-- Displayed costs reflect standard API list prices. For users with a Max or Pro
-  subscription, this does not represent actual billed amounts, but rather the
-  equivalent API cost for the same workload.
+- Displayed costs are API prices: the ones Claude Code records itself where
+  available, list prices otherwise. For users with a Max or Pro subscription,
+  this does not represent actual billed amounts, but rather the equivalent API
+  cost for the same workload.
 - Executables are not code-signed: on first launch, Windows SmartScreen will
   display an untrusted application prompt.
-- Remote sessions lack real-time status dots and token counting: the registry
-  and transcript files are located on the remote server.
 - When opening a remote folder for the first time, Claude Code prompts to
   confirm trust for that folder, just like it does locally. You must respond
   directly inside the terminal tile.

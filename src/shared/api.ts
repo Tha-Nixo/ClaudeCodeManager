@@ -16,6 +16,7 @@ import type {
   RemoteDirListing,
   RemoteProbe,
   RemoteSession,
+  RemoteTmuxListing,
   SshConnection,
   SshTarget,
   TranscriptSession,
@@ -76,6 +77,8 @@ export interface CmApi {
     /** Test connection and report home, OS, and Claude Code version. */
     probe(target: SshTarget): Promise<RemoteProbe>
     listDir(target: SshTarget, path: string): Promise<RemoteDirListing>
+    /** tmux panes on the server, matched with the Claude sessions in them (#27). */
+    tmuxPanes(target: SshTarget): Promise<RemoteTmuxListing>
     /** Existing conversations on remote server for path. */
     sessionsFor(
       target: SshTarget,

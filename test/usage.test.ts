@@ -4,7 +4,9 @@ import { join } from 'node:path'
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { contextWindowFor, costOf, priceFor, type TokenCounts } from '../src/main/usage/pricing'
+import { calibrateSession, type SessionPart } from '../src/main/usage/calibrate'
 import { scan, sessionUsage, summarize } from '../src/main/usage/scanner'
+import { costOrigin } from '../src/renderer/src/usage/UsagePanel'
 
 /**
  * Token accounting: prices, context windows and transcript parsing.
@@ -771,5 +773,195 @@ describe('scanner: local day tracking (issue #3 regression)', () => {
     assert.equal(totals.todayTokens, 0)
     assert.equal(totals.weekTokens, 0)
     assert.equal(sessionUsage()['dateless-session'].lastAt, 0)
+  })
+})
+
+// --- Calibration with cost-state (issue #25) --------------------------------
+
+/**
+ * Issue #25: the price table goes stale with every model release (#16), while
+ * Claude Code records its own figures in `cost-state` lines: cumulative per
+ * session, with subagents and background calls the transcripts never show.
+ * The scanner calibrates its per-turn costs with the last snapshot.
+ */
+describe('scanner: calibration with cost-state (issue #25)', () => {
+  const SESSION = '0f0f0f0f-1111-4222-8333-444444444444'
+
+  function turn(opts: {
+    id: string
+    at: string
+    model?: string
+    output: number
+    sessionId?: string
+  }): string {
+    return JSON.stringify({
+      type: 'assistant',
+      sessionId: opts.sessionId ?? SESSION,
+      cwd: 'C:\\fake\\project',
+      timestamp: opts.at,
+      message: {
+        id: opts.id,
+        model: opts.model ?? 'claude-opus-5-5',
+        usage: { input_tokens: 0, output_tokens: opts.output }
+      }
+    })
+  }
+
+  function costState(models: Record<string, { costUSD: number; outputTokens?: number }>): string {
+    const modelUsage: Record<string, unknown> = {}
+    let total = 0
+    for (const [model, m] of Object.entries(models)) {
+      total += m.costUSD
+      modelUsage[model] = {
+        inputTokens: 0,
+        outputTokens: m.outputTokens ?? 0,
+        cacheReadInputTokens: 0,
+        cacheCreationInputTokens: 0,
+        cacheCreationEphemeral5mInputTokens: 0,
+        cacheCreationEphemeral1hInputTokens: 0,
+        webSearchRequests: 0,
+        costUSD: m.costUSD
+      }
+    }
+    return JSON.stringify({ type: 'cost-state', sessionId: SESSION, totalCostUSD: total, modelUsage })
+  }
+
+  const near = (a: number, b: number, what: string): void =>
+    assert.ok(Math.abs(a - b) < 1e-9, `${what}: ${a} != ${b}`)
+
+  it('session totals equal the last cost-state, subagents included', () => {
+    const project = fakeRoot()
+    // 100K output tokens of Opus 5.5 = $2.00 at the table price, in two days.
+    writeTranscript(project, SESSION, [
+      turn({ id: 'm1', at: '2026-11-20T10:00:00.000Z', output: 50_000 }),
+      costState({ 'claude-opus-5-5': { costUSD: 9 } }),
+      turn({ id: 'm2', at: '2026-11-21T10:00:00.000Z', output: 50_000 }),
+      // Only the last snapshot counts: it is cumulative.
+      costState({ 'claude-opus-5-5': { costUSD: 3.3 }, 'claude-haiku-5-5': { costUSD: 0.7 } })
+    ])
+    // A subagent of the same session, before the snapshot: /cost includes it.
+    const sub = join(project, SESSION, 'subagents')
+    mkdirSync(sub, { recursive: true })
+    writeTranscript(sub, 'agent-a1', [
+      turn({ id: 's1', at: '2026-11-21T09:00:00.000Z', output: 50_000 })
+    ])
+
+    rescan()
+    const session = sessionUsage()[SESSION]
+    near(session.cost, 4, 'session cost')
+    near(session.reportedCost, 4, 'reported part')
+    // The subagent is counted with its parent, not as a session of its own.
+    assert.equal(sessionUsage()['agent-a1'], undefined)
+    assert.equal(summarize().sessions, 1)
+  })
+
+  it('per-day totals add up to the session total, in proportion to each day', () => {
+    const usage = (cost: number) => ({ tokens: { ...ZERO, output: 1 }, cost })
+    const main: SessionPart = {
+      snapshot: { at: Date.parse('2026-11-21T12:00:00Z'), models: { m: usage(8), bg: usage(1) } },
+      before: { '2026-11-20': { m: usage(1) }, '2026-11-21': { m: usage(3) } },
+      after: { '2026-11-22': { m: usage(0.5) } },
+      firstAt: 1,
+      lastAt: 2
+    }
+    const result = calibrateSession([main], () => '2026-11-21')
+    const perDay = Object.fromEntries(
+      Object.entries(result.byDay).map(([day, models]) => [
+        day,
+        Object.values(models).reduce((sum, u) => sum + u.cost, 0)
+      ])
+    )
+    // m: 4 visible -> 8 reported, factor 2. bg: invisible, on the snapshot day.
+    assert.deepEqual(perDay, { '2026-11-20': 2, '2026-11-21': 7, '2026-11-22': 0.5 })
+    near(Object.values(perDay).reduce((a, b) => a + b, 0), result.cost, 'days vs session')
+    near(result.cost, 9.5, 'session')
+    near(result.reportedCost, 9, 'reported')
+  })
+
+  it('per-day totals add up to the session total through the scanner', () => {
+    const project = fakeRoot()
+    writeTranscript(project, SESSION, [
+      turn({ id: 'd1', at: '2026-11-20T10:00:00.000Z', output: 25_000 }),
+      turn({ id: 'd2', at: '2026-11-21T10:00:00.000Z', output: 75_000 }),
+      costState({ 'claude-opus-5-5': { costUSD: 4 } })
+    ])
+
+    rescan()
+    const totals = summarize()
+    near(totals.totalCost, 4, 'total')
+    // Scaled in proportion: a quarter of the visible cost on the first day.
+    near(totals.byModel[0].cost, 4, 'by model')
+    near(totals.reportedCost, 4, 'reported')
+  })
+
+  it('a model the price table does not know gets the cost Claude Code reports', () => {
+    const project = fakeRoot()
+    writeTranscript(project, SESSION, [
+      turn({ id: 'u1', at: '2026-11-20T10:00:00.000Z', model: 'claude-newfamily-1', output: 1000 }),
+      costState({ 'claude-newfamily-1': { costUSD: 1.25, outputTokens: 1000 } })
+    ])
+
+    rescan()
+    const totals = summarize()
+    near(totals.totalCost, 1.25, 'total')
+    const row = totals.byModel.find((m) => m.model === 'claude-newfamily-1')
+    assert.ok(row, 'the model shows up in the per-model table')
+    near(row.cost, 1.25, 'model cost')
+    assert.equal(row.tokens, 1000)
+  })
+
+  it('background calls the transcript never shows land on the snapshot day', () => {
+    const project = fakeRoot()
+    writeTranscript(project, SESSION, [
+      turn({ id: 'b1', at: '2026-11-20T10:00:00.000Z', output: 50_000 }),
+      costState({ 'claude-opus-5-5': { costUSD: 1 }, 'claude-haiku-5-5': { costUSD: 0.5 } })
+    ])
+
+    rescan()
+    const totals = summarize()
+    near(totals.totalCost, 1.5, 'total')
+    near(totals.byModel.find((m) => m.model === 'claude-haiku-5-5')?.cost ?? 0, 0.5, 'haiku')
+  })
+
+  it('turns after the last snapshot are table-priced and counted as estimated', () => {
+    const project = fakeRoot()
+    writeTranscript(project, SESSION, [
+      turn({ id: 'a1', at: '2026-11-20T10:00:00.000Z', output: 50_000 }),
+      costState({ 'claude-opus-5-5': { costUSD: 1.5 } }),
+      // $20/MTok output: 50K = $1.00, not scaled by the 1.5x of the snapshot.
+      turn({ id: 'a2', at: '2026-11-20T11:00:00.000Z', output: 50_000 })
+    ])
+
+    rescan()
+    const session = sessionUsage()[SESSION]
+    near(session.cost, 2.5, 'cost')
+    near(session.reportedCost, 1.5, 'reported part')
+  })
+
+  it('without any snapshot everything is estimated, as before', () => {
+    const project = fakeRoot()
+    writeTranscript(project, SESSION, [
+      turn({ id: 'n1', at: '2026-11-20T10:00:00.000Z', output: 50_000 })
+    ])
+
+    rescan()
+    const session = sessionUsage()[SESSION]
+    near(session.cost, 1, 'cost')
+    assert.equal(session.reportedCost, 0)
+  })
+})
+
+describe('UI: reported versus estimated cost (issue #25)', () => {
+  it('a cost Claude Code reported in full is not marked', () => {
+    assert.deepEqual(costOrigin(4, 4), { estimated: false, title: 'As reported by Claude Code (/cost)' })
+    // Rounding does not turn a reported figure into an estimate.
+    assert.equal(costOrigin(4.001, 4).estimated, false)
+  })
+
+  it('an estimated part is marked, and the tooltip splits it', () => {
+    const origin = costOrigin(2.5, 1.5)
+    assert.equal(origin.estimated, true)
+    assert.equal(origin.title, '$1.50 reported by Claude Code (/cost), $1.00 estimated from list prices')
+    assert.equal(costOrigin(1, 0).title, 'Estimated from list prices')
   })
 })

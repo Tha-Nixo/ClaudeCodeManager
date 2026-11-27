@@ -15,6 +15,24 @@ export function formatCost(n: number): string {
   return `$${n.toFixed(3)}`
 }
 
+/**
+ * How a session's cost came about (#25): reported by Claude Code's own records
+ * (what /cost shows), or partly estimated from the price table. Half a cent of
+ * slack keeps rounding from marking a reported figure as estimated.
+ */
+export function costOrigin(cost: number, reportedCost: number): {
+  estimated: boolean
+  title: string
+} {
+  const estimated = cost - reportedCost > Math.max(0.005, cost * 0.005)
+  if (!estimated) return { estimated, title: 'As reported by Claude Code (/cost)' }
+  if (reportedCost <= 0) return { estimated, title: 'Estimated from list prices' }
+  return {
+    estimated,
+    title: `${formatCost(reportedCost)} reported by Claude Code (/cost), ${formatCost(cost - reportedCost)} estimated from list prices`
+  }
+}
+
 interface UsagePanelProps {
   onClose: () => void
 }
@@ -45,7 +63,7 @@ export function UsagePanel({ onClose }: UsagePanelProps): React.JSX.Element {
               <Stat label="Today" cost={summary.todayCost} tokens={summary.todayTokens} />
               <Stat label="Last 7 days" cost={summary.weekCost} tokens={summary.weekTokens} />
               <Stat label="Total" cost={summary.totalCost} tokens={summary.totalTokens} />
-              <Stat label="Transcripts" plain={String(summary.sessions)} />
+              <Stat label="Sessions" plain={String(summary.sessions)} />
             </div>
 
             <div className="cm-usage__cols">
@@ -57,7 +75,12 @@ export function UsagePanel({ onClose }: UsagePanelProps): React.JSX.Element {
                   summary.byModel.map((m) => (
                     <Bar
                       key={m.model}
-                      label={m.model}
+                      label={m.approximate ? `${m.model} ≈` : m.model}
+                      title={
+                        m.approximate
+                          ? 'Not in the price table: estimated as the newest model of its family, and corrected by Claude Code\'s records where they exist'
+                          : undefined
+                      }
                       value={m.cost}
                       max={summary.byModel[0].cost}
                       detail={`${formatTokens(m.tokens)} tok · ${formatCost(m.cost)}`}
@@ -86,7 +109,9 @@ export function UsagePanel({ onClose }: UsagePanelProps): React.JSX.Element {
             </div>
 
             <footer className="cm-usage__foot">
-              Anthropic API list pricing. With a Max or Pro subscription, this reflects
+              {formatCost(summary.reportedCost)} of {formatCost(summary.totalCost)} comes from
+              Claude Code&apos;s own records (what /cost shows); the rest is estimated from
+              Anthropic API list prices. With a Max or Pro subscription, this reflects
               equivalent API consumption rather than direct billing.
             </footer>
           </>

@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { decideNotices } from '../src/main/notify/notifier'
+import {
+  FINISH_DEBOUNCE_MS,
+  decideNotices,
+  dueFinished,
+  noticeText
+} from '../src/main/notify/notifier'
 import type { LiveSession, MonitorPane } from '@shared/types'
 
 /**
@@ -122,7 +127,8 @@ describe('notifier: when to notify', () => {
 
     assert.equal(notices.length, 1)
     assert.equal(notices[0].pane.label, 'API')
-    assert.equal(notices[0].live.sessionId, 's1', 'notice must carry correct session id')
+    assert.equal(notices[0].kind, 'waiting')
+    assert.equal(notices[0].pane.claudeSessionId, 's1', 'notice must carry correct session id')
   })
 
   it('does not repeat notice while session remains in waiting', () => {
@@ -172,7 +178,8 @@ describe('notifier: when to notify', () => {
   })
 
   it('does not notify for transitions to states other than waiting', () => {
-    // Only waiting needs the user: idle or busy are the app's business.
+    // decideNotices answers for waiting only. A finished turn (idle) is
+    // announced later by dueFinished, once the idle has lasted (#24).
     const memory = new Map<string, MemoryEntry>()
     const panes = [monitorPane('s1', 'API')]
 
@@ -316,5 +323,114 @@ describe('notifier: passed memory is updated in-place', () => {
 
     decideNotices([liveSession('s1', 'busy')], panes, first)
     assert.deepEqual(notifiedLabels(decideNotices([liveSession('s1', 'waiting')], panes, new Map())), [])
+  })
+})
+
+/**
+ * Issue #24: the most frequent reason to look at a pane is that Claude finished
+ * its turn (busy -> idle), and it produced no alert. The finish is decided in
+ * two steps: decideNotices marks the transition, and dueFinished announces it
+ * once the idle has lasted FINISH_DEBOUNCE_MS, so a short idle between two
+ * steps of the same turn cannot trigger it.
+ */
+describe('notifier: finished turn (issue #24)', () => {
+  const T0 = 1_000_000
+
+  function finishAt(memory: Map<string, MemoryEntry>, panes: MonitorPane[], id = 's1'): void {
+    decideNotices([liveSession(id, 'busy')], panes, memory, T0 - 10_000)
+    decideNotices([liveSession(id, 'idle')], panes, memory, T0)
+  }
+
+  it('busy -> idle alerts once the idle has lasted the debounce', () => {
+    const memory = new Map<string, MemoryEntry>()
+    const panes = [monitorPane('s1', 'API')]
+    finishAt(memory, panes)
+
+    assert.deepEqual(notifiedLabels(dueFinished(panes, memory, T0 + FINISH_DEBOUNCE_MS - 1)), [])
+    const due = dueFinished(panes, memory, T0 + FINISH_DEBOUNCE_MS)
+    assert.deepEqual(notifiedLabels(due), ['API'])
+    assert.equal(due[0].kind, 'finished')
+    // Announced once: the next timer tick finds nothing.
+    assert.deepEqual(dueFinished(panes, memory, T0 + 60_000), [])
+  })
+
+  it('an idle shorter than the debounce does not alert', () => {
+    const memory = new Map<string, MemoryEntry>()
+    const panes = [monitorPane('s1', 'API')]
+    finishAt(memory, panes)
+    // Back to work before the debounce: it was a pause, not the end of the turn.
+    decideNotices([liveSession('s1', 'busy')], panes, memory, T0 + 500)
+    assert.deepEqual(dueFinished(panes, memory, T0 + 10_000), [])
+  })
+
+  it('idle -> idle (a registry rewrite) does not restart or repeat the alert', () => {
+    const memory = new Map<string, MemoryEntry>()
+    const panes = [monitorPane('s1', 'API')]
+    finishAt(memory, panes)
+    // The rewrite keeps the original moment, so the debounce is not pushed back.
+    decideNotices([liveSession('s1', 'idle')], panes, memory, T0 + 1000)
+    assert.deepEqual(notifiedLabels(dueFinished(panes, memory, T0 + FINISH_DEBOUNCE_MS)), ['API'])
+    decideNotices([liveSession('s1', 'idle')], panes, memory, T0 + 5000)
+    assert.deepEqual(dueFinished(panes, memory, T0 + 60_000), [])
+  })
+
+  it('a session first seen idle is not a finish', () => {
+    const memory = new Map<string, MemoryEntry>()
+    const panes = [monitorPane('s1', 'API')]
+    decideNotices([liveSession('s1', 'idle')], panes, memory, T0)
+    assert.deepEqual(dueFinished(panes, memory, T0 + 60_000), [])
+  })
+
+  it('waiting -> idle is not a finish: only the end of real work counts', () => {
+    const memory = new Map<string, MemoryEntry>()
+    const panes = [monitorPane('s1', 'API')]
+    decideNotices([liveSession('s1', 'waiting')], panes, memory, T0 - 1000)
+    decideNotices([liveSession('s1', 'idle')], panes, memory, T0)
+    assert.deepEqual(dueFinished(panes, memory, T0 + 60_000), [])
+  })
+
+  it('sessions of other terminals finish without an alert', () => {
+    const memory = new Map<string, MemoryEntry>()
+    const panes = [monitorPane('s1', 'API')]
+    finishAt(memory, panes, 'foreign')
+    assert.deepEqual(dueFinished(panes, memory, T0 + 60_000), [])
+  })
+
+  it('a session that exits right after its turn has nothing to announce', () => {
+    const memory = new Map<string, MemoryEntry>()
+    const panes = [monitorPane('s1', 'API')]
+    finishAt(memory, panes)
+    // /exit: the registry file goes away before the debounce ends.
+    decideNotices([], panes, memory, T0 + 300)
+    assert.deepEqual(dueFinished(panes, memory, T0 + 60_000), [])
+  })
+
+  it('several panes finishing together become one notice', () => {
+    const memory = new Map<string, MemoryEntry>()
+    const panes = [monitorPane('s1', 'API'), monitorPane('s2', 'Web')]
+    decideNotices([liveSession('s1', 'busy'), liveSession('s2', 'busy')], panes, memory, T0 - 5000)
+    decideNotices([liveSession('s1', 'idle'), liveSession('s2', 'idle')], panes, memory, T0)
+    const due = dueFinished(panes, memory, T0 + FINISH_DEBOUNCE_MS)
+    assert.deepEqual(notifiedLabels(due).sort(), ['API', 'Web'])
+    assert.deepEqual(noticeText(due), { title: '2 sessions finished', body: 'API · Web' })
+  })
+
+  it('names the pane that finished, and the one that waits', () => {
+    const memory = new Map<string, MemoryEntry>()
+    const panes = [monitorPane('s1', 'API')]
+    finishAt(memory, panes)
+    const finished = dueFinished(panes, memory, T0 + FINISH_DEBOUNCE_MS)
+    assert.equal(noticeText(finished).title, 'API finished')
+
+    const waiting = decideNotices(
+      [{ ...liveSession('s1', 'waiting'), waitingFor: 'Bash: npm test' }],
+      panes,
+      memory,
+      T0 + 10_000
+    )
+    assert.deepEqual(noticeText(waiting), {
+      title: 'API is waiting for input',
+      body: 'Bash: npm test'
+    })
   })
 })
