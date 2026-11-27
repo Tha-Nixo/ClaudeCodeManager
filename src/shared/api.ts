@@ -4,7 +4,6 @@ import type {
   CreateSessionResult,
   DirEntry,
   FolderCandidate,
-  FolderInfo,
   IndexKind,
   IndexStatus,
   LaunchOptions,
@@ -43,7 +42,6 @@ export interface CmApi {
     write(id: string, data: string): void
     resize(id: string, cols: number, rows: number): void
     kill(id: string): Promise<void>
-    scrollback(id: string): Promise<string>
     /** Returns unsubscribe callback. */
     onData(cb: (e: PtyDataEvent) => void): () => void
     /** Returns unsubscribe callback. */
@@ -61,8 +59,6 @@ export interface CmApi {
     /** Fuzzy search on index; empty query = sorted by relevance. */
     search(query: string): Promise<FolderCandidate[]>
     list(path: string): Promise<ListDirResult>
-    drives(): Promise<string[]>
-    info(path: string): Promise<FolderInfo>
     favorites(): Promise<string[]>
     toggleFavorite(path: string): Promise<string[]>
   }

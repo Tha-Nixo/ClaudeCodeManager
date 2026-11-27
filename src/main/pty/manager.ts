@@ -13,8 +13,6 @@ import { buildSshInvocation, sshDestination } from '../ssh/command'
 const FLUSH_MS = 8
 /** Flush threshold: flushed immediately without waiting for the timer. */
 const FLUSH_BYTES = 64 * 1024
-/** Scrollback retained in main process to reattach terminal after renderer reload. */
-const SCROLLBACK_LIMIT = 256 * 1024
 
 interface PtySession {
   id: string
@@ -24,7 +22,6 @@ interface PtySession {
   pending: string[]
   pendingBytes: number
   flushTimer: NodeJS.Timeout | null
-  scrollback: string
   exited: boolean
 }
 
@@ -82,7 +79,6 @@ export class PtyManager extends EventEmitter<PtyManagerEvents> {
       pending: [],
       pendingBytes: 0,
       flushTimer: null,
-      scrollback: '',
       exited: false
     }
     this.sessions.set(id, session)
@@ -114,11 +110,6 @@ export class PtyManager extends EventEmitter<PtyManagerEvents> {
     } catch {
       // The process may have terminated between check and call.
     }
-  }
-
-  /** Output accumulated so far, to reattach a terminal after reload. */
-  scrollback(id: string): string {
-    return this.sessions.get(id)?.scrollback ?? ''
   }
 
   kill(id: string): void {
@@ -165,11 +156,6 @@ export class PtyManager extends EventEmitter<PtyManagerEvents> {
     const data = s.pending.join('')
     s.pending.length = 0
     s.pendingBytes = 0
-
-    s.scrollback += data
-    if (s.scrollback.length > SCROLLBACK_LIMIT) {
-      s.scrollback = s.scrollback.slice(-SCROLLBACK_LIMIT)
-    }
 
     this.emit('data', s.id, data)
   }

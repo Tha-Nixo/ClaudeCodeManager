@@ -11,7 +11,7 @@ import type {
 import type { LiveSessions } from './claude/live'
 import { isResumable, sessionsForFolder } from './claude/transcripts'
 import { devToolsAllowed } from './dev/devtools'
-import { folderInfo, listDir, listDrives } from './fs/browse'
+import { listDir } from './fs/browse'
 import { allStatuses, cancel as cancelIndex, rescan } from './indexer/diskIndex'
 import { invalidateIndex, searchFolders } from './indexer/sources'
 import { publishPanes, subscribe, unsubscribe } from './monitor/state'
@@ -76,7 +76,6 @@ export function registerIpc(
   ipcMain.handle('pty:kill', (_e, id: string) => {
     ptys.kill(id)
   })
-  ipcMain.handle('pty:scrollback', (_e, id: string) => ptys.scrollback(id))
 
   // Forward PTY events to the renderer.
   ptys.on('data', (id, data) => {
@@ -212,8 +211,6 @@ export function registerIpc(
 
   ipcMain.handle('folders:search', (_e, query: string) => searchFolders(query))
   ipcMain.handle('folders:list', (_e, path: string) => listDir(path))
-  ipcMain.handle('folders:drives', () => listDrives())
-  ipcMain.handle('folders:info', (_e, path: string) => folderInfo(path))
   ipcMain.handle('folders:favorites', () => getFavorites())
   ipcMain.handle('folders:toggleFavorite', (_e, path: string) => {
     const next = toggleFavorite(path)
