@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { CmApi, ListDirResult } from '@shared/api'
+import { DEVTOOLS_ARG } from '@shared/devtools'
 import type { ThemeCatalog } from '@shared/theme'
 import type {
   AppConfig,
@@ -165,7 +166,8 @@ const api: CmApi = {
     toggleFullscreen: (): void => ipcRenderer.send('win:toggle-fullscreen'),
     minimize: (): void => ipcRenderer.send('win:minimize'),
     quit: (): void => ipcRenderer.send('win:quit'),
-    toggleDevTools: (): void => ipcRenderer.send('win:toggle-devtools')
+    toggleDevTools: (): void => ipcRenderer.send('win:toggle-devtools'),
+    devToolsAllowed: process.argv.includes(DEVTOOLS_ARG)
   }
 }
 

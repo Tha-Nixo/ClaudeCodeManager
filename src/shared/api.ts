@@ -146,5 +146,7 @@ export interface CmApi {
     minimize(): void
     quit(): void
     toggleDevTools(): void
+    /** False in packaged builds, unless started with CM_DEVTOOLS=1 (#19). */
+    devToolsAllowed: boolean
   }
 }

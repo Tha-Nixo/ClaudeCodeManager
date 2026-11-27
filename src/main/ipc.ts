@@ -10,6 +10,7 @@ import type {
 } from '@shared/types'
 import type { LiveSessions } from './claude/live'
 import { isResumable, sessionsForFolder } from './claude/transcripts'
+import { devToolsAllowed } from './dev/devtools'
 import { folderInfo, listDir, listDrives } from './fs/browse'
 import { allStatuses, cancel as cancelIndex, rescan } from './indexer/diskIndex'
 import { invalidateIndex, searchFolders } from './indexer/sources'
@@ -241,6 +242,9 @@ export function registerIpc(
   ipcMain.on('win:minimize', () => getWindow()?.minimize())
   ipcMain.on('win:quit', () => getWindow()?.close())
   ipcMain.on('win:toggle-devtools', () => {
+    // The window has devTools disabled in packaged builds anyway; returning
+    // here keeps that decision in one readable place.
+    if (!devToolsAllowed()) return
     const wc = getWindow()?.webContents
     if (!wc) return
     if (wc.isDevToolsOpened()) wc.closeDevTools()

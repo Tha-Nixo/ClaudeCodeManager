@@ -2,6 +2,7 @@ import { join } from 'node:path'
 import { app, BrowserWindow, Menu, session, shell } from 'electron'
 import { LiveSessions } from './claude/live'
 import { installDevBridge } from './dev/bridge'
+import { devToolsPreferences } from './dev/devtools'
 import { registerIpc } from './ipc'
 import { clearAttention, initNotifier } from './notify/notifier'
 import { PtyManager } from './pty/manager'
@@ -32,7 +33,8 @@ function createWindow(): void {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
-      spellcheck: false
+      spellcheck: false,
+      ...devToolsPreferences()
     }
   })
 

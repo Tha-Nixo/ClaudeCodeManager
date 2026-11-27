@@ -397,7 +397,7 @@ export default function App(): React.JSX.Element {
   // Custom bindings overlay the default map. Recomputed only when changed:
   // reinstalling the event listener on every render is wasteful.
   const { keymap, problems: keymapProblems } = useMemo(
-    () => resolveKeymap(config?.keymap),
+    () => resolveKeymap(config?.keymap, { devTools: window.cm.win.devToolsAllowed }),
     [config?.keymap]
   )
 

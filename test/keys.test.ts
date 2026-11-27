@@ -3,6 +3,7 @@ import { describe, it } from 'node:test'
 import {
   ACTION_LABELS,
   DEFAULT_KEYMAP,
+  editableActions,
   installKeyHandler,
   keyForAction,
   normalizeCombo,
@@ -444,5 +445,33 @@ describe('prettyKey and keyForAction: user-facing labels', () => {
     assert.equal(keyForAction('focus-1'), 'Alt+1')
     const { keymap } = resolveKeymap({ 'ctrl+shift+q': '' })
     assert.equal(keyForAction('quit', keymap), null)
+  })
+})
+
+describe('DevTools shortcut in packaged builds (issue #19 regression)', () => {
+  it('drops F12 when DevTools are off, so the key reaches the terminal', () => {
+    const { keymap } = resolveKeymap(undefined, { devTools: false })
+    assert.equal(keymap.f12, undefined)
+    assert.ok(!Object.values(keymap).includes('toggle-devtools'))
+  })
+
+  it('drops a custom combination bound to DevTools as well', () => {
+    const { keymap, problems } = resolveKeymap(
+      { 'ctrl+shift+i': 'toggle-devtools' },
+      { devTools: false }
+    )
+    assert.equal(keymap['ctrl+shift+i'], undefined)
+    assert.deepEqual(problems, [])
+  })
+
+  it('keeps F12 in development', () => {
+    assert.equal(resolveKeymap(undefined).keymap.f12, 'toggle-devtools')
+    assert.equal(resolveKeymap(undefined, { devTools: true }).keymap.f12, 'toggle-devtools')
+  })
+
+  it('hides the action from the shortcut editor only when DevTools are off', () => {
+    assert.ok(!editableActions(false).some((a) => a.action === 'toggle-devtools'))
+    assert.equal(editableActions(true).length, ACTION_LABELS.length)
+    assert.equal(editableActions(false).length, ACTION_LABELS.length - 1)
   })
 })

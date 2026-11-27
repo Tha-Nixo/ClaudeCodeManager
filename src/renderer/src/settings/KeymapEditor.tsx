@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { AppConfig } from '@shared/types'
 import {
-  ACTION_LABELS,
   DEFAULT_KEYMAP,
+  editableActions,
   prettyKey,
   resolveKeymap,
   signature,
@@ -30,7 +30,11 @@ export function KeymapEditor({ config, onPatch, problems }: KeymapEditorProps): 
   const [recording, setRecording] = useState<Action | null>(null)
   const [error, setError] = useState<string | null>(null)
 
-  const { keymap } = useMemo(() => resolveKeymap(config.keymap), [config.keymap])
+  const devTools = window.cm.win.devToolsAllowed
+  const { keymap } = useMemo(
+    () => resolveKeymap(config.keymap, { devTools }),
+    [config.keymap, devTools]
+  )
 
   /** Currently assigned combination for an action, if any. */
   const comboFor = useCallback(
@@ -122,7 +126,7 @@ export function KeymapEditor({ config, onPatch, problems }: KeymapEditorProps): 
       )}
 
       <div className="cm-keymap">
-        {ACTION_LABELS.map(({ action, label }) => {
+        {editableActions(devTools).map(({ action, label }) => {
           const combo = comboFor(action)
           const isDefault = combo !== null && DEFAULT_KEYMAP[combo] === action
           return (

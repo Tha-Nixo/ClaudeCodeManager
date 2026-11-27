@@ -119,6 +119,14 @@ export const ACTION_LABELS: { action: Action; label: string }[] = [
   { action: 'quit', label: 'Quit' }
 ]
 
+/**
+ * Actions shown in the shortcut editor. Without DevTools (packaged builds,
+ * #19) the "Developer tools" row would record a shortcut that does nothing.
+ */
+export function editableActions(devTools: boolean): { action: Action; label: string }[] {
+  return devTools ? ACTION_LABELS : ACTION_LABELS.filter((a) => a.action !== 'toggle-devtools')
+}
+
 /** Set of recognized actions for validating user keymaps. */
 const ACTIONS = new Set<string>(Object.values(DEFAULT_KEYMAP))
 
@@ -139,8 +147,15 @@ export interface ResolvedKeymap {
  * Custom entries overlay defaults: remapping one shortcut does not require
  * redefining the entire set. An empty action string removes the shortcut,
  * freeing the combination.
+ *
+ * With `devTools: false` (packaged builds, #19) every combination bound to
+ * `toggle-devtools` is dropped, default or custom, so the key reaches the
+ * terminal instead of being swallowed by an action that cannot run.
  */
-export function resolveKeymap(custom: Record<string, string> | undefined): ResolvedKeymap {
+export function resolveKeymap(
+  custom: Record<string, string> | undefined,
+  { devTools = true }: { devTools?: boolean } = {}
+): ResolvedKeymap {
   const keymap: Record<string, Action> = { ...DEFAULT_KEYMAP }
   const problems: KeymapProblem[] = []
 
@@ -166,6 +181,12 @@ export function resolveKeymap(custom: Record<string, string> | undefined): Resol
     }
 
     keymap[combo] = action as Action
+  }
+
+  if (!devTools) {
+    for (const [combo, action] of Object.entries(keymap)) {
+      if (action === 'toggle-devtools') delete keymap[combo]
+    }
   }
 
   return { keymap, problems }

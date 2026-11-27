@@ -183,6 +183,7 @@ Useful environment variables during development:
 | `CM_WINDOWED=1` | Launch in windowed mode instead of fullscreen |
 | `CM_DEV_BRIDGE=1` | Enable the development bridge (see below) |
 | `CM_UPDATE_DEV=1` | Enable updates during development, reading `dev-app-update.yml` |
+| `CM_DEVTOOLS=1` | Allow DevTools (F12) in a packaged build, to diagnose a problem on an installed copy. In development they are always on. |
 
 `CM_UPDATE_DEV` exists because nobody notices a broken update pipeline until
 release day. With a `dev-app-update.yml` pointing to a local feed, you can test
